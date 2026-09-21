@@ -1,0 +1,2036 @@
+"""Browser coverage for OpenAI Responses traces in viewer.html."""
+
+from __future__ import annotations
+
+import json
+import tempfile
+from pathlib import Path
+
+import pytest
+
+from claude_tap.viewer import _generate_html_viewer
+from tests.conftest import playwright_skip_reason
+
+_pw_skip = playwright_skip_reason()
+pytestmark = pytest.mark.skipif(_pw_skip is not None, reason=_pw_skip or "")
+
+
+@pytest.fixture(scope="module")
+def responses_html_file() -> Path:
+    trace_path = Path(__file__).parent / "fixtures" / "openai_responses_trace.jsonl"
+    html_path = Path(tempfile.mktemp(suffix=".html"))
+    _generate_html_viewer(trace_path, html_path)
+    yield html_path
+    html_path.unlink(missing_ok=True)
+
+
+@pytest.fixture()
+def responses_page(responses_html_file: Path):
+    from playwright.sync_api import sync_playwright
+
+    with sync_playwright() as pw:
+        browser = pw.chromium.launch(headless=True)
+        page = browser.new_page()
+        page.goto(f"file://{responses_html_file}", timeout=10000)
+        page.wait_for_selector(".sidebar-item", timeout=5000)
+        yield page
+        browser.close()
+
+
+@pytest.fixture(scope="module")
+def codex_ws_multi_html_file() -> Path:
+    trace_path = Path(__file__).parent / "fixtures" / "codex_ws_multi_response_trace.jsonl"
+    html_path = Path(tempfile.mktemp(suffix=".html"))
+    _generate_html_viewer(trace_path, html_path)
+    yield html_path
+    html_path.unlink(missing_ok=True)
+
+
+@pytest.fixture()
+def codex_ws_multi_page(codex_ws_multi_html_file: Path):
+    from playwright.sync_api import sync_playwright
+
+    with sync_playwright() as pw:
+        browser = pw.chromium.launch(headless=True)
+        page = browser.new_page()
+        page.goto(f"file://{codex_ws_multi_html_file}", timeout=10000)
+        page.wait_for_selector(".sidebar-item", timeout=5000)
+        yield page
+        browser.close()
+
+
+@pytest.fixture(scope="module")
+def chat_completions_history_html_file() -> Path:
+    trace_path = Path(tempfile.mktemp(suffix=".jsonl"))
+    html_path = Path(tempfile.mktemp(suffix=".html"))
+    record = {
+        "request_id": "req_kimi_history",
+        "turn": 1,
+        "request": {
+            "method": "POST",
+            "path": "/chat/completions",
+            "body": {
+                "model": "kimi-k2-turbo-preview",
+                "messages": [
+                    {"role": "system", "content": "Kimi CLI regression system prompt."},
+                    {"role": "user", "content": "Use a tool."},
+                    {
+                        "role": "assistant",
+                        "content": "",
+                        "tool_calls": [
+                            {
+                                "id": "call_read",
+                                "type": "function",
+                                "function": {"name": "read_file", "arguments": '{"path":"pyproject.toml"}'},
+                            }
+                        ],
+                    },
+                    {"role": "tool", "tool_call_id": "call_read", "content": "project metadata"},
+                    {"role": "user", "content": "Continue in the same chat."},
+                ],
+                "tools": [
+                    {
+                        "type": "function",
+                        "function": {
+                            "name": "read_file",
+                            "description": "Read a file.",
+                            "parameters": {"type": "object", "properties": {"path": {"type": "string"}}},
+                        },
+                    }
+                ],
+            },
+        },
+        "response": {"status": 200, "body": {"content": [{"type": "text", "text": "Done."}]}},
+    }
+    trace_path.write_text(json.dumps(record) + "\n")
+    _generate_html_viewer(trace_path, html_path)
+    yield html_path
+    trace_path.unlink(missing_ok=True)
+    html_path.unlink(missing_ok=True)
+
+
+@pytest.fixture()
+def chat_completions_history_page(chat_completions_history_html_file: Path):
+    from playwright.sync_api import sync_playwright
+
+    with sync_playwright() as pw:
+        browser = pw.chromium.launch(headless=True)
+        page = browser.new_page()
+        page.goto(f"file://{chat_completions_history_html_file}", timeout=10000)
+        page.wait_for_selector(".sidebar-item", timeout=5000)
+        yield page
+        browser.close()
+
+
+def test_viewer_renders_codex_responses_messages_usage_and_response(responses_page) -> None:
+    responses_page.locator(".sidebar-item").first.click()
+    responses_page.wait_for_selector("#detail .section", timeout=5000)
+
+    detail_text = responses_page.locator("#detail").inner_text()
+
+    assert "Input" in detail_text
+    assert "USER" in detail_text
+    assert "Hello" in detail_text
+    assert "Response" in detail_text
+    assert "Hello! How can I help?" in detail_text
+    assert "500" in detail_text
+    assert "10" in detail_text
+    responses_page.locator(".section-header", has_text="Tools").click()
+    tools_text = responses_page.locator(".section", has_text="Tools").first.inner_text()
+    assert "exec_command" in tools_text
+    assert "web_search" in tools_text
+    assert "unknown" not in tools_text.lower()
+
+
+def test_viewer_json_tree_toggle_collapses_and_expands(responses_page) -> None:
+    responses_page.locator(".sidebar-item").first.click()
+    responses_page.wait_for_selector("#detail .section", timeout=5000)
+
+    result = responses_page.evaluate(
+        """() => {
+          const section = Array.from(document.querySelectorAll('#detail .section'))
+            .find(el => el.querySelector('.title')?.textContent === 'Full JSON');
+          if (!section) return { found: false };
+
+          const toggle = section.querySelector('.jt-toggle');
+          const children = section.querySelector('.jt-children');
+          const summary = section.querySelector('.jt-summary');
+          const closeLine = children?.nextElementSibling;
+          const initial = {
+            toggle: toggle?.textContent,
+            childrenOpen: children?.classList.contains('jt-open'),
+            summaryShown: summary?.classList.contains('jt-show'),
+            closeHidden: closeLine?.classList.contains('jt-hidden'),
+          };
+
+          toggle.click();
+          const collapsed = {
+            toggle: toggle.textContent,
+            childrenOpen: children.classList.contains('jt-open'),
+            summaryShown: summary.classList.contains('jt-show'),
+            closeHidden: closeLine.classList.contains('jt-hidden'),
+          };
+
+          toggle.click();
+          const expanded = {
+            toggle: toggle.textContent,
+            childrenOpen: children.classList.contains('jt-open'),
+            summaryShown: summary.classList.contains('jt-show'),
+            closeHidden: closeLine.classList.contains('jt-hidden'),
+          };
+
+          return { found: true, initial, collapsed, expanded };
+        }"""
+    )
+
+    assert result == {
+        "found": True,
+        "initial": {"toggle": "▼", "childrenOpen": True, "summaryShown": False, "closeHidden": False},
+        "collapsed": {"toggle": "▶", "childrenOpen": False, "summaryShown": True, "closeHidden": True},
+        "expanded": {"toggle": "▼", "childrenOpen": True, "summaryShown": False, "closeHidden": False},
+    }
+
+
+def test_viewer_maps_responses_cached_tokens_to_cache_read(responses_page) -> None:
+    result = responses_page.evaluate(
+        """() => getUsage({
+          response: {
+            body: {
+              usage: {
+                input_tokens: 11767,
+                input_tokens_details: { cached_tokens: 11648 },
+                output_tokens: 6,
+                total_tokens: 11773
+              }
+            }
+          }
+        })"""
+    )
+
+    assert result["input_tokens"] == 11767
+    assert result["output_tokens"] == 6
+    assert result["cache_read_input_tokens"] == 11648
+
+
+def test_viewer_prefers_openai_tokens_over_zero_aliases(responses_page) -> None:
+    result = responses_page.evaluate(
+        """() => getUsage({
+          response: {
+            body: {
+              usage: {
+                prompt_tokens: 743,
+                completion_tokens: 95,
+                total_tokens: 838,
+                input_tokens: 0,
+                output_tokens: 0
+              }
+            }
+          }
+        })"""
+    )
+
+    assert result["input_tokens"] == 743
+    assert result["output_tokens"] == 95
+    assert result["total_tokens"] == 838
+
+
+def test_viewer_renders_chat_completions_system_and_history_tool_calls(chat_completions_history_page) -> None:
+    chat_completions_history_page.locator(".sidebar-item").first.click()
+    chat_completions_history_page.wait_for_selector("#detail .section", timeout=5000)
+
+    result = chat_completions_history_page.evaluate(
+        """() => {
+          const body = entries[0].request.body;
+          const messages = getMessages(body);
+          const assistantBlocks = Array.from(document.querySelectorAll('#detail .msg.assistant'))
+            .map(el => el.innerText.trim());
+          return {
+            system: extractSystem(body),
+            roles: messages.map(m => m.role),
+            assistantContent: messages.find(m => m.role === 'assistant')?.content || [],
+            titles: Array.from(document.querySelectorAll('#detail .section .title')).map(el => el.textContent),
+            detailText: document.querySelector('#detail').innerText,
+            assistantBlocks,
+          };
+        }"""
+    )
+
+    assert result["system"] == "Kimi CLI regression system prompt."
+    assert result["roles"] == ["user", "assistant", "tool", "user"]
+    assert result["assistantContent"] == [
+        {"type": "tool_use", "id": "call_read", "name": "read_file", "input": {"path": "pyproject.toml"}}
+    ]
+    assert "System Prompt" in result["titles"]
+    assert "Kimi CLI regression system prompt." in result["detailText"]
+    assert "read_file" in result["detailText"]
+    assert all(block != "ASSISTANT" for block in result["assistantBlocks"])
+
+
+def test_viewer_treats_codex_forward_websocket_path_as_primary(responses_page) -> None:
+    result = responses_page.evaluate(
+        """() => ({
+          tier: pathTier('/backend-api/codex/responses'),
+          primary: isPathPrimary('/backend-api/codex/responses')
+        })"""
+    )
+
+    assert result == {"tier": 0, "primary": True}
+
+
+def test_viewer_treats_cursor_transcript_as_primary_display_turn(responses_page) -> None:
+    result = responses_page.evaluate(
+        """() => {
+          const entry = {
+            transport: 'cursor-transcript',
+            request: {
+              method: 'CURSOR_TRANSCRIPT',
+              path: '/cursor/transcript/abc/turn/1/step/1',
+              body: { messages: [{ role: 'user', content: 'hello' }] }
+            },
+            response: { status: 200, body: { content: [{ type: 'text', text: 'hi' }] } }
+          };
+          const turns = normalizeDisplayTurns([entry], true);
+          return {
+            tier: pathTier('/cursor/transcript/abc/turn/1/step/1'),
+            primary: isPathPrimary('/cursor/transcript/abc/turn/1/step/1'),
+            candidate: isDisplayTurnCandidate(entry),
+            displayTurn: turns[0].display_turn,
+            firstUser: firstUserInputInfo(entry).userText,
+            noiseUser: firstUserInputInfo({
+              request: {
+                path: '/aiserver.v1.DashboardService/GetCliDownloadUrl',
+                headers: { 'Content-Type': 'application/proto' },
+                body: '\\x12\\x04prod'
+              }
+            }).userText,
+            xProtobufNoise: firstUserInputInfo({
+              request: {
+                path: '/aiserver.v1.Foo/Bar',
+                headers: { 'Content-Type': 'application/x-protobuf' },
+                body: '\\x12\\x04prod'
+              }
+            }).userText,
+            latestNoise: latestUserInputInfo({
+              request: {
+                path: '/aiserver.v1.Foo/Bar',
+                headers: { 'Content-Type': 'application/connect+proto' },
+                body: { messages: [{ role: 'user', content: 'nope' }] }
+              }
+            }).userText
+          };
+        }"""
+    )
+
+    assert result["tier"] == 0
+    assert result["primary"] is True
+    assert result["candidate"] is True
+    assert result["displayTurn"] == 1
+    assert result["firstUser"] == "hello"
+    assert result["noiseUser"] == ""
+    assert result["xProtobufNoise"] == ""
+    assert result["latestNoise"] == ""
+
+
+def test_viewer_lazy_stub_keeps_cursor_user_input_in_session_group(responses_page) -> None:
+    result = responses_page.evaluate(
+        """() => {
+          const meta = {
+            turn: 1,
+            transport: 'cursor-transcript',
+            method: 'CURSOR_TRANSCRIPT',
+            path: '/cursor/transcript/abc/turn/1/step/1',
+            model: 'grok-4.5',
+            session_user_text: '这是一个什么项目',
+            status: 200,
+          };
+          const stubs = [
+            buildStubEntry({ ...meta, turn: 1, path: '/cursor/transcript/abc/turn/1/step/1' }, 0),
+            buildStubEntry({ ...meta, turn: 2, path: '/cursor/transcript/abc/turn/1/step/2' }, 1),
+            buildStubEntry({ ...meta, turn: 3, path: '/cursor/transcript/abc/turn/1/step/3' }, 2),
+          ];
+          stubs.forEach((stub, idx) => {
+            stub.request.body.cursor_turn = 1;
+            stub.request.body.cursor_step = idx + 1;
+          });
+          const turns = normalizeDisplayTurns(stubs, true);
+          const groups = buildSessionGroups(turns.map((entry, idx) => ({ entry, idx, order: idx })));
+          return {
+            stubHasMessages: Array.isArray(stubs[0].request.body.messages),
+            firstUser: firstUserInputInfo(stubs[0]).userText,
+            isCursor: isCursorTranscriptEntry(stubs[0]),
+            groupCount: groups.length,
+            groupUserText: groups[0]?.userText || '',
+            groupSize: groups[0]?.items.length || 0,
+          };
+        }"""
+    )
+
+    assert result["stubHasMessages"] is True
+    assert result["firstUser"] == "这是一个什么项目"
+    assert result["isCursor"] is True
+    assert result["groupCount"] == 1
+    assert result["groupUserText"] == "这是一个什么项目"
+    assert result["groupSize"] == 3
+
+
+def test_viewer_keeps_repeated_cursor_prompts_in_separate_groups(responses_page) -> None:
+    result = responses_page.evaluate(
+        """() => {
+          const make = (turn, step, idx) => {
+            const stub = buildStubEntry({
+              turn,
+              transport: 'cursor-transcript',
+              method: 'CURSOR_TRANSCRIPT',
+              path: `/cursor/transcript/abc/turn/${turn}/step/${step}`,
+              model: 'grok-4.5',
+              session_user_text: 'continue',
+              cursor_turn: turn,
+              cursor_step: step,
+              status: 200,
+            }, idx);
+            return stub;
+          };
+          const stubs = [make(1, 1, 0), make(1, 2, 1), make(2, 1, 2)];
+          const turns = normalizeDisplayTurns(stubs, true);
+          const groups = buildSessionGroups(turns.map((entry, idx) => ({ entry, idx, order: idx })));
+          return {
+            groupCount: groups.length,
+            sizes: groups.map(group => group.items.length),
+            texts: groups.map(group => group.userText),
+            stubTurn: stubs[2].request.body.cursor_turn,
+          };
+        }"""
+    )
+
+    assert result["groupCount"] == 2
+    assert result["sizes"] == [2, 1]
+    assert result["texts"] == ["continue", "continue"]
+    assert result["stubTurn"] == 2
+
+
+@pytest.fixture(scope="module")
+def cursor_transcript_tools_html_file() -> Path:
+    trace_path = Path(tempfile.mktemp(suffix=".jsonl"))
+    html_path = Path(tempfile.mktemp(suffix=".html"))
+    records = [
+        {
+            "request_id": "cursor_step_1",
+            "turn": 1,
+            "transport": "cursor-transcript",
+            "request": {
+                "method": "CURSOR_TRANSCRIPT",
+                "path": "/cursor/transcript/abc/turn/1/step/1",
+                "body": {
+                    "cursor_turn": 1,
+                    "cursor_step": 1,
+                    "messages": [{"role": "user", "content": "inspect files"}],
+                },
+            },
+            "response": {
+                "status": 200,
+                "body": {
+                    "content": [
+                        {"type": "text", "text": "I will inspect the workspace."},
+                        {
+                            "type": "tool_use",
+                            "id": "cursor_tool_1_2",
+                            "name": "Glob",
+                            "input": {"glob_pattern": "README*"},
+                        },
+                        {
+                            "type": "tool_use",
+                            "id": "cursor_tool_1_3",
+                            "name": "Shell",
+                            "input": {"command": "ls"},
+                        },
+                    ]
+                },
+            },
+        },
+        {
+            "request_id": "cursor_step_2",
+            "turn": 2,
+            "transport": "cursor-transcript",
+            "request": {
+                "method": "CURSOR_TRANSCRIPT",
+                "path": "/cursor/transcript/abc/turn/1/step/2",
+                "body": {
+                    "cursor_turn": 1,
+                    "cursor_step": 2,
+                    "messages": [{"role": "user", "content": "inspect files"}],
+                },
+            },
+            "response": {
+                "status": 200,
+                "body": {
+                    "content": [
+                        {
+                            "type": "tool_use",
+                            "id": "cursor_tool_2_1",
+                            "name": "Read",
+                            "input": {"path": "README.md"},
+                        }
+                    ]
+                },
+            },
+        },
+    ]
+    trace_path.write_text("\n".join(json.dumps(record) for record in records) + "\n")
+    _generate_html_viewer(trace_path, html_path)
+    yield html_path
+    trace_path.unlink(missing_ok=True)
+    html_path.unlink(missing_ok=True)
+
+
+@pytest.fixture()
+def cursor_transcript_tools_page(cursor_transcript_tools_html_file: Path):
+    from playwright.sync_api import sync_playwright
+
+    with sync_playwright() as pw:
+        browser = pw.chromium.launch(headless=True)
+        page = browser.new_page()
+        page.goto(f"file://{cursor_transcript_tools_html_file}", timeout=10000)
+        page.wait_for_selector(".sidebar-item", timeout=5000)
+        yield page
+        browser.close()
+
+
+def test_viewer_shows_reconstructed_cursor_tools_in_default_and_trace(cursor_transcript_tools_page) -> None:
+    page = cursor_transcript_tools_page
+    page.locator(".sidebar-item").first.click()
+    page.wait_for_selector("#detail .section", timeout=5000)
+
+    page.locator(".section-header", has_text="Tools").click()
+    tools_text = page.locator(".section", has_text="Tools").first.inner_text()
+    assert "Glob" in tools_text
+    assert "Shell" in tools_text
+    assert "Read" in tools_text
+
+    page.locator(".detail-tab", has_text="Trace").click()
+    page.wait_for_selector(".trace-code", timeout=5000)
+    trace_input = page.locator(".trace-code").first.inner_text()
+    assert "Glob" in trace_input
+    assert "Shell" in trace_input
+    assert "Read" in trace_input
+
+
+def test_viewer_collapses_cursor_transcript_paths_in_filter(responses_page) -> None:
+    result = responses_page.evaluate(
+        """() => {
+          entries = [
+            {
+              transport: 'cursor-transcript',
+              request: {
+                method: 'CURSOR_TRANSCRIPT',
+                path: '/cursor/transcript/abc/turn/1/step/1',
+                body: { messages: [{ role: 'user', content: 'one' }] }
+              },
+              response: { status: 200, body: { content: [{ type: 'text', text: 'a' }] } }
+            },
+            {
+              transport: 'cursor-transcript',
+              request: {
+                method: 'CURSOR_TRANSCRIPT',
+                path: '/cursor/transcript/abc/turn/1/step/2',
+                body: { messages: [{ role: 'user', content: 'one' }] }
+              },
+              response: { status: 200, body: { content: [{ type: 'text', text: 'b' }] } }
+            },
+            {
+              transport: 'cursor-transcript',
+              request: {
+                method: 'CURSOR_TRANSCRIPT',
+                path: '/cursor/transcript/abc/turn/2/step/1',
+                body: { messages: [{ role: 'user', content: 'two' }] }
+              },
+              response: { status: 200, body: { content: [{ type: 'text', text: 'c' }] } }
+            }
+          ].map((entry, idx) => ({ ...entry, turn: idx + 1, _entry_index: idx }));
+          activePaths = new Set();
+          pathFilterExpanded = false;
+          renderApp(true);
+          const chips = Array.from(document.querySelectorAll('#path-filter .filter-chip')).map(chip => ({
+            title: chip.title,
+            count: chip.querySelector('.chip-count')?.textContent || ''
+          }));
+          return {
+            filterKey: filterPathKey('/cursor/transcript/abc/turn/4/step/12'),
+            chips,
+            filteredCount: filtered.length,
+            activePaths: Array.from(activePaths)
+          };
+        }"""
+    )
+
+    assert result["filterKey"] == "/cursor/transcript/"
+    assert result["chips"] == [{"title": "/cursor/transcript/", "count": "3"}]
+    assert result["filteredCount"] == 3
+    assert result["activePaths"] == ["/cursor/transcript/"]
+
+
+def test_viewer_sorts_dotted_websocket_turns_by_numeric_segments(responses_page) -> None:
+    result = responses_page.evaluate(
+        """() => {
+          const makeEntry = (turn) => ({
+            timestamp: '2026-05-07T10:00:00Z',
+            request_id: 'req_' + turn,
+            turn,
+            duration_ms: 1,
+            request: {
+              method: 'POST',
+              path: '/backend-api/codex/responses',
+              body: { model: 'gpt-test' }
+            },
+            response: {
+              status: 200,
+              body: { usage: { input_tokens: 1, output_tokens: 1 }, output: [] }
+            }
+          });
+          entries = [makeEntry('1.12'), makeEntry('1.2'), makeEntry(2)];
+          activePaths = new Set(['/backend-api/codex/responses']);
+          searchQuery = '';
+          activeTools = null;
+          applyFilter(false);
+          return {
+            filteredTurns: filtered.map(e => e.turn),
+            sidebarTurns: [...document.querySelectorAll('.sidebar-item .si-turn')].map(el => el.textContent)
+          };
+        }"""
+    )
+
+    assert result == {
+        "filteredTurns": ["1.2", "1.12", 2],
+        "sidebarTurns": ["Turn 1.2", "Turn 1.12", "Turn 2"],
+    }
+
+
+def test_viewer_expands_codex_websocket_session_into_response_entries(codex_ws_multi_page) -> None:
+    result = codex_ws_multi_page.evaluate(
+        """() => ({
+          entries: entries.length,
+          derived: entries.filter(e => e.derived_from_websocket).length,
+          sidebar: document.querySelectorAll('.sidebar-item').length,
+          banners: document.querySelectorAll('.continuation-banner').length,
+          turns: entries.map(e => e.turn),
+          previousIds: entries.map(e => e.request.body.previous_response_id || ''),
+          responseIds: entries.map(e => e.response.body.id || ''),
+          hasPrompt: entries.map(e => JSON.stringify(e.request.body).includes('你好，调用一个工具，然后结束')),
+          usage: entries.map(e => getUsage(e)?.total_tokens || 0),
+          messages: entries.map(e => getMessages(e.request.body).map(m => m.role)),
+          responseTypes: entries.map(e => (getResponseOutput(e)?.content || []).map(c => c.type))
+        })"""
+    )
+
+    assert result == {
+        "entries": 2,
+        "derived": 2,
+        "sidebar": 2,
+        "banners": 0,
+        "turns": ["14.2", "14.3"],
+        "previousIds": ["resp_prefetch", "resp_tool"],
+        "responseIds": ["resp_tool", "resp_final"],
+        "hasPrompt": [True, True],
+        "usage": [24, 35],
+        "messages": [["developer", "user", "user"], ["developer", "user", "user", "assistant", "tool"]],
+        "responseTypes": [["tool_use"], ["text"]],
+    }
+
+    codex_ws_multi_page.locator(".sidebar-item").nth(0).click()
+    tool_call_detail = codex_ws_multi_page.locator("#detail").inner_text()
+    assert "Sanitized project rules." in tool_call_detail
+    assert "你好，调用一个工具，然后结束" in tool_call_detail
+    assert "exec_command" in tool_call_detail
+    assert "FINAL_OK" not in tool_call_detail
+
+    codex_ws_multi_page.locator(".sidebar-item").nth(1).click()
+    final_detail = codex_ws_multi_page.locator("#detail").inner_text()
+    assert "Sanitized project rules." in final_detail
+    assert "你好，调用一个工具，然后结束" in final_detail
+    assert "/workspace/project" in final_detail
+    assert "exec_command" in final_detail
+    assert "FINAL_OK" in final_detail
+    assert "Responses continuation" not in final_detail
+    assert "有状态 Responses 续接" not in final_detail
+
+
+def test_viewer_interleaves_codex_ws_tool_results_with_prior_outputs(responses_page) -> None:
+    result = responses_page.evaluate(
+        """() => {
+          const record = {
+            request_id: 'req_interleave',
+            turn: 21,
+            transport: 'websocket',
+            request: {
+              method: 'WEBSOCKET',
+              path: '/backend-api/codex/responses',
+              headers: {},
+              body: {
+                type: 'response.create',
+                model: 'gpt-5.5',
+                input: [],
+                stream: true
+              },
+              ws_events: [
+                {
+                  type: 'response.create',
+                  model: 'gpt-5.5',
+                  previous_response_id: 'resp_prefetch',
+                  input: [
+                    {
+                      type: 'message',
+                      role: 'user',
+                      content: [{ type: 'input_text', text: 'Run two tools.' }]
+                    }
+                  ],
+                  tools: [{ type: 'function', name: 'exec_command' }],
+                  stream: true
+                },
+                {
+                  type: 'response.create',
+                  model: 'gpt-5.5',
+                  previous_response_id: 'resp_first',
+                  input: [
+                    { type: 'function_call_output', call_id: 'call_first', output: 'first result' }
+                  ],
+                  tools: [{ type: 'function', name: 'exec_command' }],
+                  stream: true
+                },
+                {
+                  type: 'response.create',
+                  model: 'gpt-5.5',
+                  previous_response_id: 'resp_second',
+                  input: [
+                    { type: 'custom_tool_call_output', call_id: 'call_second', output: 'second result' }
+                  ],
+                  tools: [{ type: 'function', name: 'exec_command' }],
+                  stream: true
+                }
+              ]
+            },
+            response: {
+              status: 101,
+              headers: {},
+              body: {},
+              ws_events: [
+                { type: 'response.created', response: { id: 'resp_first', status: 'in_progress', model: 'gpt-5.5' } },
+                {
+                  type: 'response.output_item.done',
+                  output_index: 0,
+                  item: {
+                    id: 'msg_first',
+                    type: 'message',
+                    role: 'assistant',
+                    content: [{ type: 'output_text', text: 'First decision' }]
+                  }
+                },
+                {
+                  type: 'response.output_item.done',
+                  output_index: 1,
+                  item: {
+                    id: 'fc_first',
+                    type: 'function_call',
+                    name: 'exec_command',
+                    call_id: 'call_first',
+                    arguments: '{\"cmd\":\"pwd\"}'
+                  }
+                },
+                {
+                  type: 'response.completed',
+                  response: {
+                    id: 'resp_first',
+                    status: 'completed',
+                    model: 'gpt-5.5',
+                    output: [],
+                    usage: { input_tokens: 10, output_tokens: 4, total_tokens: 14 }
+                  }
+                },
+                {
+                  type: 'response.created',
+                  response: {
+                    id: 'resp_second',
+                    status: 'in_progress',
+                    model: 'gpt-5.5',
+                    previous_response_id: 'resp_first'
+                  }
+                },
+                {
+                  type: 'response.output_item.done',
+                  output_index: 0,
+                  item: {
+                    id: 'msg_second',
+                    type: 'message',
+                    role: 'assistant',
+                    content: [{ type: 'output_text', text: 'Second decision' }]
+                  }
+                },
+                {
+                  type: 'response.output_item.done',
+                  output_index: 1,
+                  item: {
+                    id: 'fc_second',
+                    type: 'function_call',
+                    name: 'exec_command',
+                    call_id: 'call_second',
+                    arguments: '{\"cmd\":\"ls\"}'
+                  }
+                },
+                {
+                  type: 'response.completed',
+                  response: {
+                    id: 'resp_second',
+                    status: 'completed',
+                    model: 'gpt-5.5',
+                    previous_response_id: 'resp_first',
+                    output: [],
+                    usage: { input_tokens: 20, output_tokens: 4, total_tokens: 24 }
+                  }
+                },
+                {
+                  type: 'response.created',
+                  response: {
+                    id: 'resp_final',
+                    status: 'in_progress',
+                    model: 'gpt-5.5',
+                    previous_response_id: 'resp_second'
+                  }
+                },
+                {
+                  type: 'response.output_item.done',
+                  output_index: 0,
+                  item: {
+                    id: 'msg_final',
+                    type: 'message',
+                    role: 'assistant',
+                    content: [{ type: 'output_text', text: 'Done' }]
+                  }
+                },
+                {
+                  type: 'response.completed',
+                  response: {
+                    id: 'resp_final',
+                    status: 'completed',
+                    model: 'gpt-5.5',
+                    previous_response_id: 'resp_second',
+                    output: [],
+                    usage: { input_tokens: 30, output_tokens: 2, total_tokens: 32 }
+                  }
+                }
+              ]
+            }
+          };
+          const expanded = expandWebSocketResponseEntries([record]);
+          const messages = getMessages(expanded[2].request.body);
+          return messages.map(message => {
+            const content = Array.isArray(message.content) ? message.content : [];
+            const toolUse = content.find(block => block.type === 'tool_use');
+            if (toolUse) return `assistant:tool_use:${toolUse.id}:${toolUse.name}`;
+            const toolResult = content.find(block => block.type === 'tool_result');
+            if (toolResult) return `tool:${toolResult.tool_use_id}:${toolResult.content}`;
+            const text = content.map(block => block.text || '').filter(Boolean).join(' ');
+            return `${message.role}:text:${text}`;
+          });
+        }"""
+    )
+
+    assert result == [
+        "user:text:Run two tools.",
+        "assistant:text:First decision",
+        "assistant:tool_use:call_first:exec_command",
+        "tool:call_first:first result",
+        "assistant:text:Second decision",
+        "assistant:tool_use:call_second:exec_command",
+        "tool:call_second:second result",
+    ]
+
+
+def test_viewer_reconstructs_split_codex_ws_records_across_previous_response_ids(responses_page) -> None:
+    result = responses_page.evaluate(
+        """() => {
+          const baseRequest = {
+            method: 'WEBSOCKET',
+            path: '/backend-api/codex/responses',
+            headers: {}
+          };
+          const prefetch = {
+            request_id: 'req_split',
+            turn: 1,
+            transport: 'websocket',
+            request: {
+              ...baseRequest,
+              body: { type: 'response.create', model: 'gpt-5.5', input: [], generate: false },
+              ws_events: [{ type: 'response.create', model: 'gpt-5.5', input: [], generate: false }]
+            },
+            response: {
+              status: 101,
+              headers: {},
+              body: {},
+              ws_events: [
+                { type: 'response.created', response: { id: 'resp_prefetch', status: 'in_progress', model: 'gpt-5.5', generate: false } },
+                { type: 'response.completed', response: { id: 'resp_prefetch', status: 'completed', model: 'gpt-5.5', generate: false, output: [], usage: { input_tokens: 1, output_tokens: 0, total_tokens: 1 } } }
+              ]
+            }
+          };
+          const toolTurn = {
+            request_id: 'req_split_2',
+            turn: '1.2',
+            transport: 'websocket',
+            request: {
+              ...baseRequest,
+              body: {
+                type: 'response.create',
+                model: 'gpt-5.5',
+                previous_response_id: 'resp_prefetch',
+                input: [
+                  { type: 'message', role: 'developer', content: [{ type: 'input_text', text: 'Rules.' }] },
+                  { type: 'message', role: 'user', content: [{ type: 'input_text', text: 'Run pwd.' }] }
+                ],
+                tools: [{ type: 'function', name: 'exec_command' }]
+              },
+              ws_events: []
+            },
+            response: {
+              status: 101,
+              headers: {},
+              body: {},
+              ws_events: [
+                { type: 'response.created', response: { id: 'resp_tool', status: 'in_progress', model: 'gpt-5.5', previous_response_id: 'resp_prefetch' } },
+                { type: 'response.output_item.done', output_index: 0, item: { type: 'function_call', name: 'exec_command', call_id: 'call_pwd', arguments: '{\"cmd\":\"pwd\"}' } },
+                { type: 'response.completed', response: { id: 'resp_tool', status: 'completed', model: 'gpt-5.5', previous_response_id: 'resp_prefetch', output: [], usage: { input_tokens: 10, output_tokens: 5, total_tokens: 15 } } }
+              ]
+            }
+          };
+          const finalTurn = {
+            request_id: 'req_split_3',
+            turn: '1.3',
+            transport: 'websocket',
+            request: {
+              ...baseRequest,
+              body: {
+                type: 'response.create',
+                model: 'gpt-5.5',
+                previous_response_id: 'resp_tool',
+                input: [{ type: 'function_call_output', call_id: 'call_pwd', output: '/workspace/project' }],
+                tools: [{ type: 'function', name: 'exec_command' }]
+              },
+              ws_events: []
+            },
+            response: {
+              status: 101,
+              headers: {},
+              body: {},
+              ws_events: [
+                { type: 'response.created', response: { id: 'resp_final', status: 'in_progress', model: 'gpt-5.5', previous_response_id: 'resp_tool' } },
+                { type: 'response.output_item.done', output_index: 0, item: { type: 'message', role: 'assistant', content: [{ type: 'output_text', text: 'FINAL_SPLIT_OK' }] } },
+                { type: 'response.completed', response: { id: 'resp_final', status: 'completed', model: 'gpt-5.5', previous_response_id: 'resp_tool', output: [], usage: { input_tokens: 20, output_tokens: 3, total_tokens: 23 } } }
+              ]
+            }
+          };
+          const expanded = expandWebSocketResponseEntries([prefetch, toolTurn, finalTurn]);
+          return {
+            turns: expanded.map(entry => entry.turn),
+            responseIds: expanded.map(entry => entry.response.body.id),
+            messages: expanded.map(entry => getMessages(entry.request.body).map(message => {
+              const content = Array.isArray(message.content) ? message.content : [];
+              const toolUse = content.find(block => block.type === 'tool_use');
+              if (toolUse) return `${message.role}:tool_use:${toolUse.id}:${toolUse.name}`;
+              const toolResult = content.find(block => block.type === 'tool_result');
+              if (toolResult) return `${message.role}:tool_result:${toolResult.tool_use_id}:${toolResult.content}`;
+              return `${message.role}:text:${content.map(block => block.text || '').filter(Boolean).join(' ')}`;
+            })),
+            output: expanded.map(entry => (getResponseOutput(entry)?.content || []).map(block => block.text || block.name || block.type))
+          };
+        }"""
+    )
+
+    assert result == {
+        "turns": ["1.2", "1.3"],
+        "responseIds": ["resp_tool", "resp_final"],
+        "messages": [
+            ["developer:text:Rules.", "user:text:Run pwd."],
+            [
+                "developer:text:Rules.",
+                "user:text:Run pwd.",
+                "assistant:tool_use:call_pwd:exec_command",
+                "tool:tool_result:call_pwd:/workspace/project",
+            ],
+        ],
+        "output": [["exec_command"], ["FINAL_SPLIT_OK"]],
+    }
+
+
+def test_viewer_skips_codex_prefetch_when_generate_false_only_on_created(responses_page) -> None:
+    result = responses_page.evaluate(
+        """() => {
+          const record = {
+            request_id: 'req_prefetch_created_flag',
+            turn: 1,
+            transport: 'websocket',
+            request: {
+              method: 'WEBSOCKET',
+              path: '/backend-api/codex/responses',
+              body: {
+                type: 'response.create',
+                model: 'gpt-5.5',
+                instructions: 'You are Codex.',
+                input: []
+              },
+              ws_events: [
+                {
+                  type: 'response.create',
+                  model: 'gpt-5.5',
+                  instructions: 'You are Codex.',
+                  input: [],
+                  generate: false
+                },
+                {
+                  type: 'response.create',
+                  model: 'gpt-5.5',
+                  instructions: 'You are Codex.',
+                  previous_response_id: 'resp_prefetch',
+                  input: [
+                    { type: 'message', role: 'user', content: [{ type: 'input_text', text: 'Real prompt.' }] }
+                  ]
+                }
+              ]
+            },
+            response: {
+              status: 101,
+              headers: {},
+              body: {},
+              ws_events: [
+                {
+                  type: 'response.created',
+                  response: {
+                    id: 'resp_prefetch',
+                    status: 'in_progress',
+                    model: 'gpt-5.5',
+                    instructions: 'You are Codex.',
+                    generate: false
+                  }
+                },
+                {
+                  type: 'response.completed',
+                  response: {
+                    id: 'resp_prefetch',
+                    status: 'completed',
+                    model: 'gpt-5.5',
+                    instructions: 'You are Codex.',
+                    output: [],
+                    usage: { input_tokens: 1, output_tokens: 0, total_tokens: 1 }
+                  }
+                },
+                {
+                  type: 'response.created',
+                  response: {
+                    id: 'resp_real',
+                    status: 'in_progress',
+                    model: 'gpt-5.5',
+                    instructions: 'You are Codex.',
+                    previous_response_id: 'resp_prefetch'
+                  }
+                },
+                {
+                  type: 'response.output_item.done',
+                  output_index: 0,
+                  item: {
+                    id: 'msg_real',
+                    type: 'message',
+                    role: 'assistant',
+                    content: [{ type: 'output_text', text: 'Real response.' }]
+                  }
+                },
+                {
+                  type: 'response.completed',
+                  response: {
+                    id: 'resp_real',
+                    status: 'completed',
+                    model: 'gpt-5.5',
+                    instructions: 'You are Codex.',
+                    previous_response_id: 'resp_prefetch',
+                    output: [],
+                    usage: { input_tokens: 3, output_tokens: 2, total_tokens: 5 }
+                  }
+                }
+              ]
+            }
+          };
+          const expanded = expandWebSocketResponseEntries([record]);
+          renderDetail(expanded[0]);
+          return {
+            entryCount: expanded.length,
+            responseIds: expanded.map(entry => entry.response.body.id),
+            roles: expanded.map(entry => getMessages(entry.request.body).map(message => message.role)),
+            detailText: document.querySelector('#detail')?.innerText || ''
+          };
+        }"""
+    )
+
+    assert result["entryCount"] == 1
+    assert result["responseIds"] == ["resp_real"]
+    assert result["roles"] == [["developer", "user"]]
+    assert "Real prompt." in result["detailText"]
+    assert "Real response." in result["detailText"]
+
+
+def test_viewer_filters_direct_codex_generate_false_prefetch(responses_page) -> None:
+    result = responses_page.evaluate(
+        """() => {
+          const prefetch = {
+            request_id: 'req_direct_prefetch',
+            turn: 1,
+            transport: 'websocket',
+            request: {
+              method: 'WEBSOCKET',
+              path: '/v1/responses',
+              body: { type: 'response.create', model: 'gpt-5.5', input: [], generate: false },
+              ws_events: []
+            },
+            response: {
+              status: 101,
+              headers: {},
+              body: {
+                id: 'resp_direct_prefetch',
+                status: 'completed',
+                model: 'gpt-5.5',
+                generate: false,
+                output: [],
+                usage: { input_tokens: 10, output_tokens: 0, total_tokens: 10 }
+              },
+              ws_events: []
+            }
+          };
+          const realTurn = {
+            request_id: 'req_direct_real',
+            turn: 2,
+            transport: 'websocket',
+            request: {
+              method: 'WEBSOCKET',
+              path: '/v1/responses',
+              body: {
+                type: 'response.create',
+                model: 'gpt-5.5',
+                previous_response_id: 'resp_direct_prefetch',
+                input: [
+                  { type: 'message', role: 'user', content: [{ type: 'input_text', text: 'Real prompt.' }] }
+                ]
+              },
+              ws_events: []
+            },
+            response: {
+              status: 101,
+              headers: {},
+              body: {
+                id: 'resp_direct_real',
+                status: 'completed',
+                model: 'gpt-5.5',
+                previous_response_id: 'resp_direct_prefetch',
+                output: [
+                  { type: 'message', role: 'assistant', content: [{ type: 'output_text', text: 'Real answer.' }] }
+                ],
+                usage: { input_tokens: 12, output_tokens: 2, total_tokens: 14 }
+              },
+              ws_events: []
+            }
+          };
+          const expanded = expandWebSocketResponseEntries([prefetch, realTurn]);
+          return {
+            turns: expanded.map(entry => entry.turn),
+            roles: getMessages(expanded[0].request.body).map(message => message.role)
+          };
+        }"""
+    )
+
+    assert result == {"turns": [2], "roles": ["user"]}
+
+
+def test_viewer_stitches_direct_codex_response_records_across_previous_response_ids(
+    responses_page,
+) -> None:
+    result = responses_page.evaluate(
+        """() => {
+          const baseRequest = {
+            method: 'WEBSOCKET',
+            path: '/v1/responses',
+            headers: {}
+          };
+          const toolTurn = {
+            request_id: 'req_direct_tool',
+            turn: 2,
+            transport: 'websocket',
+            request: {
+              ...baseRequest,
+              body: {
+                type: 'response.create',
+                model: 'gpt-5.5',
+                input: [
+                  { type: 'message', role: 'user', content: [{ type: 'input_text', text: 'Run pwd.' }] }
+                ],
+                tools: [{ type: 'function', name: 'exec_command' }]
+              },
+              ws_events: []
+            },
+            response: {
+              status: 101,
+              headers: {},
+              body: {
+                id: 'resp_direct_tool',
+                status: 'completed',
+                model: 'gpt-5.5',
+                output: [
+                  {
+                    type: 'function_call',
+                    name: 'exec_command',
+                    call_id: 'call_direct_pwd',
+                    arguments: '{\"cmd\":\"pwd\"}'
+                  }
+                ],
+                usage: { input_tokens: 10, output_tokens: 5, total_tokens: 15 }
+              },
+              ws_events: []
+            }
+          };
+          const finalTurn = {
+            request_id: 'req_direct_final',
+            turn: '2.2',
+            transport: 'websocket',
+            request: {
+              ...baseRequest,
+              body: {
+                type: 'response.create',
+                model: 'gpt-5.5',
+                previous_response_id: 'resp_direct_tool',
+                input: [
+                  { type: 'function_call_output', call_id: 'call_direct_pwd', output: '/workspace/project' }
+                ],
+                tools: [{ type: 'function', name: 'exec_command' }]
+              },
+              ws_events: []
+            },
+            response: {
+              status: 101,
+              headers: {},
+              body: {
+                id: 'resp_direct_final',
+                status: 'completed',
+                model: 'gpt-5.5',
+                previous_response_id: 'resp_direct_tool',
+                output: [
+                  {
+                    type: 'function_call',
+                    name: 'exec_command',
+                    call_id: 'call_direct_ls',
+                    arguments: '{\"cmd\":\"ls -la\"}'
+                  }
+                ],
+                usage: { input_tokens: 20, output_tokens: 4, total_tokens: 24 }
+              },
+              ws_events: []
+            }
+          };
+          const expanded = expandWebSocketResponseEntries([toolTurn, finalTurn]);
+          return {
+            turns: expanded.map(entry => entry.turn),
+            messages: getMessages(expanded[1].request.body).map(message => {
+              const content = Array.isArray(message.content) ? message.content : [];
+              const toolUse = content.find(block => block.type === 'tool_use');
+              if (toolUse) return `${message.role}:tool_use:${toolUse.id}:${toolUse.name}`;
+              const toolResult = content.find(block => block.type === 'tool_result');
+              if (toolResult) return `${message.role}:tool_result:${toolResult.tool_use_id}:${toolResult.content}`;
+              return `${message.role}:text:${content.map(block => block.text || '').filter(Boolean).join(' ')}`;
+            }),
+            output: (getResponseOutput(expanded[1])?.content || []).map(block => {
+              if (block.type === 'tool_use') return `${block.type}:${block.id}:${block.name}`;
+              return block.text || block.type;
+            })
+          };
+        }"""
+    )
+
+    assert result == {
+        "turns": [2, "2.2"],
+        "messages": [
+            "user:text:Run pwd.",
+            "assistant:tool_use:call_direct_pwd:exec_command",
+            "tool:tool_result:call_direct_pwd:/workspace/project",
+        ],
+        "output": ["tool_use:call_direct_ls:exec_command"],
+    }
+
+
+def test_viewer_does_not_synthesize_instructions_without_user_input(responses_page) -> None:
+    result = responses_page.evaluate(
+        """() => {
+          const body = {
+            type: 'response.create',
+            model: 'gpt-5.5',
+            instructions: 'You are Codex.',
+            input: [
+              { type: 'function_call_output', call_id: 'call_pwd', output: '/workspace/project' }
+            ]
+          };
+          return getMessages(body).map(message => message.role);
+        }"""
+    )
+
+    assert result == ["tool"]
+
+
+def test_viewer_preserves_codex_ws_history_across_incremental_expansion(responses_page) -> None:
+    result = responses_page.evaluate(
+        """() => {
+          const baseRequest = {
+            method: 'WEBSOCKET',
+            path: '/backend-api/codex/responses',
+            headers: {}
+          };
+          const toolTurn = {
+            request_id: 'req_incremental_1',
+            turn: 1,
+            transport: 'websocket',
+            request: {
+              ...baseRequest,
+              body: {
+                type: 'response.create',
+                model: 'gpt-5.5',
+                input: [{ type: 'message', role: 'user', content: [{ type: 'input_text', text: 'Run pwd.' }] }],
+                tools: [{ type: 'function', name: 'exec_command' }]
+              }
+            },
+            response: {
+              status: 101,
+              headers: {},
+              body: {},
+              ws_events: [
+                { type: 'response.created', response: { id: 'resp_tool', status: 'in_progress', model: 'gpt-5.5' } },
+                { type: 'response.output_item.done', output_index: 0, item: { type: 'function_call', name: 'exec_command', call_id: 'call_pwd', arguments: '{\"cmd\":\"pwd\"}' } },
+                { type: 'response.completed', response: { id: 'resp_tool', status: 'completed', model: 'gpt-5.5', output: [], usage: { input_tokens: 10, output_tokens: 5, total_tokens: 15 } } }
+              ]
+            }
+          };
+          const finalTurn = {
+            request_id: 'req_incremental_2',
+            turn: 2,
+            transport: 'websocket',
+            request: {
+              ...baseRequest,
+              body: {
+                type: 'response.create',
+                model: 'gpt-5.5',
+                previous_response_id: 'resp_tool',
+                input: [{ type: 'function_call_output', call_id: 'call_pwd', output: '/workspace/project' }],
+                tools: [{ type: 'function', name: 'exec_command' }]
+              }
+            },
+            response: {
+              status: 101,
+              headers: {},
+              body: {},
+              ws_events: [
+                { type: 'response.created', response: { id: 'resp_final', status: 'in_progress', model: 'gpt-5.5', previous_response_id: 'resp_tool' } },
+                { type: 'response.output_item.done', output_index: 0, item: { type: 'message', role: 'assistant', content: [{ type: 'output_text', text: 'FINAL_INCREMENTAL_OK' }] } },
+                { type: 'response.completed', response: { id: 'resp_final', status: 'completed', model: 'gpt-5.5', previous_response_id: 'resp_tool', output: [], usage: { input_tokens: 20, output_tokens: 3, total_tokens: 23 } } }
+              ]
+            }
+          };
+          const history = createWebSocketResponseHistoryStore();
+          expandWebSocketResponseEntries([toolTurn], history);
+          const expanded = expandWebSocketResponseEntries([finalTurn], history);
+          const messages = getMessages(expanded[0].request.body).map(message => {
+            const content = Array.isArray(message.content) ? message.content : [];
+            const toolUse = content.find(block => block.type === 'tool_use');
+            if (toolUse) return `${message.role}:tool_use:${toolUse.id}:${toolUse.name}`;
+            const toolResult = content.find(block => block.type === 'tool_result');
+            if (toolResult) return `${message.role}:tool_result:${toolResult.tool_use_id}:${toolResult.content}`;
+            return `${message.role}:text:${content.map(block => block.text || '').filter(Boolean).join(' ')}`;
+          });
+          return {
+            messages,
+            historySizes: [...history.values()].map(node => (
+              (node.requestInput || []).length + (node.outputMessages || []).length
+            ))
+          };
+        }"""
+    )
+
+    assert result == {
+        "messages": [
+            "user:text:Run pwd.",
+            "assistant:tool_use:call_pwd:exec_command",
+            "tool:tool_result:call_pwd:/workspace/project",
+        ],
+        "historySizes": [2, 2],
+    }
+
+
+def test_viewer_omits_empty_reasoning_blocks_for_zero_reasoning_tokens(responses_page) -> None:
+    responses_page.evaluate(
+        """() => {
+          entries[0].response.body = {
+            output: [
+              { type: 'reasoning', summary: [{ type: 'summary_text', text: '' }] },
+              { type: 'message', role: 'assistant', content: [{ type: 'output_text', text: 'Visible answer' }] }
+            ],
+            usage: { input_tokens: 1, output_tokens: 1, reasoning_tokens: 0 }
+          };
+          renderDetail(entries[0]);
+        }"""
+    )
+
+    detail_text = responses_page.locator("#detail").inner_text()
+
+    assert "Visible answer" in detail_text
+    assert "thinking" not in detail_text.lower()
+
+
+def test_viewer_reconstructs_ws_output_from_output_item_done_when_completed_output_is_empty(
+    responses_page,
+) -> None:
+    responses_page.evaluate(
+        """() => {
+          entries[0].response.body = { status: 'completed', output: [], usage: { input_tokens: 1, output_tokens: 1 } };
+          entries[0].response.ws_events = [
+            { type: 'response.created', response: { id: 'resp_1', status: 'in_progress' } },
+            { type: 'response.output_item.done', output_index: 0, item: { type: 'message', role: 'assistant', content: [{ type: 'output_text', text: 'Recovered from ws_events' }] } },
+            { type: 'response.completed', response: { id: 'resp_1', status: 'completed', output: [], usage: { input_tokens: 1, output_tokens: 1 } } }
+          ];
+          renderDetail(entries[0]);
+        }"""
+    )
+
+    detail_text = responses_page.locator("#detail").inner_text()
+
+    assert "Recovered from ws_events" in detail_text
+
+
+def test_viewer_normalizes_generic_responses_tool_call_items(responses_page) -> None:
+    result = responses_page.evaluate(
+        """() => {
+          const body = {
+            input: [
+              { type: 'message', role: 'user', content: [{ type: 'input_text', text: 'Search the docs.' }] },
+              { type: 'web_search_call', status: 'completed', action: { type: 'search', query: 'Responses items' } },
+              {
+                type: 'computer_call_output',
+                call_id: 'call_screen',
+                output: { type: 'computer_screenshot', image_url: 'https://example.test/screen.png' }
+              }
+            ]
+          };
+          const output = normalizeResponseOutput([
+            { type: 'web_search_call', status: 'completed', action: { type: 'search', query: 'Responses items' } },
+            { type: 'file_search_call', status: 'completed', queries: ['viewer parser'] },
+            { type: 'custom_tool_call', status: 'completed', name: 'deploy_preview' }
+          ]);
+          const messages = getMessages(body);
+          return {
+            responseNames: output.content.filter(block => block.type === 'tool_use').map(block => block.name),
+            responseInputs: output.content.filter(block => block.type === 'tool_use').map(block => block.input),
+            roles: messages.map(message => message.role),
+            renderedMessages: renderMessages(messages)
+          };
+        }"""
+    )
+
+    assert result["responseNames"] == ["web_search", "file_search", "deploy_preview"]
+    assert result["responseInputs"][0] == {"action": {"type": "search", "query": "Responses items"}}
+    assert result["roles"] == ["user", "assistant", "tool"]
+    assert "web_search" in result["renderedMessages"]
+    assert "computer_screenshot" in result["renderedMessages"]
+
+
+def test_viewer_marks_codex_message_content_blocks(responses_page) -> None:
+    responses_page.evaluate(
+        """() => {
+          const record = {
+            request_id: 'req_codex_multiblock',
+            turn: 12,
+            transport: 'websocket',
+            request: {
+              method: 'WEBSOCKET',
+              path: '/backend-api/codex/responses',
+              headers: {},
+              body: {
+                type: 'response.create',
+                model: 'gpt-5.5',
+                input: [
+                  {
+                    type: 'message',
+                    role: 'developer',
+                    content: [
+                      { type: 'input_text', text: 'Developer policy block.' },
+                      { type: 'input_text', text: 'Repository instruction block.' },
+                      { type: 'input_text', text: 'Runtime permission block.' }
+                    ]
+                  },
+                  {
+                    type: 'message',
+                    role: 'user',
+                    content: [
+                      { type: 'input_text', text: 'User task block.' },
+                      { type: 'input_text', text: 'Attached context block.' }
+                    ]
+                  }
+                ],
+                stream: true
+              }
+            },
+            response: {
+              status: 200,
+              headers: {},
+              body: {
+                output: [{ type: 'message', role: 'assistant', content: [{ type: 'output_text', text: 'Done.' }] }],
+                usage: { input_tokens: 10, output_tokens: 2 }
+              }
+            }
+          };
+          renderDetail(record);
+        }"""
+    )
+
+    detail_text = responses_page.locator("#detail").inner_text()
+    assert responses_page.locator(".content-block-meta").count() == 0
+    assert responses_page.locator(".msg.system .content-block.block-framed").count() == 3
+    assert responses_page.locator(".msg.user .content-block.block-framed").count() == 2
+    assert (
+        responses_page.locator(".msg.system .content-block.block-framed").first.evaluate(
+            "el => getComputedStyle(el).borderLeftWidth"
+        )
+        == "1px"
+    )
+    assert "#1/3" not in detail_text
+    assert "input_text" not in detail_text
+    assert "Repository instruction block." in detail_text
+
+
+def test_viewer_marks_claude_system_and_message_content_blocks(responses_page) -> None:
+    responses_page.evaluate(
+        """() => {
+          const record = {
+            request_id: 'req_claude_multiblock',
+            turn: 3,
+            request: {
+              method: 'POST',
+              path: '/v1/messages',
+              headers: {},
+              body: {
+                model: 'claude-opus-4-6',
+                system: [
+                  { type: 'text', text: 'Claude Code system block one.' },
+                  { type: 'text', text: 'Claude Code system block two.' }
+                ],
+                messages: [
+                  {
+                    role: 'user',
+                    content: [
+                      { type: 'text', text: 'Read the first file.' },
+                      { type: 'text', text: 'Then summarize the diff.' }
+                    ]
+                  }
+                ]
+              }
+            },
+            response: {
+              status: 200,
+              headers: {},
+              body: {
+                content: [{ type: 'text', text: 'Claude response.' }],
+                usage: { input_tokens: 12, output_tokens: 3 }
+              }
+            }
+          };
+          renderDetail(record);
+        }"""
+    )
+
+    detail_text = responses_page.locator("#detail").inner_text()
+    assert responses_page.locator(".content-block-meta").count() == 0
+    assert responses_page.locator(".system-prompt-blocks .content-block.block-framed").count() == 2
+    assert responses_page.locator(".msg.user .content-block.block-framed").count() == 2
+    assert (
+        responses_page.locator(".system-prompt-blocks .content-block.block-framed").first.evaluate(
+            "el => getComputedStyle(el).borderLeftWidth"
+        )
+        == "1px"
+    )
+    assert "#1/2" not in detail_text
+    assert "system · text" not in detail_text
+    system_copy_text = responses_page.evaluate(
+        """() => {
+          const section = Array.from(document.querySelectorAll('#detail .section'))
+            .find(el => el.querySelector('.title')?.textContent === t('section_system'));
+          const encoded = section?.querySelector('.copy-btn')?.dataset.copy || '';
+          return decodeURIComponent(escape(atob(encoded)));
+        }"""
+    )
+    assert system_copy_text == "Claude Code system block one.\n\nClaude Code system block two."
+    assert "Claude Code system block two." in responses_page.locator("#detail").inner_text()
+
+
+def test_viewer_renders_image_content_blocks(responses_page) -> None:
+    responses_page.evaluate(
+        """() => {
+          const record = {
+            request_id: 'req_image_blocks',
+            turn: 14,
+            request: {
+              method: 'POST',
+              path: '/v1/responses',
+              headers: {},
+              body: {
+                model: 'gpt-5.5',
+                input: [
+                  {
+                    type: 'message',
+                    role: 'user',
+                    content: [
+                      { type: 'input_text', text: 'Please inspect this tiny image.' },
+                      {
+                        type: 'input_image',
+                        image_url: 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAgAAAAICAYAAADED76LAAAAEklEQVR4nGPQb3j7Hx9mGBkKAKVjpsHoKJzJAAAAAElFTkSuQmCC',
+                        detail: 'high'
+                      }
+                    ]
+                  }
+                ]
+              }
+            },
+            response: {
+              status: 200,
+              headers: {},
+              body: {
+                content: [{ type: 'text', text: 'Image block response OK.' }],
+                usage: { input_tokens: 15, output_tokens: 4 }
+              }
+            }
+          };
+          renderDetail(record);
+        }"""
+    )
+
+    assert responses_page.locator(".msg.user .content-block.block-framed").count() == 2
+    image = responses_page.locator(".msg.user .content-block.block-framed img")
+    assert image.count() == 1
+    assert "content-image" in image.first.get_attribute("class")
+    assert image.first.get_attribute("src").startswith("data:image/png;base64,")
+    assert image.first.get_attribute("alt") == "image"
+    responses_page.wait_for_function("image => image.complete", arg=image.first.element_handle())
+    image_state = image.first.evaluate(
+        """img => {
+          const rect = img.getBoundingClientRect();
+          return {
+            complete: img.complete,
+            naturalWidth: img.naturalWidth,
+            width: rect.width,
+            height: rect.height,
+            minWidth: getComputedStyle(img).minWidth,
+          };
+        }"""
+    )
+    assert image_state["complete"] is True
+    assert image_state["naturalWidth"] == 8
+    assert image_state["width"] >= 100
+    assert image_state["height"] >= 100
+    assert image_state["minWidth"] == "min(160px, 100%)"
+
+
+def test_viewer_preserves_file_id_image_content_blocks(responses_page) -> None:
+    responses_page.evaluate(
+        """() => {
+          const record = {
+            request_id: 'req_file_id_image_blocks',
+            turn: 15,
+            request: {
+              method: 'POST',
+              path: '/v1/responses',
+              headers: {},
+              body: {
+                model: 'gpt-5.5',
+                input: [
+                  {
+                    type: 'message',
+                    role: 'user',
+                    content: [
+                      { type: 'input_text', text: 'Please inspect this uploaded image.' },
+                      {
+                        type: 'input_image',
+                        file_id: 'file-test-image-123',
+                        detail: 'high'
+                      }
+                    ]
+                  }
+                ]
+              }
+            },
+            response: {
+              status: 200,
+              headers: {},
+              body: {
+                content: [{ type: 'text', text: 'Uploaded image block response OK.' }],
+                usage: { input_tokens: 15, output_tokens: 4 }
+              }
+            }
+          };
+          renderDetail(record);
+        }"""
+    )
+
+    assert responses_page.locator(".msg.user .content-block.block-framed").count() == 2
+    placeholder = responses_page.locator(".msg.user .content-image-placeholder")
+    assert placeholder.count() == 1
+    assert placeholder.inner_text() == "image: file_id file-test-image-123"
+    assert responses_page.locator(".msg.user img.content-image").count() == 0
+    assert "Please inspect this uploaded image." in responses_page.locator("#detail").inner_text()
+
+
+def test_viewer_does_not_auto_load_remote_image_urls(responses_page) -> None:
+    responses_page.evaluate(
+        """() => {
+          const record = {
+            request_id: 'req_remote_image_blocks',
+            turn: 16,
+            request: {
+              method: 'POST',
+              path: '/v1/responses',
+              headers: {},
+              body: {
+                model: 'gpt-5.5',
+                input: [
+                  {
+                    type: 'message',
+                    role: 'user',
+                    content: [
+                      { type: 'input_text', text: 'Please inspect this remote image reference.' },
+                      {
+                        type: 'input_image',
+                        image_url: 'https://internal.example.test/private.png',
+                        detail: 'high'
+                      }
+                    ]
+                  }
+                ]
+              }
+            },
+            response: {
+              status: 200,
+              headers: {},
+              body: {
+                content: [{ type: 'text', text: 'Remote image reference response OK.' }],
+                usage: { input_tokens: 15, output_tokens: 4 }
+              }
+            }
+          };
+          renderDetail(record);
+        }"""
+    )
+
+    assert responses_page.locator(".msg.user .content-block.block-framed").count() == 2
+    placeholder = responses_page.locator(".msg.user .content-image-placeholder")
+    assert placeholder.count() == 1
+    assert placeholder.inner_text() == "image: url"
+    assert responses_page.locator(".msg.user img.content-image").count() == 0
+    assert responses_page.locator('.msg.user img[src*="internal.example.test"]').count() == 0
+
+
+def test_viewer_renders_codex_tool_search_call_and_output(responses_page) -> None:
+    result = responses_page.evaluate(
+        """() => {
+          const record = {
+            request_id: 'req_tool_search',
+            turn: 7,
+            transport: 'websocket',
+            request: {
+              method: 'WEBSOCKET',
+              path: '/backend-api/codex/responses',
+              headers: {},
+              body: {
+                type: 'response.create',
+                model: 'gpt-5.5',
+                input: [],
+                stream: true
+              },
+              ws_events: [
+                {
+                  type: 'response.create',
+                  model: 'gpt-5.5',
+                  input: [
+                    {
+                      type: 'message',
+                      role: 'user',
+                      content: [{ type: 'input_text', text: 'Find browser automation tools.' }]
+                    }
+                  ],
+                  tools: [{ type: 'tool_search', description: '# Tool discovery' }],
+                  stream: true
+                },
+                {
+                  type: 'response.create',
+                  model: 'gpt-5.5',
+                  previous_response_id: 'resp_search',
+                  input: [
+                    {
+                      type: 'tool_search_output',
+                      call_id: 'call_search',
+                      status: 'completed',
+                      execution: 'client',
+                      tools: [
+                        {
+                          type: 'namespace',
+                          name: 'mcp__codex_apps__figma',
+                          tools: [
+                            { type: 'function', name: '_use_figma' },
+                            { type: 'function', name: '_generate_figma_design' }
+                          ]
+                        }
+                      ]
+                    }
+                  ],
+                  tools: [
+                    { type: 'tool_search', description: '# Tool discovery' },
+                    { type: 'namespace', name: 'mcp__codex_apps__figma' }
+                  ],
+                  stream: true
+                }
+              ]
+            },
+            response: {
+              status: 101,
+              headers: {},
+              body: {},
+              ws_events: [
+                { type: 'response.created', response: { id: 'resp_search', status: 'in_progress', model: 'gpt-5.5' } },
+                {
+                  type: 'response.output_item.done',
+                  output_index: 0,
+                  item: {
+                    id: 'tsc_1',
+                    type: 'tool_search_call',
+                    status: 'completed',
+                    arguments: { query: 'browser automation screenshot localhost plugin tool', limit: 5 },
+                    call_id: 'call_search',
+                    execution: 'client'
+                  }
+                },
+                {
+                  type: 'response.completed',
+                  response: {
+                    id: 'resp_search',
+                    status: 'completed',
+                    model: 'gpt-5.5',
+                    output: [],
+                    usage: { input_tokens: 10, output_tokens: 2, total_tokens: 12 }
+                  }
+                },
+                {
+                  type: 'response.created',
+                  response: {
+                    id: 'resp_final',
+                    status: 'in_progress',
+                    model: 'gpt-5.5',
+                    previous_response_id: 'resp_search'
+                  }
+                },
+                {
+                  type: 'response.output_item.done',
+                  output_index: 0,
+                  item: {
+                    id: 'msg_final',
+                    type: 'message',
+                    role: 'assistant',
+                    content: [{ type: 'output_text', text: 'Use the Figma namespace.' }]
+                  }
+                },
+                {
+                  type: 'response.completed',
+                  response: {
+                    id: 'resp_final',
+                    status: 'completed',
+                    model: 'gpt-5.5',
+                    previous_response_id: 'resp_search',
+                    output: [],
+                    usage: { input_tokens: 12, output_tokens: 4, total_tokens: 16 }
+                  }
+                }
+              ]
+            }
+          };
+          const expanded = expandWebSocketResponseEntries([record]);
+          renderDetail(expanded[0]);
+          const firstDetail = document.querySelector('#detail').innerText;
+          renderDetail(expanded[1]);
+          const secondDetail = document.querySelector('#detail').innerText;
+          const responseToolNames = expanded.flatMap(e =>
+            (getResponseOutput(e)?.content || [])
+              .filter(block => block.type === 'tool_use')
+              .map(block => block.name)
+          );
+          return {
+            entryCount: expanded.length,
+            firstDetail,
+            secondDetail,
+            secondRoles: getMessages(expanded[1].request.body).map(message => message.role),
+            responseToolNames
+          };
+        }"""
+    )
+
+    assert result["entryCount"] == 2
+    assert "tool_search" in result["firstDetail"]
+    assert "browser automation screenshot localhost plugin tool" in result["firstDetail"]
+    assert "limit" in result["firstDetail"]
+    assert "tool_search_output" in result["secondDetail"]
+    assert "mcp__codex_apps__figma" in result["secondDetail"]
+    assert "mcp__codex_apps__figma._use_figma" in result["secondDetail"]
+    assert result["secondRoles"] == ["user", "assistant", "tool"]
+    assert result["responseToolNames"] == ["tool_search"]
+
+
+def test_viewer_labels_codex_request_input_as_context_when_response_output_missing(
+    responses_page,
+) -> None:
+    responses_page.evaluate(
+        """() => {
+          entries[0].request.path = '/backend-api/codex/responses';
+          entries[0].request.body = {
+            model: 'gpt-5.4',
+            instructions: 'You are Codex, a coding agent.',
+            input: [
+              { type: 'message', role: 'developer', content: [{ type: 'input_text', text: 'developer policy' }] },
+              { type: 'message', role: 'user', content: [{ type: 'input_text', text: 'first user question' }] },
+              { type: 'message', role: 'assistant', content: [{ type: 'output_text', text: 'prior assistant answer' }] },
+              { type: 'reasoning', summary: [{ type: 'summary_text', text: 'hidden reasoning' }] },
+              { type: 'function_call', name: 'exec_command', arguments: '{\"cmd\":\"pwd\"}' },
+              { type: 'function_call_output', call_id: 'call_1', output: 'ok' },
+              { type: 'message', role: 'user', content: [{ type: 'input_text', text: 'latest user question' }] },
+              { type: 'message', role: 'assistant', content: [{ type: 'output_text', text: 'second prior assistant answer' }] }
+            ]
+          };
+          entries[0].response.body = {
+            status: 'completed',
+            output: [],
+            usage: { input_tokens: 12, output_tokens: 0 }
+          };
+          entries[0].response.ws_events = [];
+          renderDetail(entries[0]);
+        }"""
+    )
+
+    section_titles = responses_page.locator("#detail .section .title").all_inner_texts()
+    detail_text = responses_page.locator("#detail").inner_text()
+    response_text = responses_page.locator("#detail .section").nth(2).inner_text()
+
+    assert "Messages" not in section_titles
+    assert "Request Context" in section_titles
+    assert "No response output captured; showing request context only." in detail_text
+    assert "prior assistant answer" in detail_text
+    assert "second prior assistant answer" in detail_text
+    assert "No response output captured; showing request context only." in response_text
+
+
+def test_viewer_warns_for_empty_input_responses_continuation(responses_page) -> None:
+    responses_page.evaluate(
+        """() => {
+          entries[0].request.headers = {
+            session_id: 'session_abc',
+            version: '0.122.0-alpha.1'
+          };
+          entries[0].request.body = {
+            type: 'response.create',
+            model: 'gpt-5.5',
+            instructions: 'You are Codex.',
+            input: [],
+            prompt_cache_key: 'cache_abc'
+          };
+          entries[0].response.body = {
+            id: 'resp_current',
+            previous_response_id: 'resp_previous',
+            output: [
+              { type: 'message', role: 'assistant', content: [{ type: 'output_text', text: 'Continuation answer' }] }
+            ],
+            usage: { input_tokens: 2, output_tokens: 3 }
+          };
+          renderDetail(entries[0]);
+        }"""
+    )
+
+    detail_text = responses_page.locator("#detail").inner_text()
+
+    assert "Stateful Responses continuation" in detail_text
+    assert "previous_response_id but no captured user message history" in detail_text
+    assert "resp_previous" in detail_text
+    assert "cache_abc" in detail_text
+    assert "0.122.0-alpha.1" in detail_text
+    assert "Continuation answer" in detail_text
+
+
+def test_viewer_warns_for_top_level_responses_continuation_payload(responses_page) -> None:
+    responses_page.evaluate(
+        """() => {
+          entries[0] = {
+            turn: 1,
+            request_id: 'req_top_level',
+            request: {
+              method: 'WEBSOCKET',
+              path: '/v1/responses',
+              headers: {},
+              body: {
+                type: 'response.create',
+                model: 'gpt-5.5',
+                input: [],
+                prompt_cache_key: 'cache_top_level'
+              }
+            },
+            response: {
+              id: 'resp_top_current',
+              previous_response_id: 'resp_top_previous',
+              output: [
+                { type: 'message', role: 'assistant', content: [{ type: 'output_text', text: 'Top-level answer' }] }
+              ]
+            }
+          };
+          renderDetail(entries[0]);
+        }"""
+    )
+
+    detail_text = responses_page.locator("#detail").inner_text()
+
+    assert "Stateful Responses continuation" in detail_text
+    assert "resp_top_previous" in detail_text
+    assert "cache_top_level" in detail_text
+    assert "Top-level answer" in detail_text
+
+
+def test_viewer_warns_for_tool_result_only_responses_continuation(responses_page) -> None:
+    responses_page.evaluate(
+        """() => {
+          entries[0].request.body = {
+            type: 'response.create',
+            model: 'gpt-5.5',
+            instructions: 'You are Codex.',
+            input: [
+              {
+                type: 'function_call_output',
+                call_id: 'call_123',
+                output: 'name = "claude-tap"'
+              }
+            ],
+            prompt_cache_key: 'cache_tool_result'
+          };
+          entries[0].response.body = {
+            id: 'resp_tool_current',
+            previous_response_id: 'resp_tool_previous',
+            output: [
+              { type: 'message', role: 'assistant', content: [{ type: 'output_text', text: 'claude-tap' }] }
+            ],
+            usage: { input_tokens: 2, output_tokens: 3 }
+          };
+          renderDetail(entries[0]);
+        }"""
+    )
+
+    detail_text = responses_page.locator("#detail").inner_text()
+
+    assert "Stateful Responses continuation" in detail_text
+    assert "previous_response_id but no captured user message history" in detail_text
+    assert "resp_tool_previous" in detail_text
+    assert "cache_tool_result" in detail_text
+    assert "claude-tap" in detail_text

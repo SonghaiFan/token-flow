@@ -1,0 +1,84 @@
+name: Publish to PyPI
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag to publish (e.g. v0.1.27)"
+        required: true
+
+jobs:
+  ci:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.11", "3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag || github.ref }}
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+          cache-dependency-path: |
+            pyproject.toml
+            uv.lock
+      - run: pip install ruff
+      - run: ruff check .
+      - run: ruff format --check .
+      - run: python scripts/check_changelog.py --tag "${{ inputs.tag || github.ref_name }}"
+      - run: pip install -e ".[dev]"
+      - run: python -m pytest tests/ -x --timeout=60
+
+  publish:
+    needs: ci
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      id-token: write
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag || github.ref }}
+          fetch-depth: 0
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+        with:
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+
+      - name: Set up Python
+        run: uv python install 3.13
+
+      - name: Build package
+        run: uv build
+
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          tag="${{ inputs.tag || github.ref_name }}"
+          # Skip if release already exists (e.g. manual tag push)
+          if gh release view "$tag" &>/dev/null; then
+            echo "Release $tag already exists, skipping"
+            exit 0
+          fi
+          prev_tag=$(git describe --tags --abbrev=0 "${tag}^" 2>/dev/null || echo "")
+          if [ -n "$prev_tag" ]; then
+            notes="$(git log "${prev_tag}..${tag}" --pretty=format:'- %h %s')"
+          else
+            notes="$(git log --pretty=format:'- %h %s' -n 20)"
+          fi
+          gh release create "$tag" \
+            --title "$tag" \
+            --notes "$notes"

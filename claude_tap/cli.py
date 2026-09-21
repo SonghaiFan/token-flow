@@ -1,0 +1,1165 @@
+"""CLI entry points for claude-tap."""
+
+from __future__ import annotations
+
+import argparse
+import asyncio
+import ipaddress
+import logging
+import os
+import shlex
+
+# Keep the stdlib module object available as claude_tap.cli.shutil for
+# existing tests and private integrations that monkeypatch shutil.which there.
+import shutil
+import sqlite3
+import sys
+import threading
+import time
+import webbrowser
+from contextvars import ContextVar
+from pathlib import Path
+from urllib.parse import urlparse
+
+import aiohttp
+from aiohttp import web
+
+from claude_tap.certs import CertificateAuthority, ensure_ca, is_macos_ca_trusted, trust_macos_ca
+from claude_tap.cli_clients import (
+    _CODEX_CHATGPT_TARGET,
+    CLIENT_CONFIGS,
+    TARGET_DETECTORS,
+    ClientConfig,
+    _codex_config_override_value,
+    _codex_config_override_values,
+    _codex_home,
+    _codex_profile_arg,
+    _codex_selected_provider_base_url_key,
+    _detect_claude_target,
+    _detect_codebuddy_target,
+    _detect_codex_target,
+    _extend_no_proxy,
+    _has_settings_arg,
+    _maybe_rewrite_hermes_gateway_start,
+    _prepare_codex_app_forward_launch,
+    _read_codebuddy_endpoint_cache,
+    _read_codex_config,
+    _read_settings_env_base_url,
+    _reverse_proxy_trace_options,
+    _selected_codex_provider_base_url,
+    _settings_arg,
+    _toml_dotted_key_segment,
+    run_client,
+)
+from claude_tap.cli_output import print_status as _print
+from claude_tap.cursor_transcript import CursorTranscriptWatcher, model_from_cursor_args
+from claude_tap.forward_proxy import ForwardProxyServer
+from claude_tap.history import cleanup_trace_sessions, migrate_legacy_traces
+from claude_tap.live import LiveViewerServer
+from claude_tap.proxy import proxy_handler
+from claude_tap.shared_dashboard import (
+    DEFAULT_DASHBOARD_PORT,
+    dashboard_url,
+    ensure_shared_dashboard,
+    is_dashboard_healthy,
+    resolve_dashboard_port,
+    stop_dashboard_service,
+    stop_incompatible_dashboard_if_running,
+)
+from claude_tap.trace import TraceWriter, create_trace_writer
+from claude_tap.trace_log_handler import SQLiteLogHandler
+from claude_tap.trace_store import TraceStore, get_trace_store, resolve_db_path
+
+_COMMAND_STDOUT = ContextVar("command_stdout", default=None)
+
+# Force UTF-8 + line-buffered stdout/stderr so emoji output works on Windows
+# consoles (GBK/cp936) and `uv tool` doesn't fully buffer our progress prints.
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8", errors="backslashreplace", line_buffering=True)
+if hasattr(sys.stderr, "reconfigure"):
+    sys.stderr.reconfigure(encoding="utf-8", errors="backslashreplace")
+
+log = logging.getLogger("claude-tap")
+
+
+def _create_trace_writer(
+    *,
+    store: TraceStore,
+    client: str,
+    proxy_mode: str,
+    metadata: dict[str, str],
+) -> TraceWriter:
+    return create_trace_writer(store=store, client=client, proxy_mode=proxy_mode, metadata=metadata)
+
+
+def _reverse_proxy_path_prefixes(
+    client: str, extra_allowed_paths: tuple[str, ...]
+) -> tuple[tuple[str, ...], tuple[str, ...]]:
+    """Return reverse-proxy allow and trace filters for one client.
+
+    Clients without a trace filter retain the legacy behaviour of recording
+    every allowed request. A client-specific filter may opt in to tracing
+    explicitly allowed extra paths as well.
+    """
+    config = CLIENT_CONFIGS[client]
+    allowed_prefixes = (*config.reverse_allowed_path_prefixes, *extra_allowed_paths)
+    trace_prefixes = config.reverse_trace_path_prefixes
+    if trace_prefixes:
+        trace_prefixes = (*trace_prefixes, *extra_allowed_paths)
+    return allowed_prefixes, trace_prefixes
+
+
+class _LazyTraceWriter:
+    """Create a trace session only when side-channel capture writes a record."""
+
+    def __init__(self, *, client: str, proxy_mode: str, metadata: dict[str, str]):
+        self._client = client
+        self._proxy_mode = proxy_mode
+        self._metadata = metadata
+        self._store = get_trace_store()
+        self._writer: TraceWriter | None = None
+        self.session_id: str | None = None
+
+    @property
+    def count(self) -> int:
+        return self._writer.count if self._writer is not None else 0
+
+    async def write(self, record: dict) -> None:
+        await self._ensure_writer().write(record)
+
+    async def write_next_turn(self, record: dict) -> None:
+        await self._ensure_writer().write_next_turn(record)
+
+    def close(self) -> None:
+        if self._writer is not None:
+            self._writer.close()
+
+    def get_summary(self) -> dict:
+        if self._writer is not None:
+            return self._writer.get_summary()
+        return {
+            "api_calls": 0,
+            "input_tokens": 0,
+            "output_tokens": 0,
+            "cache_read_tokens": 0,
+            "cache_create_tokens": 0,
+            "models_used": {},
+            "has_error": False,
+        }
+
+    def _ensure_writer(self) -> TraceWriter:
+        if self._writer is None:
+            self._writer = _create_trace_writer(
+                store=self._store,
+                client=self._client,
+                proxy_mode=self._proxy_mode,
+                metadata=self._metadata,
+            )
+            self.session_id = self._writer.session_id
+        return self._writer
+
+
+try:
+    from importlib.metadata import version as _pkg_version
+
+    __version__ = _pkg_version("claude-tap")
+except Exception:
+    __version__ = "0.0.0"
+
+_CLI_COMPAT_EXPORTS = (
+    shutil,
+    ClientConfig,
+    _CODEX_CHATGPT_TARGET,
+    _codex_config_override_value,
+    _codex_config_override_values,
+    _codex_home,
+    _codex_profile_arg,
+    _codex_selected_provider_base_url_key,
+    _detect_claude_target,
+    _detect_codebuddy_target,
+    _extend_no_proxy,
+    _has_settings_arg,
+    _maybe_rewrite_hermes_gateway_start,
+    _read_codebuddy_endpoint_cache,
+    _read_codex_config,
+    _read_settings_env_base_url,
+    _selected_codex_provider_base_url,
+    _settings_arg,
+    _toml_dotted_key_segment,
+)
+
+
+def _open_browser(url: str) -> None:
+    """Open URL in browser without blocking. Silently ignores failures in headless environments."""
+    threading.Thread(target=lambda: webbrowser.open(url), daemon=True).start()
+
+
+async def _is_dashboard_reusable(host: str, port: int) -> bool:
+    return await is_dashboard_healthy(host, port)
+
+
+def _dashboard_stop_command(host: str, port: int) -> str:
+    parts = ["claude-tap", "dashboard", "stop"]
+    if port != DEFAULT_DASHBOARD_PORT:
+        parts.extend(["--tap-live-port", str(port)])
+    if host != "127.0.0.1":
+        parts.extend(["--tap-host", host])
+    return " ".join(shlex.quote(part) for part in parts)
+
+
+_CLAUDE_EXECUTABLE_NAMES = {"claude", "claude.exe", "claude.cmd", "claude.bat"}
+
+
+def _loopback_target_host(target: str | None) -> str | None:
+    """Return the host of an upstream target that resolves to the local loopback.
+
+    Covers the whole IPv4 loopback block (127.0.0.0/8), IPv6 ::1, and the
+    "localhost" hostname. Returns None for remote or unparseable targets.
+
+    A loopback upstream (e.g. a local Agent Maestro/relay) must not be routed
+    through a system proxy picked up via trust_env, or aiohttp tunnels the call
+    through the proxy and the connection is reset (ServerDisconnectedError).
+    """
+    if not target:
+        return None
+    host = urlparse(target).hostname
+    if host is None:
+        return None
+    if host.lower() == "localhost":
+        return host
+    try:
+        if ipaddress.ip_address(host).is_loopback:
+            return host
+    except ValueError:
+        return None
+    return None
+
+
+def _looks_like_claude_binary_path(value: str) -> bool:
+    if not value or value.startswith("-"):
+        return False
+    # VSCode's claudeProcessWrapper passes the bundled Claude binary path as
+    # argv[0]. Require a path-looking file so normal prompts/dirs named
+    # "claude" are not silently stripped or executed.
+    if "/" not in value and "\\" not in value and not (len(value) > 1 and value[1] == ":"):
+        return False
+    path = Path(value)
+    return path.name.lower() in _CLAUDE_EXECUTABLE_NAMES and path.is_file()
+
+
+def _extract_wrapped_client_command(client: str, args: list[str]) -> tuple[str | None, list[str]]:
+    if client != "claude" or not args:
+        return None, args
+    if _looks_like_claude_binary_path(args[0]):
+        return args[0], args[1:]
+    return None, args
+
+
+def _trust_ca_for_current_user(ca_cert_path: Path) -> int:
+    """Trust the forward-proxy CA in the current user's macOS login keychain."""
+    if sys.platform != "darwin":
+        _print("--tap-trust-ca is currently only supported on macOS.", file=sys.stderr)
+        _print(f"CA certificate: {ca_cert_path}", file=sys.stderr)
+        return 1
+
+    if is_macos_ca_trusted(ca_cert_path):
+        _print(f"🔐 CA already trusted in the macOS login keychain: {ca_cert_path}")
+        return 0
+
+    result = trust_macos_ca(ca_cert_path)
+    if result.returncode != 0:
+        details = (result.stderr or result.stdout or "").strip()
+        _print("Error: failed to trust claude-tap CA in the macOS login keychain.", file=sys.stderr)
+        if details:
+            _print(details, file=sys.stderr)
+        _print("This command does not use sudo; macOS may require unlocking your login keychain.", file=sys.stderr)
+        return result.returncode or 1
+
+    if not is_macos_ca_trusted(ca_cert_path):
+        _print("Error: macOS did not report the claude-tap CA as trusted after installation.", file=sys.stderr)
+        _print(f"CA certificate: {ca_cert_path}", file=sys.stderr)
+        return 1
+
+    _print(f"🔐 Trusted claude-tap CA in the current user's macOS login keychain: {ca_cert_path}")
+    return 0
+
+
+def _ensure_ca_trust_for_forward_proxy(args: argparse.Namespace, ca_cert_path: Path) -> int:
+    """Ensure CA trust when forward-proxy clients need macOS keychain trust."""
+    if args.proxy_mode != "forward":
+        return 0
+
+    if args.trust_ca:
+        return _trust_ca_for_current_user(ca_cert_path)
+
+    cfg = CLIENT_CONFIGS[args.client]
+    if sys.platform != "darwin" or not cfg.auto_trust_ca_macos:
+        return 0
+
+    if is_macos_ca_trusted(ca_cert_path):
+        return 0
+
+    _print(f"🔐 {cfg.label} needs the claude-tap CA trusted in your macOS login keychain.")
+    _print("   Installing for the current user only; no sudo or System keychain write is used.")
+    return _trust_ca_for_current_user(ca_cert_path)
+
+
+async def _async_main(args: argparse.Namespace) -> int:
+    output_dir = Path(args.output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+    if not args.live_viewer:
+        try:
+            migrate_legacy_traces(output_dir)
+        except sqlite3.Error as exc:
+            _print(
+                f"claude-tap: legacy trace migration skipped because storage is unavailable ({exc})",
+                file=sys.stderr,
+            )
+
+    store = get_trace_store()
+    client_cfg = CLIENT_CONFIGS[args.client]
+    transcript_only = bool(client_cfg.transcript_only)
+    effective_proxy_mode = "transcript" if transcript_only else args.proxy_mode
+    trace_metadata = {"client": args.client, "proxy_mode": effective_proxy_mode}
+
+    codex_app_preflighted = False
+    codex_app_user_data_dir = None
+    if args.client == "codexapp" and args.proxy_mode == "forward" and not args.no_launch:
+        launch_plan = await _prepare_codex_app_forward_launch()
+        if not launch_plan.proceed:
+            return 1
+        codex_app_preflighted = True
+        codex_app_user_data_dir = launch_plan.user_data_dir
+
+    ca_cert_path: Path | None = None
+    ca_key_path: Path | None = None
+    if not transcript_only and args.proxy_mode == "forward":
+        ca_cert_path, ca_key_path = ensure_ca()
+        trust_result = _ensure_ca_trust_for_forward_proxy(args, ca_cert_path)
+        if trust_result != 0:
+            return trust_result
+
+    # Transcript-only clients open one tap session per Cursor conversation JSONL.
+    # Do not create an umbrella session that would merge unrelated chats.
+    writer: TraceWriter | _LazyTraceWriter | None
+    session_id: str | None
+    if transcript_only:
+        writer = None
+        session_id = None
+    else:
+        writer = _create_trace_writer(
+            store=store,
+            client=args.client,
+            proxy_mode=effective_proxy_mode,
+            metadata=trace_metadata,
+        )
+        session_id = writer.session_id
+
+    # Capture the Cursor watch window before dashboard startup so transcripts
+    # written while ensure_shared_dashboard() boots are still imported.
+    watch_since = time.time()
+
+    # Ensure the shared dashboard is running (one port for all sessions).
+    dashboard_url_value: str | None = None
+    dashboard_host = args.host
+    dashboard_port = resolve_dashboard_port(args.live_port)
+    if args.live_viewer:
+        try:
+            dashboard_url_value, spawned = await ensure_shared_dashboard(
+                host=dashboard_host,
+                port=dashboard_port,
+                output_dir=output_dir,
+                open_browser=args.open_viewer,
+                open_browser_fn=_open_browser,
+            )
+            if spawned:
+                _print(f"🌐 Dashboard: {dashboard_url_value}")
+            else:
+                _print(f"🌐 Dashboard: {dashboard_url_value} (shared)")
+        except (RuntimeError, sqlite3.Error) as exc:
+            _print(f"⚠️  {exc}", file=sys.stderr)
+
+    # Proxy logs go to SQLite, not terminal (avoids polluting Claude TUI)
+    sqlite_handler: SQLiteLogHandler | None = None
+    if session_id is not None:
+        sqlite_handler = SQLiteLogHandler(session_id, store=store)
+        sqlite_handler.setFormatter(logging.Formatter("%(asctime)s %(message)s", datefmt="%H:%M:%S"))
+        log.addHandler(sqlite_handler)
+        log.setLevel(logging.DEBUG)
+        logging.getLogger("aiohttp.access").setLevel(logging.WARNING)
+        aiohttp_server_log = logging.getLogger("aiohttp.server")
+        aiohttp_server_log.addHandler(sqlite_handler)
+        aiohttp_server_log.propagate = False
+        asyncio_log = logging.getLogger("asyncio")
+        asyncio_log.addHandler(sqlite_handler)
+        asyncio_log.propagate = False
+
+    # Proxy clients create this lazily. Transcript-only clients skip the proxy.
+    session: aiohttp.ClientSession | None = None
+
+    # Forward proxy mode: raw TCP server with CONNECT/TLS termination
+    # Reverse proxy mode: aiohttp web app (current behavior)
+    forward_server: ForwardProxyServer | None = None
+    runner: web.AppRunner | None = None
+    cursor_watcher: CursorTranscriptWatcher | None = None
+    exit_code = 0
+    capture_only = bool(getattr(args, "export_prompt", None))
+    if capture_only and not transcript_only:
+        _print("📝 Prompt export mode: upstream calls are skipped after capture.")
+    try:
+        if transcript_only:
+            _print(f"🔍 claude-tap v{__version__} watching Cursor agent-transcripts")
+            _print("   Mode: one tap session per Cursor conversation JSONL")
+            _print(f"🗄️  Trace database: {resolve_db_path()}")
+            cursor_watcher = CursorTranscriptWatcher(
+                since=watch_since,
+                model=model_from_cursor_args(args.claude_args),
+                store=store,
+                client=args.client,
+                proxy_mode=effective_proxy_mode,
+                metadata=trace_metadata,
+            )
+            await cursor_watcher.start()
+            if not args.no_launch:
+                # Bare `claude-tap --tap-client cursor` launches cursor-agent (TUI)
+                # while the watcher streams local transcripts into the dashboard.
+                try:
+                    exit_code = await run_client(
+                        0,
+                        args.claude_args,
+                        client=args.client,
+                        proxy_mode=args.proxy_mode,
+                        ca_cert_path=None,
+                        client_cmd=getattr(args, "client_cmd", None),
+                        capture_only=False,
+                        codex_app_preflighted=codex_app_preflighted,
+                        codex_app_user_data_dir=codex_app_user_data_dir,
+                    )
+                except asyncio.CancelledError:
+                    pass
+            else:
+                _print("\n--tap-no-launch: watching local Cursor transcripts only. Press Ctrl+C to stop.")
+                try:
+                    while True:
+                        await asyncio.sleep(3600)
+                except asyncio.CancelledError:
+                    pass
+        else:
+            # Honor system proxy env (HTTP_PROXY/HTTPS_PROXY/ALL_PROXY/NO_PROXY)
+            # for outbound upstream requests so users routing through Clash/VPN
+            # keep working. A loopback upstream (e.g. a local Agent Maestro/relay)
+            # must NOT be tunneled through that proxy, or aiohttp resets the
+            # connection (ServerDisconnectedError -> HTTP 502). Add only the
+            # loopback host to NO_PROXY so the bypass is per-host: remote traffic
+            # (including forward-mode CONNECT requests sharing this session) still
+            # honors the user's proxy.
+            loopback_host = _loopback_target_host(args.target)
+            if loopback_host is not None:
+                _extend_no_proxy(os.environ, (loopback_host,))
+            session = aiohttp.ClientSession(auto_decompress=False, trust_env=True)
+
+            if args.proxy_mode == "forward":
+                assert ca_cert_path is not None
+                assert ca_key_path is not None
+                assert session is not None
+                assert writer is not None
+                ca = CertificateAuthority(ca_cert_path, ca_key_path)
+                forward_server = ForwardProxyServer(
+                    host=args.host,
+                    port=args.port,
+                    ca=ca,
+                    writer=writer,
+                    session=session,
+                    local_reverse_target=args.target,
+                    local_reverse_allowed_path_prefixes=CLIENT_CONFIGS[
+                        args.client
+                    ].forward_base_url_allowed_path_prefixes,
+                    trace_methods=CLIENT_CONFIGS[args.client].forward_trace_methods,
+                    trace_path_prefixes=CLIENT_CONFIGS[args.client].forward_trace_path_prefixes,
+                    trace_path_suffixes=CLIENT_CONFIGS[args.client].forward_trace_path_suffixes,
+                    store_stream_events=args.store_stream_events,
+                    capture_only=capture_only,
+                )
+                actual_port = await forward_server.start()
+                _print(f"🔍 claude-tap v{__version__} forward proxy on http://{args.host}:{actual_port}")
+                _print(f"   CA cert: {ca_cert_path}")
+            else:
+                assert session is not None
+                assert writer is not None
+                app = web.Application(client_max_size=0)  # No body size limit (proxy must forward everything)
+                allowed_path_prefixes, trace_path_prefixes = _reverse_proxy_path_prefixes(
+                    args.client, tuple(args.extra_allowed_paths)
+                )
+                app["trace_ctx"] = {
+                    "target_url": args.target,
+                    "writer": writer,
+                    "session": session,
+                    "turn_counter": 0,
+                    "extra_allowed_path_prefixes": allowed_path_prefixes,
+                    "trace_path_prefixes": trace_path_prefixes,
+                    "store_stream_events": args.store_stream_events,
+                    "capture_only": capture_only,
+                    **_reverse_proxy_trace_options(args.client, args.target),
+                }
+                app.router.add_route("*", "/{path_info:.*}", proxy_handler)
+
+                runner = web.AppRunner(app)
+                await runner.setup()
+                site = web.TCPSite(runner, args.host, args.port)
+                await site.start()
+
+                # Resolve actual port (site._server is a private API; fall back to args.port)
+                try:
+                    actual_port = site._server.sockets[0].getsockname()[1]
+                except (AttributeError, IndexError, OSError):
+                    actual_port = args.port
+                _print(f"🔍 claude-tap v{__version__} listening on http://{args.host}:{actual_port}")
+
+            _print(f"📁 Trace session: {session_id}")
+            _print(f"🗄️  Trace database: {resolve_db_path()}")
+
+            if not args.no_launch:
+                try:
+                    exit_code = await run_client(
+                        actual_port,
+                        args.claude_args,
+                        client=args.client,
+                        proxy_mode=args.proxy_mode,
+                        ca_cert_path=ca_cert_path,
+                        client_cmd=getattr(args, "client_cmd", None),
+                        capture_only=capture_only,
+                        codex_app_preflighted=codex_app_preflighted,
+                        codex_app_user_data_dir=codex_app_user_data_dir,
+                    )
+                except asyncio.CancelledError:
+                    pass
+            else:
+                _print("\n--no-launch mode: proxy running. Press Ctrl+C to stop.")
+                try:
+                    while True:
+                        await asyncio.sleep(3600)
+                except asyncio.CancelledError:
+                    pass
+    finally:
+        cursor_session_ids: set[str] = set()
+        if cursor_watcher is not None:
+            try:
+                imported = await cursor_watcher.stop()
+            except Exception:
+                log.debug("Cursor transcript watcher stop failed", exc_info=True)
+                imported = 0
+            cursor_session_ids = set(cursor_watcher.session_ids)
+            # Prefer cumulative writer totals: stop() only returns the final-sync
+            # delta, which is often 0 after a successful live watch.
+            turns = int(cursor_watcher.get_summary().get("api_calls") or 0)
+            if turns == 0 and imported:
+                turns = int(imported)
+            if turns or cursor_session_ids:
+                _print(f"   Cursor transcript turns: {turns}")
+                _print(f"   Cursor conversations: {len(cursor_session_ids)}")
+        if forward_server:
+            try:
+                await asyncio.wait_for(forward_server.stop(), timeout=10)
+            except asyncio.TimeoutError:
+                log.warning("Timed out stopping forward proxy")
+            except Exception:
+                pass
+        if runner:
+            try:
+                await runner.cleanup()
+            except Exception:
+                pass
+        # Shared dashboard runs in a detached process; nothing to stop here.
+        if session is not None:
+            try:
+                await asyncio.wait_for(session.close(), timeout=5)
+            except asyncio.TimeoutError:
+                log.warning("Timed out closing upstream HTTP session")
+            except Exception:
+                pass
+
+        if writer is not None:
+            writer.close()
+
+        prompt_export_rc: int | None = None
+        if args.export_prompt and session_id is not None:
+            prompt_export_rc = _export_prompt_from_session(store, session_id, args.export_prompt)
+
+        protected_ids = set(cursor_session_ids)
+        if session_id is not None:
+            protected_ids.add(session_id)
+        if args.max_traces > 0:
+            try:
+                cleaned = cleanup_trace_sessions(
+                    args.max_traces,
+                    protected_session_ids=protected_ids or None,
+                )
+            except sqlite3.Error as exc:
+                _print(f"\nclaude-tap: trace cleanup skipped because storage is unavailable ({exc})", file=sys.stderr)
+            else:
+                if cleaned:
+                    _print(f"\n🧹 Cleaned up {cleaned} old trace session(s)")
+
+        # Print summary with cost estimation
+        if cursor_watcher is not None:
+            stats = cursor_watcher.get_summary()
+        elif writer is not None:
+            stats = writer.get_summary()
+        else:
+            stats = {
+                "api_calls": 0,
+                "input_tokens": 0,
+                "output_tokens": 0,
+                "cache_read_tokens": 0,
+                "cache_create_tokens": 0,
+                "models_used": {},
+                "has_error": False,
+            }
+        _print("\n📊 Trace summary:")
+        _print(f"   API calls: {stats['api_calls']}")
+        if stats.get("trace_storage_errors"):
+            _print(f"   Trace storage errors: {stats['trace_storage_errors']}")
+            _print(f"   Dropped trace records: {stats.get('dropped_trace_records', 0)}")
+
+        # Token breakdown
+        total_tokens = stats["input_tokens"] + stats["output_tokens"]
+        if total_tokens > 0:
+            _print(f"   Tokens: {stats['input_tokens']:,} in / {stats['output_tokens']:,} out", end="")
+            if stats["cache_read_tokens"] > 0:
+                _print(f" / {stats['cache_read_tokens']:,} cache_read", end="")
+            if stats["cache_create_tokens"] > 0:
+                _print(f" / {stats['cache_create_tokens']:,} cache_write", end="")
+            _print()
+
+        if cursor_session_ids:
+            _print(f"   Sessions: {len(cursor_session_ids)} (one per Cursor conversation)")
+        elif session_id is not None:
+            _print(f"   Session: {session_id}")
+        _print(f"   Database: {resolve_db_path()}")
+        if dashboard_url_value:
+            _print(f"   Dashboard: {dashboard_url_value}")
+            _print(f"   Stop dashboard: {_dashboard_stop_command(dashboard_host, dashboard_port)}")
+
+        if prompt_export_rc is not None:
+            if prompt_export_rc != 0:
+                exit_code = 1
+
+    return exit_code
+
+
+def _export_prompt_from_session(store, session_id: str, output: str) -> int:
+    from claude_tap.prompt_snapshot import render_prompt_markdown, snapshot_from_records
+
+    try:
+        text = render_prompt_markdown(snapshot_from_records(store.load_records(session_id)))
+    except ValueError as exc:
+        _print(f"Error: {exc}", file=sys.stderr)
+        return 1
+
+    if output == "-":
+        _print(text, end="", file=_COMMAND_STDOUT.get())
+        return 0
+
+    path = Path(output).expanduser()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text, encoding="utf-8")
+    _print(f"📝 Prompt snapshot: {path}")
+    trace_path = _prompt_trace_path(path)
+    trace_path.write_text(store.export_jsonl(session_id), encoding="utf-8")
+    _print(f"🧾 Raw trace: {trace_path}")
+    return 0
+
+
+def _prompt_trace_path(prompt_path: Path) -> Path:
+    if prompt_path.name in {"prompt.md", "prompt.markdown", "system.md", "system.markdown"}:
+        return prompt_path.with_name("trace.jsonl")
+    return prompt_path.with_name(f"{prompt_path.stem}.trace.jsonl")
+
+
+def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
+    """Parse argv, extracting ``--tap-*`` flags for ourselves and forwarding
+    everything else to the selected client.
+    """
+    if argv is None:
+        argv = sys.argv[1:]
+
+    tap_parser = argparse.ArgumentParser(
+        prog="claude-tap",
+        description=(
+            "Trace Claude Code, Codex CLI, Codex App, Gemini CLI, Kimi CLI, MiMo Code, OpenCode, OpenClaw, Pi, Hermes Agent, "
+            "Cursor CLI, Qoder CLI, Antigravity CLI, or CodeBuddy CLI API requests via a local proxy or transcript import. "
+            "All flags not listed below are forwarded to the selected client."
+        ),
+        epilog=(
+            "claude code:\n"
+            "  claude-tap                            Basic tracing with live viewer enabled by default\n"
+            "  claude-tap --tap-no-live              Disable live viewer server/browser auto-open\n"
+            "  claude-tap --tap-no-open              Keep viewers from auto-opening in a browser\n"
+            "  claude-tap -- --model claude-opus-4-6  Pass flags to Claude Code\n"
+            "  claude-tap -- -c                      Continue last conversation\n"
+            "  claude-tap -- --dangerously-skip-permissions  Auto-accept tool calls\n"
+            "  claude-tap -- --dangerously-skip-permissions --model claude-sonnet-4-6\n"
+            "\n"
+            "codex cli:\n"
+            "  # Target is auto-detected from Codex auth state when possible\n"
+            "  claude-tap --tap-client codex\n"
+            "  # If auto-detection cannot read Codex auth, specify OAuth target explicitly\n"
+            "  claude-tap --tap-client codex --tap-target https://chatgpt.com/backend-api/codex\n"
+            "  # With model and full auto-approval\n"
+            "  claude-tap --tap-client codex -- --model codex-mini-latest --full-auto\n"
+            "\n"
+            "codex app:\n"
+            "  # Launch Codex App through the forward proxy to capture backend HTTP/WebSocket requests\n"
+            "  claude-tap --tap-client codexapp\n"
+            "\n"
+            "kimi cli (legacy kimi-cli; uses shell KIMI_BASE_URL):\n"
+            "  claude-tap --tap-client kimi\n"
+            "  claude-tap --tap-client kimi -- --thinking\n"
+            "  claude-tap --tap-client kimi --tap-target https://api.moonshot.ai/v1\n"
+            "\n"
+            "kimi-code cli (MoonshotAI/kimi-code; patches ~/.kimi-code/config.toml via sandbox):\n"
+            "  claude-tap --tap-client kimi-code\n"
+            "  claude-tap --tap-client kimi-code -- --thinking\n"
+            "  claude-tap --tap-client kimi-code --tap-target https://api.moonshot.ai/v1\n"
+            "\n"
+            "gemini cli (defaults to forward proxy mode):\n"
+            '  claude-tap --tap-client gemini -- -p "hello"\n'
+            "  # Reverse mode sets GOOGLE_GEMINI_BASE_URL and GOOGLE_VERTEX_BASE_URL\n"
+            "  claude-tap --tap-client gemini --tap-proxy-mode reverse\n"
+            "\n"
+            "grok build cli (reverse proxy mode):\n"
+            '  claude-tap --tap-client grok -- -p "hello"\n'
+            "  # Authenticate first with `grok login`\n"
+            "\n"
+            "deepseek harness (forward proxy mode):\n"
+            '  claude-tap --tap-client dsh -- --profile headless "Reply OK"\n'
+            "  # Forward mode captures both stored and environment-configured DeepSeek endpoints\n"
+            "\n"
+            "opencode (multi-provider; defaults to forward proxy mode):\n"
+            "  # Forward proxy captures every provider opencode talks to\n"
+            "  claude-tap --tap-client opencode\n"
+            "  # Force reverse mode (single ANTHROPIC_BASE_URL provider only)\n"
+            "  claude-tap --tap-client opencode --tap-proxy-mode reverse\n"
+            "\n"
+            "mimo (MiMo Code — OpenCode fork; defaults to forward proxy mode):\n"
+            "  # Forward proxy captures every provider MiMo Code talks to\n"
+            "  claude-tap --tap-client mimo\n"
+            "  # Reverse mode — single Anthropic provider with mimo-only disabled\n"
+            "  claude-tap --tap-client mimo --tap-proxy-mode reverse\n"
+            "\n"
+            "openclaw:\n"
+            "  # Reads OpenClaw config and points the selected provider at the local proxy\n"
+            "  claude-tap --tap-client openclaw -- agent\n"
+            "\n"
+            "pi (multi-provider; defaults to forward proxy mode):\n"
+            "  # Forward proxy captures OpenAI Codex OAuth and other providers\n"
+            '  claude-tap --tap-client pi -- --model openai-codex/gpt-5.3-codex-spark -p "hello"\n'
+            "  # Pi OAuth is configured with /login inside pi, or via PI_CODING_AGENT_DIR\n"
+            "\n"
+            "hermes agent (multi-provider Python agent — forward proxy default):\n"
+            "  # Interactive TUI — captures LLM calls directly\n"
+            "  claude-tap --tap-client hermes\n"
+            "  # Gateway mode — captures LLM calls triggered by Slack/Telegram/etc. messages\n"
+            "  #   (requires messaging platform configured in ~/.hermes/.env)\n"
+            "  claude-tap --tap-client hermes -- gateway start\n"
+            "\n"
+            "cursor cli (defaults to forward proxy mode):\n"
+            '  claude-tap --tap-client cursor -- -p --trust --model auto "hello"\n'
+            "  # Cursor readable messages are imported from local transcripts after exit\n"
+            "\n"
+            "qoder cli (defaults to forward proxy mode):\n"
+            '  claude-tap --tap-client qoder -- -p "hello" --permission-mode dont_ask\n'
+            "  # Authenticate first with `qodercli login` or QODER_PERSONAL_ACCESS_TOKEN / QODER_JOB_TOKEN\n"
+            "\n"
+            "antigravity cli (defaults to forward proxy mode):\n"
+            "  # On macOS, claude-tap auto-trusts the local CA in your user login keychain without sudo\n"
+            "  claude-tap --tap-client agy --tap-live\n"
+            "\n"
+            "codebuddy (reverse proxy mode):\n"
+            "  # Auto-detects the endpoint from CodeBuddy's own login cache,\n"
+            "  # so internal, iOA, and external users all work out of the box.\n"
+            "  claude-tap --tap-client codebuddy\n"
+            "  # Or override explicitly (custom/staging deployments)\n"
+            "  claude-tap --tap-client codebuddy --tap-target https://www.codebuddy.ai/v2\n"
+            '  CODEBUDDY_BASE_URL=https://your-host/v2 claude-tap --tap-client codebuddy -- -p "Reply OK"\n'
+            "\n"
+            "proxy-only mode (connect from another terminal):\n"
+            "  claude-tap --tap-no-launch --tap-port 8080\n"
+            "  # then: ANTHROPIC_BASE_URL=http://127.0.0.1:8080 claude\n"
+            "\n"
+            "export traces:\n"
+            "  claude-tap export <session-id> -o trace.ctap.json Export compact trace bundle\n"
+            "  claude-tap export trace.jsonl              Export compact trace bundle to stdout\n"
+            "  claude-tap export trace.jsonl --format markdown -o out.md Export to markdown\n"
+            "  claude-tap export trace.jsonl --format prompt-md -o prompt.md Export prompt snapshot\n"
+            "  claude-tap export trace.jsonl --format json Export as full JSON\n"
+            "  claude-tap export trace.jsonl -o out.html  Export as HTML viewer\n"
+            "\n"
+            "dashboard:\n"
+            "  claude-tap dashboard                       Browse trace history\n"
+            "  claude-tap dashboard stop                  Stop the shared dashboard service\n"
+            "  claude-tap dashboard --tap-live-port 3000  Use a fixed dashboard port\n"
+            "\n"
+            "trust local CA:\n"
+            "  claude-tap trust-ca                        Trust forward-proxy CA in macOS user keychain\n"
+            "\n"
+            "homepage: https://github.com/liaohch3/claude-tap"
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    tap_parser.add_argument("-v", "--version", action="version", version=f"%(prog)s {__version__}")
+
+    # -- Proxy options --
+    proxy_group = tap_parser.add_argument_group("proxy options")
+    proxy_group.add_argument("--tap-port", type=int, default=0, dest="port", help="Proxy port (default: auto)")
+    proxy_group.add_argument(
+        "--tap-host",
+        default=None,
+        dest="host",
+        help="Bind address (default: 127.0.0.1, or 0.0.0.0 with --tap-no-launch)",
+    )
+    proxy_group.add_argument(
+        "--tap-client",
+        choices=sorted(CLIENT_CONFIGS.keys()),
+        default="claude",
+        dest="client",
+        help="Client to launch (default: claude)",
+    )
+    proxy_group.add_argument(
+        "--tap-target",
+        default=None,
+        dest="target",
+        help="Upstream API URL (default: auto-detected from auth state)",
+    )
+    proxy_group.add_argument(
+        "--tap-proxy-mode",
+        choices=["reverse", "forward"],
+        default=None,
+        dest="proxy_mode",
+        help=(
+            "'reverse' sets provider base URL, 'forward' sets HTTPS_PROXY with CONNECT/TLS termination. "
+            "Default depends on the client: 'reverse' for claude/codex/grok/kimi/kimi-code/openclaw/codebuddy, "
+            "'forward' for agy/codexapp/dsh/gemini/mimo/opencode/pi/hermes/qoder. "
+            "Ignored for transcript-only clients such as cursor."
+        ),
+    )
+    proxy_group.add_argument(
+        "--tap-trust-ca",
+        action="store_true",
+        dest="trust_ca",
+        help=(
+            "On macOS, explicitly trust the forward-proxy CA in the current user's login keychain before launch "
+            "(no sudo; agy does this automatically when needed)"
+        ),
+    )
+    proxy_group.add_argument(
+        "--tap-no-launch",
+        action="store_true",
+        dest="no_launch",
+        help="Don't launch the client (proxy-only, or Cursor IDE transcript watch)",
+    )
+    proxy_group.add_argument(
+        "--tap-allow-path",
+        action="append",
+        default=[],
+        dest="extra_allowed_paths",
+        metavar="PREFIX",
+        help="Extra path prefix to allow through the proxy (can be repeated, e.g. --tap-allow-path /custom/api)",
+    )
+    proxy_group.add_argument(
+        "--tap-codexapp-cdp-endpoint",
+        default=None,
+        dest="codexapp_cdp_endpoint",
+        help=argparse.SUPPRESS,
+    )
+
+    # -- Viewer options --
+    viewer_group = tap_parser.add_argument_group("viewer options")
+    viewer_group.add_argument(
+        "--tap-no-open",
+        action="store_false",
+        dest="open_viewer",
+        default=True,
+        help="Don't auto-open live or generated HTML viewers in a browser",
+    )
+    viewer_group.add_argument(
+        "--tap-live",
+        action="store_true",
+        dest="live_viewer",
+        default=True,
+        help="Use the shared local dashboard while the client runs (default: on)",
+    )
+    viewer_group.add_argument(
+        "--tap-no-live",
+        action="store_false",
+        dest="live_viewer",
+        help="Disable the shared dashboard (restores pre-v0.1.75 behavior)",
+    )
+    viewer_group.add_argument(
+        "--tap-live-port",
+        type=int,
+        default=0,
+        dest="live_port",
+        help=f"Port for the shared dashboard (default: {DEFAULT_DASHBOARD_PORT})",
+    )
+
+    # -- Storage options --
+    storage_group = tap_parser.add_argument_group("storage options")
+    storage_group.add_argument(
+        "--tap-output-dir",
+        default="./.traces",
+        dest="output_dir",
+        help="Legacy trace directory to import once (default: ./.traces)",
+    )
+    storage_group.add_argument(
+        "--tap-max-traces",
+        type=int,
+        default=50,
+        dest="max_traces",
+        help="Max trace sessions to keep (default: 50, 0 = unlimited)",
+    )
+    storage_group.add_argument(
+        "--tap-store-stream-events",
+        action="store_true",
+        dest="store_stream_events",
+        help="Persist raw SSE/WebSocket stream events in trace storage and viewer/export output (default: off)",
+    )
+    storage_group.add_argument(
+        "--tap-export-prompt",
+        metavar="PATH",
+        default=None,
+        dest="export_prompt",
+        help=(
+            "Export the captured prompt surface to Markdown after this run, plus a raw trace JSONL next to it. "
+            "This mode records the request and returns a local success response without contacting upstream."
+        ),
+    )
+    storage_group.add_argument(
+        "--tap-no-update-check",
+        action="store_true",
+        dest="_deprecated_no_update_check",
+        help=argparse.SUPPRESS,
+    )
+    storage_group.add_argument(
+        "--tap-no-auto-update",
+        action="store_true",
+        dest="_deprecated_no_auto_update",
+        help=argparse.SUPPRESS,
+    )
+    args, claude_args = tap_parser.parse_known_args(argv)
+    # Strip leading "--" separator if present (argparse leaves it in remainder)
+    if claude_args and claude_args[0] == "--":
+        claude_args = claude_args[1:]
+    args.client_cmd, claude_args = _extract_wrapped_client_command(args.client, claude_args)
+    if any(arg == "--tap-codexapp-cdp-capture" for arg in claude_args):
+        tap_parser.error("--tap-codexapp-cdp-capture was removed; --tap-client codexapp now captures via forward proxy")
+    if args.codexapp_cdp_endpoint is not None:
+        tap_parser.error(
+            "--tap-codexapp-cdp-endpoint was removed; --tap-client codexapp now captures via forward proxy"
+        )
+    args.claude_args = claude_args
+    client_cfg = CLIENT_CONFIGS[args.client]
+    # Default host: 0.0.0.0 in --tap-no-launch mode (proxy-only, typically remote),
+    # 127.0.0.1 otherwise (launching the client locally). Transcript-only clients
+    # have no proxy to expose, so keep them on localhost even with --tap-no-launch.
+    if args.host is None:
+        if client_cfg.transcript_only:
+            args.host = "127.0.0.1"
+        else:
+            args.host = "0.0.0.0" if args.no_launch else "127.0.0.1"
+    if args.target is None:
+        if args.client == "codex":
+            args.target = _detect_codex_target(claude_args)
+        elif args.client == "kimi-code":
+            args.target = TARGET_DETECTORS["kimi-code"](claude_args)
+        elif args.client == "openclaw":
+            args.target = TARGET_DETECTORS["openclaw"](claude_args)
+        else:
+            detector = TARGET_DETECTORS.get(args.client)
+            args.target = detector() if detector else client_cfg.default_target
+    if args.proxy_mode is None:
+        args.proxy_mode = client_cfg.default_proxy_mode
+    if args.client == "codexapp" and args.proxy_mode != "forward":
+        tap_parser.error("--tap-client codexapp only supports forward proxy mode")
+    if args.trust_ca and (client_cfg.transcript_only or args.proxy_mode != "forward"):
+        tap_parser.error("--tap-trust-ca only applies to forward proxy mode")
+    if client_cfg.transcript_only and args.export_prompt:
+        tap_parser.error("--tap-export-prompt is not supported for transcript-only clients")
+    if client_cfg.transcript_only and args.proxy_mode != client_cfg.default_proxy_mode:
+        tap_parser.error(
+            f"--tap-client {args.client} is transcript-only and ignores --tap-proxy-mode (got {args.proxy_mode!r})"
+        )
+
+    # Validate --tap-allow-path prefixes
+    for prefix in args.extra_allowed_paths:
+        if not prefix:
+            tap_parser.error("--tap-allow-path cannot be empty")
+        if not prefix.startswith("/"):
+            tap_parser.error(f"--tap-allow-path '{prefix}' must start with '/'")
+        if prefix == "/":
+            tap_parser.error("--tap-allow-path '/' is too broad and not allowed")
+        if prefix.endswith("/"):
+            tap_parser.error(f"--tap-allow-path '{prefix}' must not end with '/' (specify exact prefix)")
+
+    return args
+
+
+async def async_main(args: argparse.Namespace) -> int:
+    """Run claude-tap while keeping operational output off command stdout."""
+    command_stdout = _COMMAND_STDOUT.set(sys.stdout)
+    try:
+        return await _async_main(args)
+    finally:
+        _COMMAND_STDOUT.reset(command_stdout)
+
+
+def parse_dashboard_args(argv: list[str] | None = None) -> argparse.Namespace:
+    """Parse arguments for the standalone dashboard command."""
+    parser = argparse.ArgumentParser(
+        prog="claude-tap dashboard",
+        description="Open a local claude-tap dashboard for browsing trace history.",
+    )
+    parser.add_argument(
+        "command",
+        nargs="?",
+        choices=["stop", "quit"],
+        help="Use 'stop' or 'quit' to stop a running dashboard service instead of starting one",
+    )
+    parser.add_argument(
+        "--tap-output-dir",
+        default="./.traces",
+        dest="output_dir",
+        help="Legacy trace directory to import once (default: ./.traces)",
+    )
+    parser.add_argument(
+        "--tap-live-port",
+        type=int,
+        default=0,
+        dest="live_port",
+        help="Dashboard server port (default: auto)",
+    )
+    parser.add_argument(
+        "--tap-host",
+        default="127.0.0.1",
+        dest="host",
+        help="Bind address (default: 127.0.0.1)",
+    )
+    parser.add_argument(
+        "--tap-no-open",
+        action="store_false",
+        dest="open_viewer",
+        default=True,
+        help="Don't auto-open the dashboard in a browser",
+    )
+    return parser.parse_args(argv)
+
+
+async def dashboard_main(args: argparse.Namespace) -> int:
+    """Run the standalone dashboard until interrupted."""
+    output_dir = Path(args.output_dir)
+
+    host = args.host
+    port = resolve_dashboard_port(args.live_port)
+    if args.command in {"stop", "quit"}:
+        if not await is_dashboard_healthy(host, port, require_current_db=False):
+            _print(f"claude-tap dashboard is not running on {dashboard_url(host, port)}")
+            return 1
+        if not await stop_dashboard_service(host, port):
+            _print(f"Unable to stop claude-tap dashboard on {dashboard_url(host, port)}")
+            return 1
+        _print(f"Stopped claude-tap dashboard on {dashboard_url(host, port)}")
+        return 0
+
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    if await _is_dashboard_reusable(host, port):
+        migrate_legacy_traces(output_dir)
+        url = dashboard_url(host, port)
+        _print(f"🌐 claude-tap dashboard already running: {url}")
+        _print(f"🗄️  Trace database: {resolve_db_path()}")
+        if args.open_viewer:
+            _open_browser(url)
+        return 0
+
+    url = dashboard_url(host, port)
+    await stop_incompatible_dashboard_if_running(host, port, url)
+
+    server = LiveViewerServer(
+        port=port,
+        host=host,
+        migrate_from=output_dir,
+        dashboard_mode=True,
+    )
+    try:
+        await server.start()
+    except OSError:
+        if await _is_dashboard_reusable(host, port):
+            migrate_legacy_traces(output_dir)
+            url = dashboard_url(host, port)
+            _print(f"🌐 claude-tap dashboard already running: {url}")
+            if args.open_viewer:
+                _open_browser(url)
+            return 0
+        raise
+    _print(f"🌐 claude-tap dashboard: {server.url}")
+    _print(f"🗄️  Trace database: {resolve_db_path()}")
+    if output_dir.exists():
+        _print(f"📁 Legacy import dir: {output_dir}")
+    _print("Press Ctrl+C to stop.")
+    if args.open_viewer:
+        _open_browser(server.url)
+
+    try:
+        await server.wait_stopped()
+    except asyncio.CancelledError:
+        pass
+    finally:
+        await server.stop()
+    return 0
+
+
+# ---------------------------------------------------------------------------
+def parse_trust_ca_args(argv: list[str] | None = None) -> argparse.Namespace:
+    """Parse arguments for the trust-ca subcommand."""
+    parser = argparse.ArgumentParser(
+        prog="claude-tap trust-ca",
+        description=(
+            "Trust the claude-tap forward-proxy CA in the current user's macOS login keychain. "
+            "This does not use sudo or the System keychain."
+        ),
+    )
+    return parser.parse_args(argv)
+
+
+def trust_ca_main(argv: list[str] | None = None) -> int:
+    """Entry point for the trust-ca subcommand."""
+    parse_trust_ca_args(argv)
+    ca_cert_path, _ = ensure_ca()
+    return _trust_ca_for_current_user(ca_cert_path)
+
+
+def main_entry() -> None:
+    """Entry point for the claude-tap CLI."""
+    # Check if first argument is "export" subcommand
+    if len(sys.argv) > 1 and sys.argv[1] == "export":
+        from claude_tap.export import export_main
+
+        sys.exit(export_main(sys.argv[2:]))
+
+    if len(sys.argv) > 1 and sys.argv[1] == "trust-ca":
+        sys.exit(trust_ca_main(sys.argv[2:]))
+
+    if len(sys.argv) > 1 and sys.argv[1] == "dashboard":
+        args = parse_dashboard_args(sys.argv[2:])
+        try:
+            code = asyncio.run(dashboard_main(args))
+        except KeyboardInterrupt:
+            code = 0
+        sys.exit(code)
+
+    args = parse_args()
+    try:
+        code = asyncio.run(async_main(args))
+    except KeyboardInterrupt:
+        code = 0
+    sys.exit(code)

@@ -1,0 +1,733 @@
+from __future__ import annotations
+
+import asyncio
+import os
+from pathlib import Path
+
+import pytest
+
+from claude_tap.cli import _reverse_proxy_trace_options, _toml_dotted_key_segment, parse_args, run_client
+
+
+class _DummyProc:
+    def __init__(self) -> None:
+        self.pid = 12345
+        self.returncode: int | None = None
+
+    async def wait(self) -> int:
+        self.returncode = 0
+        return 0
+
+    def terminate(self) -> None:
+        self.returncode = 0
+
+    def kill(self) -> None:
+        self.returncode = -9
+
+
+_CODEX_PROXY_BASE_URL = "http://127.0.0.1:43123/v1"
+
+
+def _builtin_codex_http_args(*tail: str) -> tuple[str, ...]:
+    provider = "model_providers.claude-tap-openai"
+    return (
+        "/tmp/codex",
+        "-c",
+        'model_provider="claude-tap-openai"',
+        "-c",
+        f'{provider}.name="claude-tap"',
+        "-c",
+        f'{provider}.base_url="{_CODEX_PROXY_BASE_URL}"',
+        "-c",
+        f'{provider}.wire_api="responses"',
+        "-c",
+        f"{provider}.requires_openai_auth=true",
+        "-c",
+        f"{provider}.supports_websockets=false",
+        *tail,
+    )
+
+
+def _custom_codex_http_args(provider: str, *tail: str) -> tuple[str, ...]:
+    provider_key = f"model_providers.{provider}"
+    return (
+        "/tmp/codex",
+        "-c",
+        f'{provider_key}.base_url="{_CODEX_PROXY_BASE_URL}"',
+        "-c",
+        f"{provider_key}.supports_websockets=false",
+        *tail,
+    )
+
+
+@pytest.mark.asyncio
+async def test_output_policy_keeps_client_stdout_and_routes_wrapper_status_to_stderr(monkeypatch, capfd) -> None:
+    from claude_tap import cli
+
+    async def fake_async_main(_args) -> int:
+        cli._print("wrapper status")
+        os.write(1, b"client output\n")
+        return 0
+
+    args = parse_args(["--tap-client", "codex", "exec", "hello"])
+    monkeypatch.setattr(cli, "_async_main", fake_async_main)
+
+    code = await cli.async_main(args)
+
+    captured = capfd.readouterr()
+    assert code == 0
+    assert captured.out == "client output\n"
+    assert captured.err == "wrapper status\n"
+
+
+@pytest.mark.asyncio
+async def test_output_policy_does_not_redirect_concurrent_host_output(monkeypatch, capsys) -> None:
+    from claude_tap import cli
+
+    started = asyncio.Event()
+    release = asyncio.Event()
+
+    async def fake_async_main(_args) -> int:
+        cli._print("wrapper status")
+        started.set()
+        await release.wait()
+        return 0
+
+    args = parse_args(["--tap-client", "codex", "exec", "hello"])
+    monkeypatch.setattr(cli, "_async_main", fake_async_main)
+
+    task = asyncio.create_task(cli.async_main(args))
+    await started.wait()
+    print("host output")
+    release.set()
+    assert await task == 0
+
+    captured = capsys.readouterr()
+    assert captured.out == "host output\n"
+    assert captured.err == "wrapper status\n"
+
+
+@pytest.mark.asyncio
+async def test_output_policy_keeps_prompt_export_payload_on_stdout(monkeypatch, capsys) -> None:
+    from claude_tap import cli
+
+    class FakeStore:
+        def load_records(self, _session_id):
+            return [
+                {
+                    "request": {
+                        "body": {
+                            "model": "gpt-5",
+                            "instructions": "system instructions",
+                        }
+                    }
+                }
+            ]
+
+    async def fake_async_main(_args) -> int:
+        cli._print("wrapper status")
+        return cli._export_prompt_from_session(FakeStore(), "session", "-")
+
+    args = parse_args(
+        [
+            "--tap-client",
+            "codex",
+            "--tap-export-prompt",
+            "-",
+        ]
+    )
+    monkeypatch.setattr(cli, "_async_main", fake_async_main)
+
+    code = await cli.async_main(args)
+
+    captured = capsys.readouterr()
+    assert code == 0
+    assert "# System Prompt\n\nsystem instructions" in captured.out
+    assert "wrapper status" not in captured.out
+    assert captured.err == "wrapper status\n"
+
+
+@pytest.mark.asyncio
+async def test_run_client_codex_reverse_forces_builtin_provider_to_http(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+
+    async def fake_create_subprocess_exec(*cmd, **kwargs):
+        captured["cmd"] = cmd
+        captured["env"] = kwargs["env"]
+        return _DummyProc()
+
+    monkeypatch.setattr("claude_tap.cli.shutil.which", lambda _: "/tmp/codex")
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_create_subprocess_exec)
+    monkeypatch.setattr("sys.stdin.isatty", lambda: False)
+    monkeypatch.setattr("claude_tap.cli_clients._codex_selected_provider_base_url_key", lambda _: None)
+
+    code = await run_client(43123, ["exec", "hello"], client="codex", proxy_mode="reverse")
+
+    assert code == 0
+    assert captured["cmd"] == _builtin_codex_http_args("exec", "hello")
+    assert captured["env"]["OPENAI_BASE_URL"] == "http://127.0.0.1:43123/v1"
+
+
+@pytest.mark.asyncio
+async def test_run_client_codex_reverse_isolates_legacy_openai_base_override(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+
+    async def fake_create_subprocess_exec(*cmd, **kwargs):
+        captured["cmd"] = cmd
+        return _DummyProc()
+
+    monkeypatch.setattr("claude_tap.cli.shutil.which", lambda _: "/tmp/codex")
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_create_subprocess_exec)
+    monkeypatch.setattr("sys.stdin.isatty", lambda: False)
+    monkeypatch.setattr("claude_tap.cli_clients._codex_selected_provider_base_url_key", lambda _: None)
+
+    code = await run_client(
+        43123,
+        ["-c", 'openai_base_url="http://example.invalid/v1"', "exec", "hello"],
+        client="codex",
+        proxy_mode="reverse",
+    )
+
+    assert code == 0
+    assert captured["cmd"] == _builtin_codex_http_args(
+        "-c",
+        'openai_base_url="http://example.invalid/v1"',
+        "exec",
+        "hello",
+    )
+
+
+@pytest.mark.asyncio
+async def test_run_client_codex_reverse_replaces_builtin_provider_override(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+
+    async def fake_create_subprocess_exec(*cmd, **kwargs):
+        captured["cmd"] = cmd
+        return _DummyProc()
+
+    monkeypatch.setattr("claude_tap.cli.shutil.which", lambda _: "/tmp/codex")
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_create_subprocess_exec)
+    monkeypatch.setattr("sys.stdin.isatty", lambda: False)
+    monkeypatch.setattr("claude_tap.cli_clients._codex_selected_provider_base_url_key", lambda _: None)
+
+    code = await run_client(
+        43123,
+        ["--config", 'model_provider="openai"', "exec", "hello"],
+        client="codex",
+        proxy_mode="reverse",
+    )
+
+    assert code == 0
+    assert captured["cmd"] == _builtin_codex_http_args("exec", "hello")
+
+
+@pytest.mark.asyncio
+async def test_run_client_codex_forward_sets_rust_tls_ca_env(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+    ca_path = Path("/tmp/test-ca.pem")
+
+    async def fake_create_subprocess_exec(*cmd, **kwargs):
+        captured["env"] = kwargs["env"]
+        return _DummyProc()
+
+    monkeypatch.setattr("claude_tap.cli.shutil.which", lambda _: "/tmp/codex")
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_create_subprocess_exec)
+    monkeypatch.setattr("sys.stdin.isatty", lambda: False)
+
+    code = await run_client(43123, ["exec", "hello"], client="codex", proxy_mode="forward", ca_cert_path=ca_path)
+
+    assert code == 0
+    assert captured["env"]["HTTPS_PROXY"] == "http://127.0.0.1:43123"
+    assert captured["env"]["SSL_CERT_FILE"] == str(ca_path)
+    assert captured["env"]["CODEX_CA_CERTIFICATE"] == str(ca_path)
+
+
+def test_toml_dotted_key_segment_quotes_non_ascii_provider_ids() -> None:
+    assert _toml_dotted_key_segment("newapi") == "newapi"
+    assert _toml_dotted_key_segment("new-api") == "new-api"
+    assert _toml_dotted_key_segment("new.api") == '"new.api"'
+    assert _toml_dotted_key_segment("模型") == '"\\u6a21\\u578b"'
+
+
+def test_parse_args_codex_auto_detects_chatgpt_target(monkeypatch, tmp_path) -> None:
+    codex_home = tmp_path / "codex-home"
+    codex_home.mkdir()
+    (codex_home / "auth.json").write_text('{"auth_mode":"chatgpt"}\n', encoding="utf-8")
+    monkeypatch.setenv("CODEX_HOME", str(codex_home))
+
+    args = parse_args(["--tap-client", "codex"])
+
+    assert args.target == "https://chatgpt.com/backend-api/codex"
+
+
+def test_parse_args_codex_auto_detects_custom_provider_target(monkeypatch, tmp_path) -> None:
+    codex_home = tmp_path / "codex-home"
+    codex_home.mkdir()
+    (codex_home / "auth.json").write_text('{"OPENAI_API_KEY":"sk-test"}\n', encoding="utf-8")
+    (codex_home / "config.toml").write_text(
+        "\n".join(
+            [
+                'model = "gpt-5.4"',
+                'model_provider = "newapi"',
+                "",
+                "[model_providers.newapi]",
+                'base_url = "https://new-api.example.test/v1"',
+                'name = "Custom"',
+                "requires_openai_auth = true",
+                'wire_api = "responses"',
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("CODEX_HOME", str(codex_home))
+    monkeypatch.delenv("OPENAI_BASE_URL", raising=False)
+
+    args = parse_args(["--tap-client", "codex"])
+
+    assert args.target == "https://new-api.example.test/v1"
+
+
+def test_parse_args_codex_custom_provider_precedes_openai_base_url_env(monkeypatch, tmp_path) -> None:
+    codex_home = tmp_path / "codex-home"
+    codex_home.mkdir()
+    (codex_home / "auth.json").write_text('{"OPENAI_API_KEY":"sk-test"}\n', encoding="utf-8")
+    (codex_home / "config.toml").write_text(
+        "\n".join(
+            [
+                'model_provider = "newapi"',
+                "",
+                "[model_providers.newapi]",
+                'base_url = "https://new-api.example.test/v1"',
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("CODEX_HOME", str(codex_home))
+    monkeypatch.setenv("OPENAI_BASE_URL", "https://stale-env.example.test/v1")
+
+    args = parse_args(["--tap-client", "codex"])
+
+    assert args.target == "https://new-api.example.test/v1"
+
+
+def test_parse_args_codex_auto_detects_custom_provider_from_profile(monkeypatch, tmp_path) -> None:
+    codex_home = tmp_path / "codex-home"
+    codex_home.mkdir()
+    (codex_home / "auth.json").write_text('{"OPENAI_API_KEY":"sk-test"}\n', encoding="utf-8")
+    (codex_home / "config.toml").write_text(
+        "\n".join(
+            [
+                'model_provider = "openai"',
+                "",
+                "[profiles.staging]",
+                'model_provider = "newapi"',
+                "",
+                "[model_providers.openai]",
+                'base_url = "https://api.openai.com/v1"',
+                "",
+                "[model_providers.newapi]",
+                'base_url = "https://new-api.example.test/v1"',
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("CODEX_HOME", str(codex_home))
+    monkeypatch.delenv("OPENAI_BASE_URL", raising=False)
+
+    args = parse_args(["--tap-client", "codex", "--", "--profile", "staging"])
+
+    assert args.target == "https://new-api.example.test/v1"
+
+
+def test_parse_args_codex_auto_detects_custom_provider_from_profile_file(monkeypatch, tmp_path) -> None:
+    codex_home = tmp_path / "codex-home"
+    codex_home.mkdir()
+    (codex_home / "auth.json").write_text('{"auth_mode":"chatgpt"}\n', encoding="utf-8")
+    (codex_home / "config.toml").write_text(
+        "\n".join(
+            [
+                'model_provider = "openai"',
+                "",
+                "[model_providers.openai]",
+                'base_url = "https://api.openai.com/v1"',
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    (codex_home / "staging.config.toml").write_text(
+        "\n".join(
+            [
+                'model_provider = "newapi"',
+                "",
+                "[model_providers.newapi]",
+                'base_url = "https://new-api.example.test/v1"',
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("CODEX_HOME", str(codex_home))
+    monkeypatch.delenv("OPENAI_BASE_URL", raising=False)
+
+    args = parse_args(["--tap-client", "codex", "--", "--profile", "staging"])
+
+    assert args.target == "https://new-api.example.test/v1"
+
+
+def test_parse_args_codex_provider_base_url_override_precedes_config(monkeypatch, tmp_path) -> None:
+    codex_home = tmp_path / "codex-home"
+    codex_home.mkdir()
+    (codex_home / "config.toml").write_text(
+        "\n".join(
+            [
+                'model_provider = "newapi"',
+                "",
+                "[model_providers.newapi]",
+                'base_url = "https://production.example.test/v1"',
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("CODEX_HOME", str(codex_home))
+    monkeypatch.delenv("OPENAI_BASE_URL", raising=False)
+
+    args = parse_args(
+        [
+            "--tap-client",
+            "codex",
+            "--",
+            "-c",
+            'model_providers.newapi.base_url="https://staging.example.test/v1"',
+        ]
+    )
+
+    assert args.target == "https://staging.example.test/v1"
+
+
+def test_parse_args_codex_openai_base_url_override_precedes_default(monkeypatch, tmp_path) -> None:
+    codex_home = tmp_path / "codex-home"
+    codex_home.mkdir()
+    monkeypatch.setenv("CODEX_HOME", str(codex_home))
+    monkeypatch.delenv("OPENAI_BASE_URL", raising=False)
+
+    args = parse_args(["--tap-client", "codex", "--", "-c", 'openai_base_url="https://gateway.example.test/v1"'])
+
+    assert args.target == "https://gateway.example.test/v1"
+
+
+def test_parse_args_codex_auto_detects_custom_provider_from_model_provider_override(monkeypatch, tmp_path) -> None:
+    codex_home = tmp_path / "codex-home"
+    codex_home.mkdir()
+    (codex_home / "auth.json").write_text('{"OPENAI_API_KEY":"sk-test"}\n', encoding="utf-8")
+    (codex_home / "config.toml").write_text(
+        "\n".join(
+            [
+                'model_provider = "openai"',
+                "",
+                "[model_providers.openai]",
+                'base_url = "https://api.openai.com/v1"',
+                "",
+                "[model_providers.newapi]",
+                'base_url = "https://new-api.example.test/v1"',
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("CODEX_HOME", str(codex_home))
+    monkeypatch.delenv("OPENAI_BASE_URL", raising=False)
+
+    args = parse_args(["--tap-client", "codex", "--", "-c", 'model_provider="newapi"'])
+
+    assert args.target == "https://new-api.example.test/v1"
+
+
+@pytest.mark.asyncio
+async def test_run_client_codex_reverse_injects_selected_provider_base_url(monkeypatch, tmp_path) -> None:
+    captured: dict[str, object] = {}
+    codex_home = tmp_path / "codex-home"
+    codex_home.mkdir()
+    (codex_home / "config.toml").write_text(
+        "\n".join(
+            [
+                'model_provider = "newapi"',
+                "",
+                "[model_providers.newapi]",
+                'base_url = "https://new-api.example.test/v1"',
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    async def fake_create_subprocess_exec(*cmd, **kwargs):
+        captured["cmd"] = cmd
+        captured["env"] = kwargs["env"]
+        return _DummyProc()
+
+    monkeypatch.setenv("CODEX_HOME", str(codex_home))
+    monkeypatch.setattr("claude_tap.cli.shutil.which", lambda _: "/tmp/codex")
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_create_subprocess_exec)
+    monkeypatch.setattr("sys.stdin.isatty", lambda: False)
+
+    code = await run_client(43123, ["exec", "hello"], client="codex", proxy_mode="reverse")
+
+    assert code == 0
+    assert captured["cmd"] == _custom_codex_http_args("newapi", "exec", "hello")
+    assert captured["env"]["OPENAI_BASE_URL"] == "http://127.0.0.1:43123/v1"
+
+
+@pytest.mark.asyncio
+async def test_run_client_codex_reverse_injects_profile_provider_base_url(monkeypatch, tmp_path) -> None:
+    captured: dict[str, object] = {}
+    codex_home = tmp_path / "codex-home"
+    codex_home.mkdir()
+    (codex_home / "config.toml").write_text(
+        "\n".join(
+            [
+                'model_provider = "openai"',
+                "",
+                "[profiles.staging]",
+                'model_provider = "newapi"',
+                "",
+                "[model_providers.openai]",
+                'base_url = "https://api.openai.com/v1"',
+                "",
+                "[model_providers.newapi]",
+                'base_url = "https://new-api.example.test/v1"',
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    async def fake_create_subprocess_exec(*cmd, **kwargs):
+        captured["cmd"] = cmd
+        return _DummyProc()
+
+    monkeypatch.setenv("CODEX_HOME", str(codex_home))
+    monkeypatch.setattr("claude_tap.cli.shutil.which", lambda _: "/tmp/codex")
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_create_subprocess_exec)
+    monkeypatch.setattr("sys.stdin.isatty", lambda: False)
+
+    code = await run_client(43123, ["--profile", "staging", "exec", "hello"], client="codex", proxy_mode="reverse")
+
+    assert code == 0
+    assert captured["cmd"] == _custom_codex_http_args("newapi", "--profile", "staging", "exec", "hello")
+
+
+@pytest.mark.asyncio
+async def test_run_client_codex_reverse_injects_profile_file_provider_base_url(monkeypatch, tmp_path) -> None:
+    captured: dict[str, object] = {}
+    codex_home = tmp_path / "codex-home"
+    codex_home.mkdir()
+    (codex_home / "config.toml").write_text(
+        "\n".join(
+            [
+                'model_provider = "openai"',
+                "",
+                "[model_providers.openai]",
+                'base_url = "https://api.openai.com/v1"',
+                "",
+                "[model_providers.newapi]",
+                'base_url = "https://new-api.example.test/v1"',
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    (codex_home / "staging.config.toml").write_text('model_provider = "newapi"\n', encoding="utf-8")
+
+    async def fake_create_subprocess_exec(*cmd, **kwargs):
+        captured["cmd"] = cmd
+        return _DummyProc()
+
+    monkeypatch.setenv("CODEX_HOME", str(codex_home))
+    monkeypatch.setattr("claude_tap.cli.shutil.which", lambda _: "/tmp/codex")
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_create_subprocess_exec)
+    monkeypatch.setattr("sys.stdin.isatty", lambda: False)
+
+    code = await run_client(43123, ["--profile", "staging", "exec", "hello"], client="codex", proxy_mode="reverse")
+
+    assert code == 0
+    assert captured["cmd"] == _custom_codex_http_args("newapi", "--profile", "staging", "exec", "hello")
+
+
+@pytest.mark.asyncio
+async def test_run_client_codex_reverse_injects_provider_from_model_provider_override(monkeypatch, tmp_path) -> None:
+    captured: dict[str, object] = {}
+    codex_home = tmp_path / "codex-home"
+    codex_home.mkdir()
+    (codex_home / "config.toml").write_text(
+        "\n".join(
+            [
+                'model_provider = "openai"',
+                "",
+                "[model_providers.openai]",
+                'base_url = "https://api.openai.com/v1"',
+                "",
+                "[model_providers.newapi]",
+                'base_url = "https://new-api.example.test/v1"',
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    async def fake_create_subprocess_exec(*cmd, **kwargs):
+        captured["cmd"] = cmd
+        return _DummyProc()
+
+    monkeypatch.setenv("CODEX_HOME", str(codex_home))
+    monkeypatch.setattr("claude_tap.cli.shutil.which", lambda _: "/tmp/codex")
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_create_subprocess_exec)
+    monkeypatch.setattr("sys.stdin.isatty", lambda: False)
+
+    code = await run_client(
+        43123,
+        ["-c", 'model_provider="newapi"', "exec", "hello"],
+        client="codex",
+        proxy_mode="reverse",
+    )
+
+    assert code == 0
+    assert captured["cmd"] == _custom_codex_http_args(
+        "newapi",
+        "-c",
+        'model_provider="newapi"',
+        "exec",
+        "hello",
+    )
+
+
+@pytest.mark.asyncio
+async def test_run_client_codex_reverse_quotes_non_ascii_provider_base_url_key(monkeypatch, tmp_path) -> None:
+    captured: dict[str, object] = {}
+    codex_home = tmp_path / "codex-home"
+    codex_home.mkdir()
+    (codex_home / "config.toml").write_text(
+        "\n".join(
+            [
+                'model_provider = "模型"',
+                "",
+                '[model_providers."模型"]',
+                'base_url = "https://new-api.example.test/v1"',
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    async def fake_create_subprocess_exec(*cmd, **kwargs):
+        captured["cmd"] = cmd
+        return _DummyProc()
+
+    monkeypatch.setenv("CODEX_HOME", str(codex_home))
+    monkeypatch.setattr("claude_tap.cli.shutil.which", lambda _: "/tmp/codex")
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_create_subprocess_exec)
+    monkeypatch.setattr("sys.stdin.isatty", lambda: False)
+
+    code = await run_client(43123, ["exec", "hello"], client="codex", proxy_mode="reverse")
+
+    assert code == 0
+    assert captured["cmd"] == _custom_codex_http_args('"\\u6a21\\u578b"', "exec", "hello")
+
+
+@pytest.mark.asyncio
+async def test_run_client_codex_reverse_replaces_conflicting_provider_overrides(monkeypatch, tmp_path) -> None:
+    captured: dict[str, object] = {}
+    codex_home = tmp_path / "codex-home"
+    codex_home.mkdir()
+    (codex_home / "config.toml").write_text(
+        "\n".join(
+            [
+                'model_provider = "newapi"',
+                "",
+                "[model_providers.newapi]",
+                'base_url = "https://new-api.example.test/v1"',
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    async def fake_create_subprocess_exec(*cmd, **kwargs):
+        captured["cmd"] = cmd
+        return _DummyProc()
+
+    monkeypatch.setenv("CODEX_HOME", str(codex_home))
+    monkeypatch.setattr("claude_tap.cli.shutil.which", lambda _: "/tmp/codex")
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_create_subprocess_exec)
+    monkeypatch.setattr("sys.stdin.isatty", lambda: False)
+
+    code = await run_client(
+        43123,
+        [
+            "-c",
+            'model_providers.newapi.base_url="http://example.invalid/v1"',
+            "--config=model_providers.newapi.supports_websockets=true",
+            "exec",
+            "hello",
+        ],
+        client="codex",
+        proxy_mode="reverse",
+    )
+
+    assert code == 0
+    assert captured["cmd"] == _custom_codex_http_args("newapi", "exec", "hello")
+
+
+def test_parse_args_claude_uses_env_base_url(monkeypatch) -> None:
+    monkeypatch.setenv("ANTHROPIC_BASE_URL", "https://gateway.example.test/v1/anthropic")
+
+    args = parse_args([])
+
+    assert args.target == "https://gateway.example.test/v1/anthropic"
+
+
+def test_parse_args_claude_uses_project_settings_base_url(monkeypatch, tmp_path) -> None:
+    monkeypatch.delenv("ANTHROPIC_BASE_URL", raising=False)
+    home = tmp_path / "home"
+    project = tmp_path / "project"
+    home_settings = home / ".claude"
+    project_settings = project / ".claude"
+    home_settings.mkdir(parents=True)
+    project_settings.mkdir(parents=True)
+    (home_settings / "settings.json").write_text(
+        '{"env":{"ANTHROPIC_BASE_URL":"https://global.example.test/v1/anthropic"}}\n',
+        encoding="utf-8",
+    )
+    (project_settings / "settings.local.json").write_text(
+        '{"env":{"ANTHROPIC_BASE_URL":"https://project.example.test/v1/anthropic"}}\n',
+        encoding="utf-8",
+    )
+    monkeypatch.setattr("pathlib.Path.home", lambda: home)
+    monkeypatch.chdir(project)
+
+    args = parse_args([])
+
+    assert args.target == "https://project.example.test/v1/anthropic"
+
+
+def test_parse_args_claude_falls_back_to_default_target(monkeypatch, tmp_path) -> None:
+    monkeypatch.delenv("ANTHROPIC_BASE_URL", raising=False)
+    monkeypatch.setattr("pathlib.Path.home", lambda: tmp_path / "home")
+    monkeypatch.chdir(tmp_path)
+
+    args = parse_args([])
+
+    assert args.target == "https://api.anthropic.com"
+
+
+def test_codex_reverse_trace_options_allow_websocket() -> None:
+    options = _reverse_proxy_trace_options("codex", "https://chatgpt.com/backend-api/codex")
+
+    assert options == {
+        "strip_path_prefix": "/v1",
+        "force_http": False,
+    }

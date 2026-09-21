@@ -1,0 +1,167 @@
+from __future__ import annotations
+
+import pytest
+
+from claude_tap.trace import TraceWriter
+from claude_tap.usage import normalize_usage
+
+
+def test_normalize_usage_maps_responses_cached_tokens() -> None:
+    usage = normalize_usage(
+        {
+            "input_tokens": 11767,
+            "input_tokens_details": {"cached_tokens": 11648},
+            "output_tokens": 6,
+            "output_tokens_details": {"reasoning_tokens": 0},
+            "total_tokens": 11773,
+        }
+    )
+
+    assert usage["input_tokens"] == 11767
+    assert usage["output_tokens"] == 6
+    assert usage["cache_read_input_tokens"] == 11648
+
+
+def test_normalize_usage_maps_chat_completion_cached_tokens() -> None:
+    usage = normalize_usage(
+        {
+            "prompt_tokens": 8,
+            "completion_tokens": 5,
+            "prompt_tokens_details": {"cached_tokens": 3},
+            "total_tokens": 13,
+        }
+    )
+
+    assert usage["input_tokens"] == 8
+    assert usage["output_tokens"] == 5
+    assert usage["cache_read_input_tokens"] == 3
+
+
+def test_normalize_usage_prefers_openai_tokens_over_zero_aliases() -> None:
+    usage = normalize_usage(
+        {
+            "prompt_tokens": 743,
+            "completion_tokens": 95,
+            "total_tokens": 838,
+            "prompt_tokens_details": {"cached_tokens": 0},
+            "input_tokens": 0,
+            "output_tokens": 0,
+        }
+    )
+
+    assert usage["input_tokens"] == 743
+    assert usage["output_tokens"] == 95
+    assert usage["total_tokens"] == 838
+    assert usage["cache_read_input_tokens"] == 0
+
+
+def test_normalize_usage_maps_bedrock_converse_tokens() -> None:
+    usage = normalize_usage(
+        {
+            "inputTokens": 12,
+            "outputTokens": 3,
+            "totalTokens": 15,
+            "cacheReadInputTokens": 7,
+            "cacheWriteInputTokens": 5,
+        }
+    )
+
+    assert usage["input_tokens"] == 12
+    assert usage["output_tokens"] == 3
+    assert usage["total_tokens"] == 15
+    assert usage["cache_read_input_tokens"] == 7
+    assert usage["cache_creation_input_tokens"] == 5
+
+
+def test_normalize_usage_preserves_explicit_anthropic_cache_read() -> None:
+    usage = normalize_usage(
+        {
+            "input_tokens": 10,
+            "output_tokens": 2,
+            "cache_read_input_tokens": 4,
+            "input_tokens_details": {"cached_tokens": 9},
+        }
+    )
+
+    assert usage["cache_read_input_tokens"] == 4
+
+
+def test_normalize_usage_maps_direct_deepseek_prompt_cache_hit_tokens() -> None:
+    """Direct DeepSeek names its two prompt buckets outright.
+
+    Both are counted inside prompt_tokens, so the bucket is embedded: billing a
+    900-of-1000 hit as fresh input costs an order of magnitude more than the
+    cache-read rate, and the viewer reported no hit at all.
+    """
+    usage = normalize_usage(
+        {
+            "prompt_tokens": 1_000,
+            "completion_tokens": 50,
+            "prompt_cache_hit_tokens": 900,
+            "prompt_cache_miss_tokens": 100,
+        }
+    )
+
+    assert usage["input_tokens"] == 1_000
+    assert usage["cache_read_input_tokens"] == 900
+    assert usage["cache_read_in_input"] is True
+
+
+def test_a_nested_cached_tokens_detail_still_wins_over_the_deepseek_alias() -> None:
+    """The alias is a fallback, so a details object keeps precedence."""
+    usage = normalize_usage(
+        {
+            "prompt_tokens": 1_000,
+            "completion_tokens": 50,
+            "prompt_tokens_details": {"cached_tokens": 700},
+            "prompt_cache_hit_tokens": 900,
+        }
+    )
+
+    assert usage["cache_read_input_tokens"] == 700
+
+
+def test_normalize_usage_drops_null_token_fields_before_alias_mapping() -> None:
+    usage = normalize_usage(
+        {
+            "input_tokens": None,
+            "output_tokens": None,
+            "prompt_tokens": 8,
+            "completion_tokens": 5,
+            "cache_creation_input_tokens": None,
+        }
+    )
+
+    assert usage["input_tokens"] == 8
+    assert usage["output_tokens"] == 5
+    assert "cache_creation_input_tokens" not in usage
+
+
+@pytest.mark.asyncio
+async def test_trace_writer_counts_responses_cached_tokens(trace_db) -> None:
+    from claude_tap.trace_store import get_trace_store
+
+    session_id = get_trace_store().create_session()
+    writer = TraceWriter(session_id)
+    try:
+        await writer.write(
+            {
+                "request": {"body": {"model": "gpt-5.4"}},
+                "response": {
+                    "body": {
+                        "usage": {
+                            "input_tokens": 11767,
+                            "input_tokens_details": {"cached_tokens": 11648},
+                            "output_tokens": 6,
+                        }
+                    }
+                },
+            }
+        )
+
+        summary = writer.get_summary()
+        assert summary["input_tokens"] == 11767
+        assert summary["output_tokens"] == 6
+        assert summary["cache_read_tokens"] == 11648
+    finally:
+        writer.close()

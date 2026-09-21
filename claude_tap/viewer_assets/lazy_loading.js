@@ -1,0 +1,245 @@
+/* ─── Lazy loading infrastructure ─── */
+const LAZY_THRESHOLD = 50;
+let lazyMode = false;
+let rawLines = null; // array of raw JSON strings, populated on first access
+const entryCache = new Map(); // index -> parsed full entry
+const remoteEntryPromises = new Map(); // index -> pending record fetch
+
+function getRawLines() {
+  if (rawLines) return rawLines;
+  const el = document.getElementById('trace-raw');
+  if (!el) return [];
+  const text = el.textContent;
+  // Free DOM node memory — we no longer need the script element
+  el.remove();
+  rawLines = text.split('\n').filter(l => l.trim());
+  return rawLines;
+}
+
+function hasEmbeddedRawLines() {
+  return !!rawLines || !!document.getElementById('trace-raw');
+}
+
+function buildStubEntry(meta, rawIdx) {
+  // Build an entry object with the same shape as real entries so existing
+  // sidebar rendering code works unchanged. Nested paths are constructed
+  // to satisfy property access patterns (e.g. entry.request.body.model).
+  const usage = {};
+  if (meta.input_tokens) usage.input_tokens = meta.input_tokens;
+  if (meta.output_tokens) usage.output_tokens = meta.output_tokens;
+  if (meta.cache_read_input_tokens) {
+    usage.cache_read_input_tokens = meta.cache_read_input_tokens;
+    /* Python already decided this when it normalized the captured usage, so take
+       its answer instead of guessing from the model name. The old inference read
+       cache_creation_input_tokens as proof of a separate bucket, but metadata
+       carries that key even at zero, so every embedded-cache turn was misread:
+       a 51K-input/50K-cached OpenAI turn showed a ~50% hit rate against a
+       101K denominator instead of 98% against 51K.
+
+       Fall back to the name check only for metadata written before the flag
+       existed, so an older trace keeps the behaviour it was generated with. */
+    if (typeof meta.cache_read_in_input === 'boolean') {
+      usage._cache_read_in_input = meta.cache_read_in_input;
+    } else {
+      const m = (meta.model || '').toLowerCase();
+      usage._cache_read_in_input = !(m.includes('claude') || m.includes('anthropic') || m.includes('bedrock'));
+    }
+  }
+  if (meta.cache_creation_input_tokens) usage.cache_creation_input_tokens = meta.cache_creation_input_tokens;
+
+  // Build a minimal system field to support task fingerprinting
+  const body = { model: meta.model || '' };
+  if (meta.codex_app_session_id) {
+    body.metadata = { codex_app_session_id: meta.codex_app_session_id };
+  }
+  if (typeof meta.request_generate === 'boolean') body.generate = meta.request_generate;
+  if (meta.has_system && meta.sys_hint) {
+    body.system = meta.sys_hint;
+  }
+  if (meta.tool_names && meta.tool_names.length) {
+    body.tools = meta.tool_names.map(n => ({ name: n }));
+  }
+  // Preserve user prompt text for sidebar session grouping in lazy/stub mode.
+  // Full messages are not embedded in stubs; without this, Cursor transcript
+  // sessions (> LAZY_THRESHOLD) show empty "User Input" group headers.
+  if (meta.session_user_text) {
+    body.messages = [{ role: 'user', content: meta.session_user_text }];
+  }
+  // Preserve Cursor turn ids so repeated identical prompts stay in separate
+  // sidebar groups when only stubs are available.
+  if (typeof meta.cursor_turn === 'number') body.cursor_turn = meta.cursor_turn;
+  if (typeof meta.cursor_step === 'number') body.cursor_step = meta.cursor_step;
+
+  // Build minimal response content for tool filter
+  const respContent = [];
+  if (meta.response_tool_names && meta.response_tool_names.length) {
+    meta.response_tool_names.forEach(n => respContent.push({ type: 'tool_use', name: n }));
+  }
+
+  const responseBody = {
+    /* Only attach usage when a bucket actually carried tokens. An empty object is
+       truthy, so installing it unconditionally made every usage-free turn --
+       /v1/messages/count_tokens above all -- read as a turn whose price is
+       unknown, inflating the "no known price" count in lazy mode only. */
+    usage: Object.keys(usage).length ? usage : undefined,
+    content: respContent.length ? respContent : undefined,
+    error: meta.error_message ? { message: meta.error_message } : undefined,
+  };
+  if (typeof meta.response_generate === 'boolean') responseBody.generate = meta.response_generate;
+  if (meta.response_output_count) responseBody.output = Array.from({ length: meta.response_output_count }, () => ({}));
+
+  const stub = {
+    _isStub: true,
+    _rawIdx: rawIdx,
+    _entry_index: rawIdx,
+    turn: meta.turn,
+    request_id: meta.request_id || '',
+    timestamp: meta.timestamp || '',
+    duration_ms: meta.duration_ms || 0,
+    transport: meta.transport || '',
+    _session_user_text: meta.session_user_text || '',
+    /* Provenance chosen by `_session_user_title` in viewer.py. `body.messages`
+       above is a bare string, so classifying it again here cannot see which block
+       the title came from: a harness turn titled from a later pasted block would
+       come back as `payload` and the group would change its badge above
+       LAZY_THRESHOLD. Absent means `human`, the classifier's own default. */
+    _session_user_origin: meta.session_user_origin || '',
+    request: {
+      method: meta.method || '',
+      path: meta.path || '',
+      headers: meta.codex_app_session_id ? { 'x-codex-app-session-id': meta.codex_app_session_id } : {},
+      body: body,
+    },
+    response: {
+      status: meta.status || 0,
+      body: responseBody,
+    },
+  };
+  /* In lazy mode the cost Python computed rides on each metadata record and
+     EMBEDDED_COST_INDEX is empty, so a stub that drops these fields makes the
+     cost stats read zero for the whole trace. */
+  /* Subscription turns carry no cost on purpose, and the flag has to survive
+     into the stub or they get counted as "price unknown" instead. */
+  if (meta.subscription === true) stub.subscription = true;
+  if (typeof meta.cost === 'number') stub.cost = meta.cost;
+  if (typeof meta.uncached_cost === 'number') stub.uncached_cost = meta.uncached_cost;
+  if (typeof meta.saved === 'number') stub.saved = meta.saved;
+  if (meta.priced_model) stub.priced_model = meta.priced_model;
+  if (typeof meta.long_context === 'boolean') stub.long_context = meta.long_context;
+  return stub;
+}
+
+function toolDisplayName(td) {
+  if (!td || typeof td !== 'object') return '';
+  const candidates = [
+    td.name,
+    td.function && typeof td.function === 'object' ? td.function.name : null,
+    td.id,
+    td.type
+  ];
+  for (const value of candidates) {
+    if (typeof value === 'string' && value) return value;
+  }
+  return '';
+}
+
+function toolDescription(td) {
+  if (!td || typeof td !== 'object') return '';
+  const desc = td.description || (td.function && typeof td.function === 'object' ? td.function.description : '');
+  return typeof desc === 'string' ? desc : '';
+}
+
+function toolSchema(td) {
+  if (!td || typeof td !== 'object') return {};
+  return td.input_schema || td.parameters || (td.function && typeof td.function === 'object' ? td.function.parameters : null) || {};
+}
+
+function getFullEntry(entry) {
+  if (!entry._isStub) return entry;
+  const idx = entry._rawIdx;
+  if (entryCache.has(idx)) return entryCache.get(idx);
+  const lines = getRawLines();
+  if (idx < 0 || idx >= lines.length) return entry;
+  try {
+    const full = JSON.parse(lines[idx]);
+    entryCache.set(idx, full);
+    return full;
+  } catch (e) {
+    console.error('Failed to parse entry at index', idx, e);
+    return entry;
+  }
+}
+
+function shouldFetchRemoteEntry(entry) {
+  return !!(entry && entry._isStub && TRACE_RECORDS_API && !hasEmbeddedRawLines());
+}
+
+function remoteRecordUrl(idx) {
+  const sep = TRACE_RECORDS_API.includes('?') ? '&' : '?';
+  return `${TRACE_RECORDS_API}${sep}offset=${encodeURIComponent(idx)}&limit=1`;
+}
+
+async function fetchRemoteEntry(entry) {
+  if (!shouldFetchRemoteEntry(entry)) return getFullEntry(entry);
+  const idx = entry._rawIdx;
+  if (entryCache.has(idx)) return entryCache.get(idx);
+  if (!remoteEntryPromises.has(idx)) {
+    remoteEntryPromises.set(idx, fetch(remoteRecordUrl(idx))
+      .then(async resp => {
+        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+        const payload = await resp.json();
+        const record = Array.isArray(payload.records) ? payload.records[0] : null;
+        if (!record || typeof record !== 'object') return entry;
+        entryCache.set(idx, record);
+        return record;
+      })
+      .catch(err => {
+        remoteEntryPromises.delete(idx);
+        throw err;
+      }));
+  }
+  return remoteEntryPromises.get(idx);
+}
+
+function withDisplayFields(full, entry) {
+  return {
+    ...full,
+    _entry_index: entry._entry_index,
+    display_turn: entry.display_turn,
+    capture_turn: entry.capture_turn,
+    record_index: entry.record_index,
+    websocket_response_index: entry.websocket_response_index,
+  };
+}
+
+function resolveEntryForDetail(entry) {
+  if (!entry || !entry._isStub) return entry;
+  return withDisplayFields(getFullEntry(entry), entry);
+}
+
+async function resolveEntryForDetailAsync(entry) {
+  if (!entry || !entry._isStub) return entry;
+  return withDisplayFields(await fetchRemoteEntry(entry), entry);
+}
+
+/* ─── Virtual scroll state ─── */
+let virtualMode = false;
+const VS_ITEM_HEIGHT = 68;
+const VS_BUFFER = 10;
+let vsFilteredItems = []; // {entry, idx} pairs for virtual scroll
+
+const globalSearchState = {
+  open: false,
+  query: '',
+  queries: [],
+  matchCounts: [],
+  totalMatches: 0,
+  currentMatch: -1,
+  textCache: new Map(),
+  recalcTimer: 0,
+};
+const TRACE_JSONL_PATH = typeof __TRACE_JSONL_PATH__ !== 'undefined' ? __TRACE_JSONL_PATH__ : '';
+const TRACE_HTML_PATH = typeof __TRACE_HTML_PATH__ !== 'undefined' ? __TRACE_HTML_PATH__ : '';
+const TRACE_RECORDS_API = typeof __TRACE_RECORDS_API__ !== 'undefined' ? __TRACE_RECORDS_API__ : '';
+const CLAUDE_TAP_VERSION = typeof __CLAUDE_TAP_VERSION__ !== 'undefined' ? __CLAUDE_TAP_VERSION__ : '';
+const TRACE_SESSION_EXPORTS = typeof __TRACE_SESSION_EXPORTS__ !== 'undefined' ? __TRACE_SESSION_EXPORTS__ : null;
