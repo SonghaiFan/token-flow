@@ -1142,62 +1142,176 @@ function buildTurnTokenMap(items, columnWidth = 152, columnGap = 40, mapHeight =
   return { turns, width: 48 + turns.length * columnWidth + Math.max(0, turns.length - 1) * columnGap, height: 620 };
 }
 
+function tokenTurnSummary(entry, catalog = buildAttributionCatalog()) {
+  const categories = attributionTokenCategories(entry, catalog);
+  const input = categories.reduce((sum, category) => sum + category.tokens, 0);
+  const cached = categories.reduce((sum, category) => sum + category.cached, 0);
+  return { categories, input, cached, fresh: Math.max(0, input - cached) };
+}
+
+function compactTokenNumber(value) {
+  const amount = Number(value) || 0;
+  if (amount >= 1000000) return `${(amount / 1000000).toFixed(amount >= 10000000 ? 0 : 1)}m`;
+  if (amount >= 1000) return `${(amount / 1000).toFixed(amount >= 10000 ? 1 : 2)}k`;
+  return amount.toLocaleString();
+}
+
+function visualDashboardModel(items) {
+  const catalog = buildAttributionCatalog();
+  const summaries = items.map(item => ({ ...item, ...tokenTurnSummary(item.entry, catalog) }));
+  let selectedPosition = summaries.findIndex(item => item.idx === activeIdx);
+  if (selectedPosition < 0) selectedPosition = 0;
+  const selected = summaries[selectedPosition] || null;
+  const previous = selectedPosition > 0 ? summaries[selectedPosition - 1] : null;
+  return { summaries, selectedPosition, selected, previous };
+}
+
+function visualTimelineMarkup(model) {
+  return `<div class="token-timeline" role="tablist" aria-label="${esc(t('turn'))}">${model.summaries.map((turn, position) => {
+    const active = position === model.selectedPosition;
+    return `<button class="token-timeline-turn${active ? ' active' : ''}" type="button" role="tab" aria-selected="${active ? 'true' : 'false'}" data-idx="${turn.idx}">
+      <span class="timeline-index">${position + 1}</span>
+      <span class="timeline-value">${compactTokenNumber(turn.input)}</span>
+    </button>`;
+  }).join('')}</div>`;
+}
+
+function visualMetricsMarkup(model) {
+  const selected = model.selected;
+  if (!selected) return '';
+  const hitRate = selected.input ? selected.cached / selected.input * 100 : 0;
+  const delta = model.previous ? selected.fresh - model.previous.fresh : 0;
+  const deltaClass = !model.previous || delta === 0 ? 'neutral' : delta < 0 ? 'good' : 'bad';
+  const deltaText = model.previous ? `${delta > 0 ? '+' : ''}${delta.toLocaleString()}` : 'N/A';
+  return `<div class="token-kpis">
+    <div class="token-kpi"><strong>${selected.input.toLocaleString()}</strong><span>${esc(t('tok_input'))} ${esc(t('tok'))}</span></div>
+    <div class="token-kpi"><strong>${hitRate.toFixed(0)}%</strong><span>${esc(t('token_cache_hit'))} (${selected.cached.toLocaleString()})</span></div>
+    <div class="token-kpi"><strong>${selected.fresh.toLocaleString()}</strong><span>${esc(t('flow_fresh'))}</span></div>
+    <div class="token-kpi ${deltaClass}"><strong>${deltaText}</strong><span>${esc(t('token_vs_previous'))}</span></div>
+  </div>`;
+}
+
+function visualDashboardHeader(model) {
+  const selected = model.selected;
+  if (!selected) return '';
+  return `<div class="token-dashboard-header">
+    <div class="token-breadcrumb"><span>Trace</span><i>/</i><strong>${esc(`${t('turn')} ${model.selectedPosition + 1} ${t('token_of')} ${model.summaries.length}`)}</strong></div>
+    ${visualTimelineMarkup(model)}
+    ${visualMetricsMarkup(model)}
+  </div>`;
+}
+
+function bindVisualTimeline(root) {
+  root.querySelectorAll('.token-timeline-turn').forEach(button => {
+    button.addEventListener('click', () => {
+      activeIdx = parseInt(button.dataset.idx);
+      selectedTokenCategoryId = null;
+      renderSidebar(true);
+      updatePositionIndicator();
+    });
+  });
+}
+
+function categoryInspectorMarkup(category, current, previous) {
+  if (!category || !current) {
+    return `<div class="token-inspector-empty">${esc(t('token_no_attribution'))}</div>`;
+  }
+  const share = current.input ? category.tokens / current.input * 100 : 0;
+  const cachedShare = category.tokens ? category.cached / category.tokens * 100 : 0;
+  const fresh = freshCategoryTokens(category);
+  const prior = previous?.categories.find(item => item.id === category.id);
+  const delta = previous ? category.tokens - (prior?.tokens || 0) : null;
+  return `<div class="token-inspector-content">
+    <div class="token-inspector-heading"><div><span>${esc(t('token_category'))}</span><h3>${esc(category.label)}</h3></div></div>
+    <div class="token-inspector-total"><strong>${category.tokens.toLocaleString()}</strong><span>${share.toFixed(1)}% ${esc(t('token_of_total'))}</span></div>
+    <div class="token-split-bar" aria-label="${esc(`${t('token_cache_hit')} ${cachedShare.toFixed(1)}%`)}"><span class="cached" style="width:${cachedShare}%"></span><span class="fresh" style="width:${100 - cachedShare}%"></span></div>
+    <dl class="token-inspector-rows">
+      <div><dt><i class="cached"></i>${esc(t('tok_cache_read'))}</dt><dd><strong>${category.cached.toLocaleString()}</strong><span>${cachedShare.toFixed(1)}%</span></dd></div>
+      <div><dt><i class="fresh"></i>${esc(t('flow_fresh'))}</dt><dd><strong>${fresh.toLocaleString()}</strong><span>${(100 - cachedShare).toFixed(1)}%</span></dd></div>
+      <div><dt>${esc(t('token_vs_previous'))}</dt><dd class="${delta === null ? '' : delta < 0 ? 'good' : delta > 0 ? 'bad' : ''}"><strong>${delta === null ? 'N/A' : `${delta > 0 ? '+' : ''}${delta.toLocaleString()}`}</strong></dd></div>
+    </dl>
+  </div>`;
+}
+
+function turnInspectorMarkup(turn) {
+  if (!turn) return `<div class="token-inspector-empty">${esc(t('token_no_attribution'))}</div>`;
+  const ranked = [...turn.categories].sort((a, b) => freshCategoryTokens(b) - freshCategoryTokens(a)).slice(0, 7);
+  return `<div class="token-inspector-content">
+    <div class="token-inspector-heading"><div><span>${esc(t('turn'))}</span><h3>${esc(`${t('turn')} ${displayTurnLabel(turn.entry)}`)}</h3></div></div>
+    <div class="token-inspector-total"><strong>${turn.fresh.toLocaleString()}</strong><span>${esc(t('flow_fresh'))}</span></div>
+    <dl class="token-inspector-rows compact">
+      ${ranked.map(category => `<div><dt><i style="background:${category.color}"></i>${esc(sessionTextSnippet(category.label, 28))}</dt><dd><strong>${freshCategoryTokens(category).toLocaleString()}</strong></dd></div>`).join('')}
+    </dl>
+  </div>`;
+}
+
 function renderTreemap(sb, preserveDetail) {
   document.body.classList.add('token-visual-mode');
   sb.className = 'sidebar token-map';
   sb.innerHTML = '';
   virtualMode = false;
   const items = filtered.map((entry, idx) => ({ entry, idx }));
-  const map = buildTurnTokenMap(items);
+  const model = visualDashboardModel(items);
+  if (!model.selected) {
+    sb.innerHTML = `<div class="empty-state">${esc(t('empty_state'))}</div>`;
+    return;
+  }
+  activeIdx = model.selected.idx;
+  const mapWidth = 920;
+  const mapHeight = 430;
+  const categories = binaryTreemapLayout(model.selected.categories, { x: 0, y: 0, width: mapWidth, height: mapHeight });
+  const initialCategory = categories.find(category => category.id === selectedTokenCategoryId) || categories[0];
+  selectedTokenCategoryId = initialCategory?.id || null;
 
-  const legend = document.createElement('div');
-  legend.className = 'flow-legend';
-  legend.innerHTML = `<span><i class="flow-swatch fresh"></i>${esc(t('tok_input'))}</span><small>${esc(t('treemap_note'))}</small>`;
-  sb.appendChild(legend);
-
-  const scroller = document.createElement('div');
-  scroller.className = 'token-flow-scroll';
+  const workspace = document.createElement('div');
+  workspace.className = 'token-dashboard';
+  workspace.innerHTML = visualDashboardHeader(model) + `<div class="token-dashboard-grid">
+    <section class="token-chart-panel">
+      <div class="token-panel-heading"><div><h2>${esc(t('treemap_title'))}</h2><p>${esc(t('treemap_note'))}</p></div><div class="token-legend"><span><i class="cached"></i>${esc(t('tok_cache_read'))}</span><span><i class="fresh"></i>${esc(t('flow_fresh'))}</span></div></div>
+      <div class="token-chart-canvas"></div>
+    </section>
+    <aside class="token-inspector" id="token-inspector">${categoryInspectorMarkup(initialCategory, model.selected, model.previous)}</aside>
+  </div>`;
+  const scroller = workspace.querySelector('.token-chart-canvas');
   const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
-  svg.setAttribute('class', 'token-flow-svg');
-  svg.setAttribute('viewBox', `0 0 ${map.width} ${map.height}`);
-  svg.setAttribute('width', map.width);
-  svg.setAttribute('height', map.height);
+  svg.setAttribute('class', 'token-treemap-svg');
+  svg.setAttribute('viewBox', `0 0 ${mapWidth} ${mapHeight}`);
+  svg.setAttribute('width', mapWidth);
+  svg.setAttribute('height', mapHeight);
   svg.setAttribute('role', 'img');
   svg.setAttribute('aria-label', t('treemap_title'));
-
-  const turns = map.turns.map(turn => {
-    const input = turn.categories.reduce((sum, category) => sum + category.tokens, 0);
-    const heading = `<text class="flow-turn-label" x="${turn.x}" y="25">${esc(`${t('turn')} ${displayTurnLabel(turn.entry)}`)}</text><text class="flow-token-total" x="${turn.x}" y="42">${input.toLocaleString()} input</text>`;
-    const tiles = turn.categories.map(category => {
-      const enoughForLabel = category.width >= 42 && category.height >= 25;
-      const enoughForValue = category.width >= 58 && category.height >= 42;
-      const share = input > 0 ? category.tokens / input * 100 : 0;
-      const summary = `${category.label}: ${category.tokens.toLocaleString()} ${t('tok')} · ${share.toFixed(1)}%`;
-      return `<g class="token-category-tile" data-idx="${turn.idx}" tabindex="0" role="button" aria-label="${esc(summary)}">
-        <rect class="category-base" x="${category.x}" y="${category.y}" width="${category.width}" height="${category.height}" style="fill:${category.color}"></rect>
-        <rect class="category-outline" x="${category.x}" y="${category.y}" width="${category.width}" height="${category.height}"></rect>
-        ${enoughForLabel ? `<text class="category-label" x="${category.x + 6}" y="${category.y + 15}">${esc(sessionTextSnippet(category.label, Math.max(8, Math.floor(category.width / 7))))}</text>` : ''}
-        ${enoughForValue ? `<text class="category-value" x="${category.x + 6}" y="${category.y + 29}">${category.tokens.toLocaleString()}</text>` : ''}
-        <title>${esc(summary)}</title>
-      </g>`;
-    }).join('');
-    return `<g class="token-map-turn" data-idx="${turn.idx}">${heading}${tiles}</g>`;
+  svg.innerHTML = categories.map(category => {
+    const enoughForLabel = category.width >= 86 && category.height >= 45;
+    const enoughForValue = category.width >= 104 && category.height >= 74;
+    const share = model.selected.input ? category.tokens / model.selected.input * 100 : 0;
+    const summary = `${category.label}: ${category.tokens.toLocaleString()} ${t('tok')}, ${share.toFixed(1)}%`;
+    return `<g class="token-category-tile${category.id === selectedTokenCategoryId ? ' selected' : ''}" data-category-id="${esc(category.id)}" tabindex="0" role="button" aria-label="${esc(summary)}">
+      <rect class="category-base" x="${category.x + 1}" y="${category.y + 1}" width="${Math.max(0, category.width - 2)}" height="${Math.max(0, category.height - 2)}" rx="6" style="fill:${category.color}"></rect>
+      <rect class="category-outline" x="${category.x + 1}" y="${category.y + 1}" width="${Math.max(0, category.width - 2)}" height="${Math.max(0, category.height - 2)}" rx="6"></rect>
+      ${enoughForLabel ? `<text class="category-label" x="${category.x + 14}" y="${category.y + 25}">${esc(sessionTextSnippet(category.label, Math.max(10, Math.floor(category.width / 8))))}</text>` : ''}
+      ${enoughForValue ? `<text class="category-value" x="${category.x + 14}" y="${category.y + 51}">${category.tokens.toLocaleString()}</text><text class="category-share" x="${category.x + 14}" y="${category.y + 70}">${share.toFixed(1)}%</text>` : ''}
+      <title>${esc(summary)}</title>
+    </g>`;
   }).join('');
-  svg.innerHTML = turns;
   svg.querySelectorAll('.token-category-tile').forEach(node => {
-    const idx = parseInt(node.dataset.idx);
-    node.addEventListener('click', () => selectEntry(idx));
+    const activate = () => {
+      selectedTokenCategoryId = node.dataset.categoryId;
+      svg.querySelectorAll('.token-category-tile').forEach(tile => tile.classList.toggle('selected', tile === node));
+      const category = categories.find(item => item.id === selectedTokenCategoryId);
+      workspace.querySelector('#token-inspector').innerHTML = categoryInspectorMarkup(category, model.selected, model.previous);
+    };
+    node.addEventListener('click', activate);
     node.addEventListener('keydown', event => {
       if (event.key === 'Enter' || event.key === ' ') {
         event.preventDefault();
-        selectEntry(idx);
+        activate();
       }
     });
   });
   scroller.appendChild(svg);
-  sb.appendChild(scroller);
+  sb.appendChild(workspace);
+  bindVisualTimeline(workspace);
   visualOrder = items.map(item => item.idx);
-  _restoreSelection(preserveDetail);
 }
 
 function freshCategoryTokens(category) {
@@ -1291,16 +1405,25 @@ function renderTokenFlow(sb, preserveDetail) {
   sb.innerHTML = '';
   virtualMode = false;
   const items = filtered.map((entry, idx) => ({ entry, idx }));
-  const width = Math.max(900, items.length * 190);
-  const height = 620;
+  const model = visualDashboardModel(items);
+  if (!model.selected) {
+    sb.innerHTML = `<div class="empty-state">${esc(t('empty_state'))}</div>`;
+    return;
+  }
+  activeIdx = model.selected.idx;
+  const width = Math.max(980, items.length * 180);
+  const height = 510;
   const graph = buildFreshTokenSankey(items, width, height);
-
-  const legend = document.createElement('div');
-  legend.className = 'flow-legend';
-  legend.innerHTML = `<span><i class="flow-swatch fresh"></i>${esc(t('flow_fresh'))}</span><span><i class="flow-swatch cache"></i>${esc(t('flow_saved'))}</span><small>${esc(t('flow_width_note'))}</small>`;
-  sb.appendChild(legend);
-  const scroller = document.createElement('div');
-  scroller.className = 'token-flow-scroll';
+  const workspace = document.createElement('div');
+  workspace.className = 'token-dashboard';
+  workspace.innerHTML = visualDashboardHeader(model) + `<div class="token-dashboard-grid">
+    <section class="token-chart-panel">
+      <div class="token-panel-heading"><div><h2>${esc(t('flow_title'))}</h2><p>${esc(t('flow_width_note'))}</p></div><div class="token-legend"><span><i class="fresh"></i>${esc(t('flow_fresh'))}</span><span><i class="saved"></i>${esc(t('flow_saved'))}</span></div></div>
+      <div class="token-chart-canvas token-flow-scroll"></div>
+    </section>
+    <aside class="token-inspector" id="token-inspector">${turnInspectorMarkup(model.selected)}</aside>
+  </div>`;
+  const scroller = workspace.querySelector('.token-chart-canvas');
   const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
   svg.setAttribute('class', 'token-flow-svg');
   svg.setAttribute('viewBox', `0 0 ${width} ${height}`);
@@ -1323,7 +1446,8 @@ function renderTokenFlow(sb, preserveDetail) {
     const label = isCategory ? node.category.label : node.flowKind === 'saved' ? t('flow_saved') : t('flow_new');
     const value = Math.round(node.value || node.fixedValue || 0);
     const turnIdx = isCategory ? node.turn.idx : '';
-    return `<g class="fresh-flow-node ${node.flowKind}"${isCategory ? ` data-idx="${turnIdx}" tabindex="0" role="button"` : ''} aria-label="${esc(`${label}: ${value.toLocaleString()} ${t('tok')}`)}">
+    const selected = isCategory && turnIdx === activeIdx ? ' selected' : '';
+    return `<g class="fresh-flow-node ${node.flowKind}${selected}"${isCategory ? ` data-idx="${turnIdx}" tabindex="0" role="button"` : ''} aria-label="${esc(`${label}: ${value.toLocaleString()} ${t('tok')}`)}">
       <rect x="${node.x0}" y="${node.y0}" width="${nodeWidth}" height="${nodeHeight}" rx="2" style="fill:${color}"></rect>
       ${nodeHeight >= 18 ? `<text class="fresh-flow-label" x="${node.x1 + 5}" y="${node.y0 + 12}">${esc(sessionTextSnippet(label, 20))}</text>` : ''}
       <title>${esc(`${label}: ${value.toLocaleString()} ${t('tok')}`)}</title>
@@ -1338,18 +1462,24 @@ function renderTokenFlow(sb, preserveDetail) {
   svg.innerHTML = headings + `<g>${linkMarkup}</g><g>${nodeMarkup}</g>`;
   svg.querySelectorAll('.fresh-flow-node.category').forEach(node => {
     const idx = parseInt(node.dataset.idx);
-    node.addEventListener('click', () => selectEntry(idx));
+    const activate = () => {
+      activeIdx = idx;
+      selectedTokenCategoryId = null;
+      renderSidebar(true);
+      updatePositionIndicator();
+    };
+    node.addEventListener('click', activate);
     node.addEventListener('keydown', event => {
       if (event.key === 'Enter' || event.key === ' ') {
         event.preventDefault();
-        selectEntry(idx);
+        activate();
       }
     });
   });
   scroller.appendChild(svg);
-  sb.appendChild(scroller);
+  sb.appendChild(workspace);
+  bindVisualTimeline(workspace);
   visualOrder = items.map(item => item.idx);
-  _restoreSelection(preserveDetail);
 }
 
 function renderSidebar(preserveDetail) {
@@ -1568,6 +1698,6 @@ function selectEntry(idx, opts) {
     if (active) active.scrollIntoView({ block: 'nearest' });
   }
   updatePositionIndicator();
-  mobileShowDetail();
+  if (!document.body.classList.contains('token-visual-mode')) mobileShowDetail();
   updateMobileNav();
 }

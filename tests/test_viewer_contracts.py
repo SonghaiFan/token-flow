@@ -2517,15 +2517,13 @@ def test_viewer_separates_attributed_treemaps_from_fresh_token_sankey(tmp_path: 
                 label: el.textContent,
                 active: el.classList.contains('active'),
               })),
-              turns: Array.from(document.querySelectorAll('.token-map-turn')).map(el => ({
+              timeline: Array.from(document.querySelectorAll('.token-timeline-turn')).map(el => ({
                 idx: el.dataset.idx,
-                categories: Array.from(el.querySelectorAll('.token-category-tile')).map(tile => ({
-                  label: tile.getAttribute('aria-label'),
-                  area: Number(tile.querySelector('.category-base').getAttribute('width'))
-                    * Number(tile.querySelector('.category-base').getAttribute('height')),
-                })),
+                active: el.classList.contains('active'),
               })),
-              note: document.querySelector('.flow-legend small')?.textContent || '',
+              categories: Array.from(document.querySelectorAll('.token-category-tile')).map(tile => tile.getAttribute('aria-label')),
+              inspector: document.querySelector('#token-inspector')?.innerText || '',
+              note: document.querySelector('.token-panel-heading p')?.textContent || '',
             })"""
         )
 
@@ -2537,7 +2535,8 @@ def test_viewer_separates_attributed_treemaps_from_fresh_token_sankey(tmp_path: 
               saved: Array.from(document.querySelectorAll('.fresh-flow-link.saved')).map(el => Number(el.__data__.value)).sort((a, b) => a - b),
               added: Array.from(document.querySelectorAll('.fresh-flow-link.new')).map(el => Number(el.__data__.value)).sort((a, b) => a - b),
               totals: Array.from(document.querySelectorAll('.flow-token-total')).map(el => el.textContent),
-              note: document.querySelector('.flow-legend small')?.textContent || '',
+              timeline: Array.from(document.querySelectorAll('.token-timeline-turn')).map(el => el.dataset.idx),
+              note: document.querySelector('.token-panel-heading p')?.textContent || '',
             })"""
         )
 
@@ -2570,14 +2569,17 @@ def test_viewer_separates_attributed_treemaps_from_fresh_token_sankey(tmp_path: 
         {"mode": "turn", "label": "Turn", "active": False},
         {"mode": "session", "label": "Query", "active": False},
     ]
-    assert [turn["idx"] for turn in treemap_state["turns"]] == ["0", "1", "2"]
-    assert [[category["label"] for category in turn["categories"]] for turn in treemap_state["turns"]] == [
-        ["Tool definitions: 60 tok · 60.0%", "User · First sidebar task: 40 tok · 40.0%"],
-        ["Tool definitions: 120 tok · 60.0%", "User · Second sidebar task: 80 tok · 40.0%"],
-        ["Tool definitions: 180 tok · 60.0%", "User · Second sidebar task: 120 tok · 40.0%"],
+    assert treemap_state["timeline"] == [
+        {"idx": "0", "active": True},
+        {"idx": "1", "active": False},
+        {"idx": "2", "active": False},
     ]
-    for turn in treemap_state["turns"]:
-        assert sum(category["area"] for category in turn["categories"]) == pytest.approx(152 * 520, abs=0.01)
+    assert treemap_state["categories"] == [
+        "Tool definitions: 60 tok, 60.0%",
+        "User · First sidebar task: 40 tok, 40.0%",
+    ]
+    assert "Tool definitions" in treemap_state["inspector"]
+    assert "60" in treemap_state["inspector"]
     assert treemap_state["note"] == "Area = category share within each turn."
     assert flow_state["categories"] == sorted(
         [
@@ -2596,6 +2598,7 @@ def test_viewer_separates_attributed_treemaps_from_fresh_token_sankey(tmp_path: 
         "120 fresh · 80 cached",
         "140 fresh · 160 cached",
     ]
+    assert flow_state["timeline"] == ["0", "1", "2"]
     assert flow_state["note"] == (
         "Width = uncached tokens actually added in each turn. Cache hits reduce the following flow."
     )

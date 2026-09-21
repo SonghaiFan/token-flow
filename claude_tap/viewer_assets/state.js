@@ -1,6 +1,7 @@
 const $ = s => document.querySelector(s);
 const EMBED_QUERY_OPTIONS = parseEmbedQueryOptions();
 let entries = [], filtered = [], activeIdx = -1, activePaths = new Set(), searchQuery = '', activeTools = null;
+let selectedTokenCategoryId = null;
 let sessionImageRegistryCache = null, sessionImageRegistrySize = -1;
 let visualOrder = []; // filtered indices in sidebar visual (DOM) order, excludes collapsed items
 const SIDEBAR_ORDER_MODES = ['treemap', 'flow', 'turn', 'session'];
