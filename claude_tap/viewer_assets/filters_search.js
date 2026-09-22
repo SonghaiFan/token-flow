@@ -17,6 +17,7 @@ function renderApp(preserveDetail) {
   $('#sidebar-wrap').style.display = 'flex';
   $('#search-bar').style.display = '';
   $('#sidebar-sort').style.display = '';
+  $('#turn-navigator').style.display = '';
   $('#position-indicator').style.display = '';
   $('#sidebar').style.display = '';
   $('#detail').style.display = '';
@@ -430,11 +431,16 @@ function toggleToolFilter(name) {
 }
 function clearToolFilter() { activeTools = null; applyFilter(); }
 
-function setSidebarOrderMode(mode) {
-  if (!SIDEBAR_ORDER_MODES.includes(mode)) return;
-  if (sidebarOrderMode === mode) return;
-  sidebarOrderMode = mode;
-  safeLocalStorageSet('claude-tap-sidebar-order', mode);
+function workspaceLensForMode(mode = sidebarOrderMode) {
+  return mode === 'treemap' || mode === 'flow' ? mode : 'request';
+}
+
+function setWorkspaceLens(lens) {
+  if (!WORKSPACE_LENSES.includes(lens)) return;
+  const nextMode = lens === 'request' ? requestGroupMode : lens;
+  if (sidebarOrderMode === nextMode) return;
+  sidebarOrderMode = nextMode;
+  safeLocalStorageSet('token-flow-sidebar-order', nextMode);
   updateSidebarSortControls();
   renderSidebar(true);
   updatePositionIndicator();
@@ -446,17 +452,52 @@ function setSidebarOrderMode(mode) {
   }
 }
 
+function setSidebarOrderMode(mode) {
+  if (!SIDEBAR_ORDER_MODES.includes(mode)) return;
+  if (mode === 'turn' || mode === 'session') {
+    setRequestGroupMode(mode);
+    return;
+  }
+  setWorkspaceLens(mode);
+}
+
+function setRequestGroupMode(mode) {
+  if (!REQUEST_GROUP_MODES.includes(mode)) return;
+  requestGroupMode = mode;
+  safeLocalStorageSet('token-flow-request-group', mode);
+  if (workspaceLensForMode() !== 'request') {
+    updateSidebarSortControls();
+    return;
+  }
+  sidebarOrderMode = mode;
+  safeLocalStorageSet('token-flow-sidebar-order', mode);
+  updateSidebarSortControls();
+  renderSidebar(true);
+  updatePositionIndicator();
+}
+
 function updateSidebarSortControls() {
   document.querySelectorAll('.sidebar-sort-btn').forEach(btn => {
-    const mode = btn.dataset.sortMode;
-    btn.textContent = mode === 'treemap'
+    const lens = btn.dataset.lens;
+    btn.textContent = lens === 'treemap'
       ? t('treemap_title')
-      : mode === 'flow'
+      : lens === 'flow'
         ? t('flow_title')
-        : mode === 'turn'
-          ? t('sort_turn')
-          : t('sort_session');
-    const active = mode === sidebarOrderMode;
+        : t('lens_request');
+    const active = lens === workspaceLensForMode();
+    btn.classList.toggle('active', active);
+    btn.setAttribute('aria-pressed', active ? 'true' : 'false');
+  });
+  const requestModeBar = $('#request-mode-bar');
+  const requestLensActive = workspaceLensForMode() === 'request';
+  document.body.classList.toggle('request-lens-mode', requestLensActive);
+  if (requestModeBar) requestModeBar.style.display = requestLensActive ? 'flex' : 'none';
+  const requestGroupLabel = $('#request-group-label');
+  if (requestGroupLabel) requestGroupLabel.textContent = t('group_by');
+  document.querySelectorAll('.request-mode-btn').forEach(btn => {
+    const mode = btn.dataset.groupMode;
+    btn.textContent = mode === 'turn' ? t('sort_turn') : t('sort_session');
+    const active = mode === requestGroupMode;
     btn.classList.toggle('active', active);
     btn.setAttribute('aria-pressed', active ? 'true' : 'false');
   });

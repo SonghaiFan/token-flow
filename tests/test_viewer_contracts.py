@@ -438,11 +438,11 @@ def _opencode_chat_completions_record() -> dict[str, Any]:
                     {
                         "role": "tool",
                         "tool_call_id": "call_one",
-                        "content": "OPENCODE_TOOL_ONE\n/home/liaohch3/src/github.com/liaohch3/claude-tap-3\n",
+                        "content": "OPENCODE_TOOL_ONE\n/workspace/packlite\n",
                     },
                     {
                         "role": "assistant",
-                        "content": "OPENCODE_TOOL_ONE\n/home/liaohch3/src/github.com/liaohch3/claude-tap-3",
+                        "content": "OPENCODE_TOOL_ONE\n/workspace/packlite",
                     },
                     {
                         "role": "user",
@@ -520,7 +520,7 @@ def _opencode_chat_completions_record() -> dict[str, Any]:
                         "type": "text",
                         "text": (
                             "Path from OPENCODE_TOOL_ONE: "
-                            "`/home/liaohch3/src/github.com/liaohch3/claude-tap-3`\n\n"
+                            "`/workspace/packlite`\n\n"
                             "New command output:\n```\nOPENCODE_TOOL_TWO\npyproject.toml\n```"
                         ),
                     },
@@ -554,16 +554,7 @@ def _opencode_chat_completions_record() -> dict[str, Any]:
                 {
                     "event": "message",
                     "data": {
-                        "choices": [
-                            {
-                                "delta": {
-                                    "content": (
-                                        "Path from OPENCODE_TOOL_ONE: "
-                                        "`/home/liaohch3/src/github.com/liaohch3/claude-tap-3`"
-                                    )
-                                }
-                            }
-                        ]
+                        "choices": [{"delta": {"content": ("Path from OPENCODE_TOOL_ONE: `/workspace/packlite`")}}]
                     },
                 },
             ],
@@ -617,9 +608,7 @@ def _opencode_openai_oauth_responses_record() -> dict[str, Any]:
                     {
                         "type": "function_call_output",
                         "call_id": "call_oauth_bash",
-                        "output": (
-                            "OPENCODE_OPENAI_OAUTH_TOOL_ONE\n/home/liaohch3/src/github.com/liaohch3/claude-tap-3\n"
-                        ),
+                        "output": ("OPENCODE_OPENAI_OAUTH_TOOL_ONE\n/workspace/packlite\n"),
                     },
                 ],
                 "tools": [
@@ -640,10 +629,7 @@ def _opencode_openai_oauth_responses_record() -> dict[str, Any]:
                         "content": [
                             {
                                 "type": "output_text",
-                                "text": (
-                                    "OPENCODE_OPENAI_OAUTH_TOOL_ONE\n"
-                                    "/home/liaohch3/src/github.com/liaohch3/claude-tap-3"
-                                ),
+                                "text": ("OPENCODE_OPENAI_OAUTH_TOOL_ONE\n/workspace/packlite"),
                             }
                         ],
                     }
@@ -666,10 +652,7 @@ def _opencode_openai_oauth_responses_record() -> dict[str, Any]:
                             "content": [
                                 {
                                     "type": "output_text",
-                                    "text": (
-                                        "OPENCODE_OPENAI_OAUTH_TOOL_ONE\n"
-                                        "/home/liaohch3/src/github.com/liaohch3/claude-tap-3"
-                                    ),
+                                    "text": ("OPENCODE_OPENAI_OAUTH_TOOL_ONE\n/workspace/packlite"),
                                 }
                             ],
                         },
@@ -716,7 +699,7 @@ def _pi_openai_oauth_websocket_record() -> dict[str, Any]:
             {
                 "type": "function_call_output",
                 "call_id": "call_pi_bash",
-                "output": "PI_TOOL_ONE\n/home/liaohch3/src/github.com/liaohch3/claude-tap-3\n",
+                "output": "PI_TOOL_ONE\n/workspace/packlite\n",
             }
         ],
     }
@@ -748,7 +731,7 @@ def _pi_openai_oauth_websocket_record() -> dict[str, Any]:
                         "content": [
                             {
                                 "type": "output_text",
-                                "text": "PI_TOOL_ONE\n/home/liaohch3/src/github.com/liaohch3/claude-tap-3",
+                                "text": "PI_TOOL_ONE\n/workspace/packlite",
                             }
                         ],
                     }
@@ -814,7 +797,7 @@ def _pi_openai_oauth_websocket_record() -> dict[str, Any]:
                         "content": [
                             {
                                 "type": "output_text",
-                                "text": "PI_TOOL_ONE\n/home/liaohch3/src/github.com/liaohch3/claude-tap-3",
+                                "text": "PI_TOOL_ONE\n/workspace/packlite",
                             }
                         ],
                     },
@@ -834,7 +817,7 @@ def _pi_openai_oauth_websocket_record() -> dict[str, Any]:
                                 "content": [
                                     {
                                         "type": "output_text",
-                                        "text": "PI_TOOL_ONE\n/home/liaohch3/src/github.com/liaohch3/claude-tap-3",
+                                        "text": "PI_TOOL_ONE\n/workspace/packlite",
                                     }
                                 ],
                             }
@@ -1233,7 +1216,7 @@ def _contract_cases() -> tuple[ViewerContractCase, ...]:
             expected_usage={"input_tokens": 14070, "output_tokens": 109, "cache_read_input_tokens": 13952},
             required_detail_text=(
                 "OPENCODE_TOOL_ONE",
-                "/home/liaohch3/src/github.com/liaohch3/claude-tap-3",
+                "/workspace/packlite",
                 "OPENCODE_TOOL_TWO",
                 "pyproject.toml",
             ),
@@ -1253,7 +1236,7 @@ def _contract_cases() -> tuple[ViewerContractCase, ...]:
             expected_usage={"input_tokens": 12424, "output_tokens": 115, "cache_read_input_tokens": 11776},
             required_detail_text=(
                 "OPENCODE_OPENAI_OAUTH_TOOL_ONE",
-                "/home/liaohch3/src/github.com/liaohch3/claude-tap-3",
+                "/workspace/packlite",
                 "bash",
             ),
             min_stream_events=1,
@@ -1273,7 +1256,7 @@ def _contract_cases() -> tuple[ViewerContractCase, ...]:
             expected_usage={"input_tokens": 655, "output_tokens": 29},
             required_detail_text=(
                 "PI_TOOL_ONE",
-                "/home/liaohch3/src/github.com/liaohch3/claude-tap-3",
+                "/workspace/packlite",
                 "printf 'PI_TOOL_ONE",
             ),
             min_stream_events=2,
@@ -2506,29 +2489,36 @@ def test_viewer_separates_attributed_treemaps_from_fresh_token_sankey(tmp_path: 
     html_path = _generate_case_html(tmp_path, "sidebar_order", _sidebar_order_records())
 
     page = chromium_browser.new_page()
-    page.add_init_script("localStorage.setItem('claude-tap-sidebar-order', 'treemap')")
+    page.add_init_script("localStorage.setItem('packlite-sidebar-order', 'treemap')")
     try:
         errors = _open_viewer_with_error_capture(page, html_path)
         treemap_state = page.evaluate(
             """() => ({
-              label: document.querySelector('#sidebar-sort-label')?.textContent || '',
+              navParent: document.querySelector('#sidebar-sort')?.parentElement?.tagName || '',
               buttons: Array.from(document.querySelectorAll('.sidebar-sort-btn')).map(el => ({
-                mode: el.dataset.sortMode,
+                lens: el.dataset.lens,
                 label: el.textContent,
                 active: el.classList.contains('active'),
               })),
+              navigatorParent: document.querySelector('#turn-navigator')?.parentElement?.tagName || '',
               timeline: Array.from(document.querySelectorAll('.token-timeline-turn')).map(el => ({
                 idx: el.dataset.idx,
                 active: el.classList.contains('active'),
               })),
+              timelineDirection: getComputedStyle(document.querySelector('.token-timeline')).flexDirection,
+              navigatorRight: document.querySelector('#turn-navigator').getBoundingClientRect().right,
+              mainLeft: document.querySelector('#main-area').getBoundingClientRect().left,
+              firstTurnTitle: document.querySelector('.token-timeline-turn')?.title || '',
+              firstTurnText: document.querySelector('.token-timeline-turn')?.innerText || '',
+              firstTurnAgent: document.querySelector('.token-timeline-turn .timeline-agent')?.textContent || '',
               categories: Array.from(document.querySelectorAll('.token-category-tile')).map(tile => tile.getAttribute('aria-label')),
               inspector: document.querySelector('#token-inspector')?.innerText || '',
               note: document.querySelector('.token-panel-heading p')?.textContent || '',
             })"""
         )
 
-        page.locator('.sidebar-sort-btn[data-sort-mode="flow"]').click()
-        page.wait_for_selector('.sidebar-sort-btn[data-sort-mode="flow"].active', timeout=5000)
+        page.locator('.sidebar-sort-btn[data-lens="flow"]').click()
+        page.wait_for_selector('.sidebar-sort-btn[data-lens="flow"].active', timeout=5000)
         flow_state = page.evaluate(
             """() => ({
               categories: Array.from(document.querySelectorAll('.fresh-flow-node.category')).map(el => el.getAttribute('aria-label')).sort(),
@@ -2540,40 +2530,66 @@ def test_viewer_separates_attributed_treemaps_from_fresh_token_sankey(tmp_path: 
             })"""
         )
 
-        page.locator('.sidebar-sort-btn[data-sort-mode="turn"]').click()
-        page.wait_for_selector('.sidebar-sort-btn[data-sort-mode="turn"].active', timeout=5000)
+        page.locator('.sidebar-sort-btn[data-lens="request"]').click()
+        page.wait_for_selector('.sidebar-sort-btn[data-lens="request"].active', timeout=5000)
+        page.locator('.request-mode-btn[data-group-mode="turn"]').click()
+        page.wait_for_selector('.request-mode-btn[data-group-mode="turn"].active', timeout=5000)
         turn_state = page.evaluate(
             """() => ({
-              groupCount: document.querySelectorAll('.sidebar-group-header').length,
-              turns: Array.from(document.querySelectorAll('.sidebar-item .si-turn')).map(el => el.textContent),
+              sidebarDisplay: getComputedStyle(document.querySelector('#sidebar-wrap')).display,
+              detailDisplay: getComputedStyle(document.querySelector('#detail')).display,
+              timelineTurns: Array.from(document.querySelectorAll('#turn-navigator .token-timeline-turn')).map(el => el.dataset.idx),
+              conversationLabels: Array.from(document.querySelectorAll('#turn-navigator .timeline-group')).map(el => el.textContent),
+              groupingVisible: getComputedStyle(document.querySelector('#request-mode-bar')).display,
             })"""
         )
 
-        page.locator('.sidebar-sort-btn[data-sort-mode="session"]').click()
-        page.wait_for_selector('.sidebar-sort-btn[data-sort-mode="session"].active', timeout=5000)
+        page.locator('.request-mode-btn[data-group-mode="session"]').click()
+        page.wait_for_selector('.request-mode-btn[data-group-mode="session"].active', timeout=5000)
         session_state = page.evaluate(
             """() => ({
-              groups: Array.from(document.querySelectorAll('.sidebar-group-header .group-name')).map(el => el.textContent),
-              counts: Array.from(document.querySelectorAll('.sidebar-group-header .group-count')).map(el => el.textContent),
-              turns: Array.from(document.querySelectorAll('.sidebar-item .si-turn')).map(el => el.textContent),
+              sidebarDisplay: getComputedStyle(document.querySelector('#sidebar-wrap')).display,
+              detailDisplay: getComputedStyle(document.querySelector('#detail')).display,
+              timelineTurns: Array.from(document.querySelectorAll('#turn-navigator .token-timeline-turn')).map(el => el.dataset.idx),
+              conversationLabels: Array.from(document.querySelectorAll('#turn-navigator .timeline-group')).map(el => el.textContent),
+            })"""
+        )
+        page.set_viewport_size({"width": 390, "height": 844})
+        mobile_state = page.evaluate(
+            """() => ({
+              timelineDirection: getComputedStyle(document.querySelector('.token-timeline')).flexDirection,
+              viewportOverflowX: getComputedStyle(document.querySelector('.turn-rail-viewport')).overflowX,
+              modelDisplay: getComputedStyle(document.querySelector('.timeline-model')).display,
+              cardWidth: document.querySelector('.token-timeline-turn').getBoundingClientRect().width,
+              navigatorBottom: document.querySelector('#turn-navigator').getBoundingClientRect().bottom,
+              stageTop: document.querySelector('.workspace-stage').getBoundingClientRect().top,
             })"""
         )
     finally:
         page.close()
 
     assert errors == []
-    assert treemap_state["label"] == "View"
+    assert treemap_state["navParent"] == "BODY"
+    assert treemap_state["navigatorParent"] == "DIV"
     assert treemap_state["buttons"] == [
-        {"mode": "treemap", "label": "Token map", "active": True},
-        {"mode": "flow", "label": "Token flow", "active": False},
-        {"mode": "turn", "label": "Turn", "active": False},
-        {"mode": "session", "label": "Query", "active": False},
+        {"lens": "treemap", "label": "Composition", "active": True},
+        {"lens": "flow", "label": "Cache flow", "active": False},
+        {"lens": "request", "label": "Request", "active": False},
     ]
     assert treemap_state["timeline"] == [
         {"idx": "0", "active": True},
         {"idx": "1", "active": False},
         {"idx": "2", "active": False},
     ]
+    assert treemap_state["timelineDirection"] == "column"
+    assert treemap_state["navigatorRight"] <= treemap_state["mainLeft"] + 1
+    assert "other-model" in treemap_state["firstTurnTitle"]
+    assert "100 tok" in treemap_state["firstTurnTitle"]
+    assert "POST /v1/messages" in treemap_state["firstTurnTitle"]
+    assert treemap_state["firstTurnAgent"]
+    assert "other-model" in treemap_state["firstTurnText"]
+    assert "100 tok" in treemap_state["firstTurnText"]
+    assert "POST /v1/messages" in treemap_state["firstTurnText"]
     assert treemap_state["categories"] == [
         "Tool definitions: 60 tok, 60.0%",
         "User · First sidebar task: 40 tok, 40.0%",
@@ -2602,22 +2618,31 @@ def test_viewer_separates_attributed_treemaps_from_fresh_token_sankey(tmp_path: 
     assert flow_state["note"] == (
         "Width = uncached tokens actually added in each turn. Cache hits reduce the following flow."
     )
-    assert turn_state["groupCount"] == 0
-    assert turn_state["turns"] == ["Turn 1", "Turn 2", "Turn 3"]
-    assert session_state["groups"] == [
-        "Query 1 - First sidebar task",
-        "Query 2 - Second sidebar task",
-        "Query 3 - Second sidebar task",
+    assert turn_state["sidebarDisplay"] == "none"
+    assert turn_state["detailDisplay"] == "block"
+    assert turn_state["timelineTurns"] == ["0", "1", "2"]
+    assert turn_state["conversationLabels"] == []
+    assert turn_state["groupingVisible"] == "flex"
+    assert session_state["sidebarDisplay"] == "none"
+    assert session_state["detailDisplay"] == "block"
+    assert session_state["timelineTurns"] == ["0", "1", "2"]
+    assert session_state["conversationLabels"] == [
+        "Conversation 1",
+        "Conversation 2",
+        "Conversation 3",
     ]
-    assert session_state["counts"] == ["1", "1", "1"]
-    assert session_state["turns"] == ["Turn 1", "Turn 2", "Turn 3"]
+    assert mobile_state["timelineDirection"] == "row"
+    assert mobile_state["viewportOverflowX"] == "auto"
+    assert mobile_state["modelDisplay"] != "none"
+    assert mobile_state["cardWidth"] >= 220
+    assert mobile_state["navigatorBottom"] <= mobile_state["stageTop"] + 1
 
 
 def test_viewer_session_order_groups_claude_code_tool_loop_rounds(tmp_path: Path, chromium_browser) -> None:
     html_path = _generate_case_html(tmp_path, "claude_code_session_rounds", _claude_code_session_round_records())
 
     page = chromium_browser.new_page()
-    page.add_init_script("localStorage.setItem('claude-tap-sidebar-order', 'session')")
+    page.add_init_script("localStorage.setItem('packlite-sidebar-order', 'session')")
     try:
         errors = _open_viewer_with_error_capture(page, html_path)
         state = page.evaluate(
@@ -2646,7 +2671,7 @@ def test_viewer_session_order_groups_large_codex_app_sessions_in_virtual_mode(tm
     html_path = _generate_case_html(tmp_path, "codex_app_large_sessions", _codex_app_large_session_records())
 
     page = chromium_browser.new_page()
-    page.add_init_script("localStorage.setItem('claude-tap-sidebar-order', 'session')")
+    page.add_init_script("localStorage.setItem('packlite-sidebar-order', 'session')")
     try:
         errors = _open_viewer_with_error_capture(page, html_path)
         state = page.evaluate(
@@ -2701,7 +2726,7 @@ def test_viewer_virtual_group_title_stays_inside_its_fixed_row(tmp_path: Path, c
     html_path = _generate_case_html(tmp_path, "virtual_group_title_clamp", records)
 
     page = chromium_browser.new_page()
-    page.add_init_script("localStorage.setItem('claude-tap-sidebar-order', 'session')")
+    page.add_init_script("localStorage.setItem('packlite-sidebar-order', 'session')")
     try:
         errors = _open_viewer_with_error_capture(page, html_path)
         overflowing = page.evaluate(
@@ -3051,7 +3076,7 @@ def test_viewer_session_group_hover_shows_full_truncated_user_input(tmp_path: Pa
     )
 
     page = chromium_browser.new_page()
-    page.add_init_script("localStorage.setItem('claude-tap-sidebar-order', 'session')")
+    page.add_init_script("localStorage.setItem('packlite-sidebar-order', 'session')")
     try:
         errors = _open_viewer_with_error_capture(page, html_path)
         header = page.locator(".sidebar-group-header").nth(0)
@@ -3106,7 +3131,7 @@ def test_viewer_session_group_hover_shows_titles_cut_by_the_line_clamp(tmp_path:
     html_path = _generate_case_html(tmp_path, "session_clamped_title", (record,))
 
     page = chromium_browser.new_page()
-    page.add_init_script("localStorage.setItem('claude-tap-sidebar-order', 'session')")
+    page.add_init_script("localStorage.setItem('packlite-sidebar-order', 'session')")
     try:
         errors = _open_viewer_with_error_capture(page, html_path)
         header = page.locator(".sidebar-group-header").nth(0)
@@ -3713,7 +3738,7 @@ def test_viewer_session_identical_prompts_image_tags_and_early_title_generation(
 
     html_path = _generate_case_html(tmp_path, "identical_prompts_and_image_tags", records)
     page = chromium_browser.new_page()
-    page.add_init_script("localStorage.setItem('claude-tap-sidebar-order', 'session')")
+    page.add_init_script("localStorage.setItem('packlite-sidebar-order', 'session')")
     try:
         errors = _open_viewer_with_error_capture(page, html_path)
         state = page.evaluate(
@@ -3915,7 +3940,7 @@ def test_viewer_codex_global_search_skips_non_navigable_and_orders_by_capture_tu
 def test_viewer_labels_user_input_provenance_and_titles_groups_by_human_prose(tmp_path: Path, chromium_browser) -> None:
     html_path = _generate_case_html(tmp_path, "user_input_provenance", _user_input_provenance_records())
     page = chromium_browser.new_page()
-    page.add_init_script("localStorage.setItem('claude-tap-sidebar-order', 'session')")
+    page.add_init_script("localStorage.setItem('packlite-sidebar-order', 'session')")
     try:
         errors = _open_viewer_with_error_capture(page, html_path)
 
@@ -3984,7 +4009,7 @@ def test_viewer_translates_provenance_kind_in_badges(tmp_path: Path, chromium_br
     html_path = _generate_case_html(tmp_path, "user_input_provenance", _user_input_provenance_records())
     page = chromium_browser.new_page()
     page.add_init_script(
-        "localStorage.setItem('claude-tap-sidebar-order', 'session');localStorage.setItem('claude-tap-lang', 'zh-CN')"
+        "localStorage.setItem('packlite-sidebar-order', 'session');localStorage.setItem('packlite-lang', 'zh-CN')"
     )
     try:
         errors = _open_viewer_with_error_capture(page, html_path)

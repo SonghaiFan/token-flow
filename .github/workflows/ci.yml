@@ -11,165 +11,52 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  lint:
+  python:
     runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      pull-requests: read
+    strategy:
+      matrix:
+        python-version: ["3.11", "3.12", "3.13"]
     steps:
       - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.12"
+          python-version: ${{ matrix.python-version }}
           cache: pip
-          cache-dependency-path: |
-            pyproject.toml
-            uv.lock
-      - run: pip install ruff
+          cache-dependency-path: pyproject.toml
+      - run: pip install -e ".[dev]"
       - run: ruff check .
       - run: ruff format --check .
-      - name: Collect changed files for PR policy
-        if: github.event_name == 'pull_request'
-        env:
-          GH_TOKEN: ${{ github.token }}
-          PR_NUMBER: ${{ github.event.pull_request.number }}
-        run: gh pr view "$PR_NUMBER" --json files --jq '.files[].path' > /tmp/pr-changed-files.txt
-      - name: Validate PR body policy
-        if: github.event_name == 'pull_request'
-        run: python scripts/check_pr_policy.py --event-path "$GITHUB_EVENT_PATH" --changed-files-file /tmp/pr-changed-files.txt
-
-  screenshot-quality:
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      pull-requests: read
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-      - name: Collect screenshot-related changes
-        id: screenshot_changes
-        if: github.event_name == 'pull_request'
-        env:
-          GH_TOKEN: ${{ github.token }}
-          PR_NUMBER: ${{ github.event.pull_request.number }}
-        run: |
-          gh pr view "$PR_NUMBER" --json files --jq '.files[].path' > /tmp/pr-changed-files.txt
-          if grep -Eq '^(\.agents/evidence/pr/|scripts/check_screenshots\.(py|sh))' /tmp/pr-changed-files.txt; then
-            echo "should_run=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "should_run=false" >> "$GITHUB_OUTPUT"
-          fi
-      - name: Validate screenshot evidence quality
-        if: github.event_name != 'pull_request' || steps.screenshot_changes.outputs.should_run == 'true'
-        run: python scripts/check_screenshots.py .agents/evidence/pr/
-      - name: Skip unchanged screenshot evidence
-        if: github.event_name == 'pull_request' && steps.screenshot_changes.outputs.should_run != 'true'
-        run: echo "No screenshot evidence or screenshot checker changes in this PR; skipping full screenshot scan."
-
-  pr-policy:
-    runs-on: ubuntu-latest
-    if: github.event_name == 'pull_request'
-    permissions:
-      contents: read
-      pull-requests: read
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-      - name: Collect changed files
-        env:
-          GH_TOKEN: ${{ github.token }}
-          PR_NUMBER: ${{ github.event.pull_request.number }}
-        run: gh pr view "$PR_NUMBER" --json files --jq '.files[].path' > /tmp/pr-changed-files.txt
-      - name: Validate PR body policy
-        run: python scripts/check_pr_policy.py --event-path "$GITHUB_EVENT_PATH" --changed-files-file /tmp/pr-changed-files.txt
-
-  test:
-    runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        python-version: ["3.11", "3.12", "3.13"]
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-      - uses: actions/setup-python@v5
-        with:
-          python-version: ${{ matrix.python-version }}
-          cache: pip
-          cache-dependency-path: |
-            pyproject.toml
-            uv.lock
-      - run: pip install -e ".[dev]"
       - run: python -m pytest tests/ -x --timeout=60
 
-  windows-client-launch:
+  ui:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ui
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: ui/package-lock.json
+      - run: npm ci
+      - run: npm run lint
+      - run: npm run build
+
+  windows-launch:
     runs-on: windows-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        python-version: ["3.11", "3.12", "3.13"]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
-          python-version: ${{ matrix.python-version }}
+          python-version: "3.12"
           cache: pip
-          cache-dependency-path: |
-            pyproject.toml
-            uv.lock
+          cache-dependency-path: pyproject.toml
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
       - run: pip install -e ".[dev]"
-      - name: Run Windows client launch regression tests
-        run: python -m pytest tests/test_windows_compat.py -x --timeout=60
-      - name: Install the real npm Claude Code shim
-        run: npm install --global @anthropic-ai/claude-code
-      - name: Launch the real npm shim through claude-tap
-        run: claude-tap --tap-client claude --tap-no-live --tap-no-open -- --version
-
-  coverage:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.13"
-          cache: pip
-          cache-dependency-path: |
-            pyproject.toml
-            uv.lock
-      - run: pip install -e ".[dev]"
-      # The cache key must hash whatever pins playwright, because the browser
-      # revision under ~/.cache/ms-playwright is chosen by the installed
-      # playwright version. Deliberately no prefix fallback — a partial hit
-      # would restore a directory missing the current revision, and the
-      # exact-key hit would still skip the post-step save, so the re-download
-      # would repeat on every run forever.
-      - name: Cache Playwright browsers
-        id: playwright-cache
-        uses: actions/cache@v4
-        with:
-          path: ~/.cache/ms-playwright
-          key: ${{ runner.os }}-playwright-${{ hashFiles('pyproject.toml') }}
-      # System libraries live outside the cached path, so they are installed
-      # unconditionally; only the browser download is skipped on a cache hit.
-      - run: python -m playwright install-deps chromium
-      - if: steps.playwright-cache.outputs.cache-hit != 'true'
-        run: python -m playwright install chromium
-      - run: python -m coverage erase
-      - run: python -m coverage run --append -m pytest tests/ --ignore=tests/test_e2e.py --ignore=tests/test_nav_browser.py --ignore=tests/test_responses_browser.py --ignore=tests/test_search_browser.py --ignore=tests/test_perf_viewer.py --ignore=tests/test_viewer_contracts.py -x --timeout=60 -q
-      - run: python -m coverage run --append -m pytest tests/test_e2e.py -q
-      - run: python -m coverage run --append -m pytest tests/test_nav_browser.py tests/test_perf_viewer.py -q
-      - run: python -m coverage run --append -m pytest tests/test_responses_browser.py -q
-      - run: python -m coverage run --append -m pytest tests/test_search_browser.py tests/test_viewer_contracts.py -q
-      - run: python -m coverage json -o .coverage.json
-      - run: python scripts/check_coverage.py --python-coverage .coverage.json
+      - run: python -m pytest tests/test_windows_compat.py -x --timeout=60
+      - run: npm install --global @anthropic-ai/claude-code
+      - run: token-flow --tap-client claude --tap-no-live --tap-no-open -- --version

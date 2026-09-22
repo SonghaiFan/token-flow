@@ -1,117 +1,15 @@
-# Scripts
+# Token Flow maintenance scripts
 
-## `check_coverage.py`
+Only scripts used by the current product belong here.
 
-Enforce project and incremental coverage targets for backend Python code and the
-inline JavaScript and CSS in `claude_tap/viewer.html`.
+## Refresh model prices
 
-Targets are configured in `pyproject.toml` under `[tool.claude_tap.coverage]`:
-
-- Python project coverage: `python_total_min`
-- Python changed executable package lines: `python_diff_min`
-- Viewer JavaScript function coverage: `viewer_js_function_min`
-- Viewer changed JavaScript functions: `viewer_js_diff_min`
-- Viewer CSS selector coverage: `viewer_css_selector_min`
-- Viewer changed CSS selectors: `viewer_css_diff_min`
-
-### Usage
+`refresh_model_prices.py` refreshes the bundled model-pricing data used by the
+capture/export backend. Review its generated diff before committing it.
 
 ```bash
-python -m coverage run -m pytest tests/ -q
-python -m coverage json -o .coverage.json
-python scripts/check_coverage.py --python-coverage .coverage.json
+uv run python scripts/refresh_model_prices.py
 ```
 
-## `check_pr_policy.py`
-
-Validate PR body policy against the changed files in a pull request.
-
-The check enforces machine-readable maintainer rules:
-
-- Summary/Problem/Goal and Validation/Test plan/Results sections are present
-- Runtime, viewer, client, proxy, or UI behavior changes include
-  `raw.githubusercontent.com` screenshot evidence
-- PR image links use `raw.githubusercontent.com`
-- Raw traces, generated trace viewers, logs, and secret-like files are not part
-  of the PR
-- PR body does not include obvious API keys or bearer tokens
-
-### Usage
-
-```bash
-python scripts/check_pr_policy.py \
-  --body-file /tmp/pr-body.md \
-  --changed-files-file /tmp/pr-files.txt
-```
-
-In GitHub Actions, pass the event payload:
-
-```bash
-python scripts/check_pr_policy.py \
-  --event-path "$GITHUB_EVENT_PATH" \
-  --changed-files-file /tmp/pr-files.txt
-```
-
-The CI workflow runs this check both as a standalone `pr-policy` job and inside
-the existing required `lint` job.
-
-## `translate_i18n.py`
-
-Translate missing i18n strings in `claude_tap/viewer_i18n.json` using OpenRouter.
-
-It parses the viewer i18n JSON source, finds keys present in both `en` and `zh-CN` but missing in other supported languages (`ja`, `ko`, `fr`, `ar`, `de`, `ru`), and writes new translations back into the same file.
-
-### Requirements
-
-- Set `OPENROUTER_API_KEY` in your environment
-- Default model: `google/gemini-2.5-flash`
-
-### Usage
-
-```bash
-# Show missing keys only (no file changes)
-python scripts/translate_i18n.py --dry-run
-
-# Translate missing keys and update viewer_i18n.json in place
-python scripts/translate_i18n.py
-
-# Use a specific model
-python scripts/translate_i18n.py --model google/gemini-2.5-flash
-```
-
-### Advanced usage
-
-```bash
-# Use a custom file/object name (future CLI i18n support)
-python scripts/translate_i18n.py --target cli --dry-run
-python scripts/translate_i18n.py --file claude_tap/cli.py --object-name I18N --dry-run
-```
-
-## `check_changelog.py`
-
-Ensure release tags are documented in `CHANGELOG.md`.
-
-Publish checks the exact tag being published.
-
-### Usage
-
-```bash
-# Check latest release tag known to git
-python scripts/check_changelog.py
-
-# Check an explicit release tag
-python scripts/check_changelog.py --tag v0.1.40
-```
-
-## `update_changelog.py`
-
-Insert a release section in `CHANGELOG.md` when one is missing.
-
-Auto-release uses this before tagging so normal feature/fix PRs are not blocked by changelog bookkeeping. If the main branch is protected, auto-release opens or updates a changelog PR with the standard PR body, waits for the PR checks, merges it with the release bot's admin bypass, and publishes after that PR is merged.
-
-### Usage
-
-```bash
-python scripts/update_changelog.py --version 0.1.40
-python scripts/update_changelog.py --version 0.1.40 --date 2026-05-03
-```
+UI build and sync scripts live in `ui/scripts/` because `ui/` is the canonical
+frontend source.

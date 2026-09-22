@@ -8,7 +8,60 @@ from pathlib import Path
 import pytest
 
 from claude_tap.history import cleanup_trace_sessions, delete_trace_history, migrate_legacy_traces
-from claude_tap.trace_store import TraceStore, get_trace_store, reset_trace_store
+from claude_tap.trace_store import TraceStore, get_trace_store, reset_trace_store, resolve_db_path
+
+
+def test_token_flow_db_override_takes_precedence(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    current = tmp_path / "token-flow.sqlite3"
+    packlite = tmp_path / "packlite.sqlite3"
+    inherited = tmp_path / "inherited.sqlite3"
+    monkeypatch.setenv("TOKEN_FLOW_DB", str(current))
+    monkeypatch.setenv("PACKLITE_DB", str(packlite))
+    monkeypatch.setenv("CLOUDTAP_DB", str(inherited))
+
+    assert resolve_db_path() == current.resolve()
+
+
+def test_packlite_db_override_remains_readable(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    current = tmp_path / "packlite.sqlite3"
+    monkeypatch.delenv("TOKEN_FLOW_DB", raising=False)
+    monkeypatch.setenv("PACKLITE_DB", str(current))
+
+    assert resolve_db_path() == current.resolve()
+
+
+def test_inherited_db_override_remains_readable(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    inherited = tmp_path / "inherited.sqlite3"
+    monkeypatch.delenv("TOKEN_FLOW_DB", raising=False)
+    monkeypatch.setenv("CLOUDTAP_DB", str(inherited))
+
+    assert resolve_db_path() == inherited.resolve()
+
+
+def test_default_db_prefers_each_newer_product_generation(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.delenv("TOKEN_FLOW_DB", raising=False)
+    monkeypatch.delenv("CLOUDTAP_DB", raising=False)
+    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path))
+    inherited = tmp_path / "claude-tap" / "traces.sqlite3"
+    inherited.parent.mkdir()
+    inherited.touch()
+
+    assert resolve_db_path() == inherited.resolve()
+
+    current = tmp_path / "packlite" / "traces.sqlite3"
+    current.parent.mkdir()
+    current.touch()
+
+    assert resolve_db_path() == current.resolve()
+
+    token_flow = tmp_path / "token-flow" / "traces.sqlite3"
+    token_flow.parent.mkdir()
+    token_flow.touch()
+
+    assert resolve_db_path() == token_flow.resolve()
 
 
 def _write_legacy_session(base: Path, stem: str, *, date: str = "2026-05-01") -> Path:
@@ -124,7 +177,7 @@ def test_migrate_legacy_directory_upgrades_v2_schema_for_source_key_dedupe(
 ) -> None:
     db_path = tmp_path / "v2.sqlite3"
     _write_v2_database(db_path)
-    monkeypatch.setenv("CLOUDTAP_DB", str(db_path))
+    monkeypatch.setenv("TOKEN_FLOW_DB", str(db_path))
     reset_trace_store()
     project = tmp_path / "project"
     _write_legacy_session(project, "trace_same")

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""End-to-end test for claude-tap.
+"""End-to-end test for packlite.
 
 Creates a fake 'claude' script + a fake upstream API server,
 then runs `python claude_tap.py` as a real subprocess and
@@ -252,7 +252,7 @@ def test_e2e_store_stream_events_flag():
 
 def _run_test(upstream_port, store_stream_events=False):
     project_dir = PROJECT_ROOT
-    trace_dir = tempfile.mkdtemp(prefix="claude_tap_test_")
+    trace_dir = tempfile.mkdtemp(prefix="packlite_test_")
 
     # Create fake claude
     fake_bin_dir = tempfile.mkdtemp(prefix="fake_bin_")
@@ -671,7 +671,7 @@ for suffix, stream in [(":rawPredict", False), (":streamRawPredict", True)]:
         sys.exit(1)
 """
 
-    trace_dir = tempfile.mkdtemp(prefix="claude_tap_test_vertex_")
+    trace_dir = tempfile.mkdtemp(prefix="packlite_test_vertex_")
     fake_bin_dir = _create_fake_claude(fake_claude_script)
     with socket.socket() as sock:
         sock.bind(("127.0.0.1", 0))
@@ -887,7 +887,7 @@ def test_upstream_error():
     print(f"\n[test_upstream_error] Fake upstream on :{FAKE_UPSTREAM_ERROR_PORT}")
 
     project_dir = PROJECT_ROOT
-    trace_dir = tempfile.mkdtemp(prefix="claude_tap_test_error_")
+    trace_dir = tempfile.mkdtemp(prefix="packlite_test_error_")
     fake_bin_dir = _create_fake_claude(FAKE_CLAUDE_ERROR_SCRIPT)
 
     try:
@@ -1028,7 +1028,7 @@ def test_malformed_sse():
     print(f"\n[test_malformed_sse] Fake upstream on :{FAKE_UPSTREAM_MALFORMED_PORT}")
 
     project_dir = PROJECT_ROOT
-    trace_dir = tempfile.mkdtemp(prefix="claude_tap_test_malformed_")
+    trace_dir = tempfile.mkdtemp(prefix="packlite_test_malformed_")
     fake_bin_dir = _create_fake_claude(FAKE_CLAUDE_MALFORMED_SCRIPT)
 
     try:
@@ -1156,7 +1156,7 @@ def test_large_payload():
     print(f"\n[test_large_payload] Fake upstream on :{FAKE_UPSTREAM_LARGE_PORT}")
 
     project_dir = PROJECT_ROOT
-    trace_dir = tempfile.mkdtemp(prefix="claude_tap_test_large_")
+    trace_dir = tempfile.mkdtemp(prefix="packlite_test_large_")
     fake_bin_dir = _create_fake_claude(FAKE_CLAUDE_LARGE_SCRIPT)
 
     try:
@@ -1314,7 +1314,7 @@ def test_concurrent_requests():
     print(f"\n[test_concurrent_requests] Fake upstream on :{FAKE_UPSTREAM_CONCURRENT_PORT}")
 
     project_dir = PROJECT_ROOT
-    trace_dir = tempfile.mkdtemp(prefix="claude_tap_test_concurrent_")
+    trace_dir = tempfile.mkdtemp(prefix="packlite_test_concurrent_")
     fake_bin_dir = _create_fake_claude(FAKE_CLAUDE_CONCURRENT_SCRIPT)
 
     try:
@@ -1419,7 +1419,7 @@ def _cmd_preview():
 
 
 def _cmd_dev():
-    """Start claude-tap proxy, run multi-turn prompts non-interactively, open HTML.
+    """Start Token Flow proxy, run multi-turn prompts non-interactively, open HTML.
 
     Usage:
         uv run python test_e2e.py --dev                          # default prompts
@@ -1442,7 +1442,7 @@ def _cmd_dev():
 
     # Start proxy in background via --no-launch
     # -u: unbuffered stdout so we can read the port line immediately
-    print("Starting claude-tap proxy...")
+    print("Starting Token Flow proxy...")
     proxy_env = os.environ.copy()
     proxy_env["PYTHONUNBUFFERED"] = "1"
     proxy_proc = sp.Popen(
@@ -1518,7 +1518,7 @@ def _cmd_dev():
 
 
 def test_parse_args(monkeypatch, tmp_path):
-    """Test that --tap-* flags are consumed by claude-tap and everything else
+    """Test that --tap-* flags are consumed by Token Flow and everything else
     is forwarded to claude via claude_args."""
     from claude_tap import parse_args
 
@@ -1669,7 +1669,7 @@ async def test_async_main_live_viewer_default_opens_when_allowed(monkeypatch, tm
         return server.url, True
 
     migration_calls = []
-    monkeypatch.setenv("CLOUDTAP_DB", str(tmp_path / "async-main.sqlite3"))
+    monkeypatch.setenv("TOKEN_FLOW_DB", str(tmp_path / "async-main.sqlite3"))
     monkeypatch.setattr("claude_tap.cli.run_client", fake_run_client)
     monkeypatch.setattr("claude_tap.cli._open_browser", opened_urls.append)
     monkeypatch.setattr("claude_tap.cli.ensure_shared_dashboard", fake_ensure_shared_dashboard)
@@ -1687,7 +1687,7 @@ async def test_async_main_live_viewer_default_opens_when_allowed(monkeypatch, tm
     assert all(url.startswith("http://127.0.0.1:") for url in opened_urls)
     assert migration_calls == []
     output = capsys.readouterr().err
-    assert "Stop dashboard: claude-tap dashboard stop" in output
+    assert "Stop dashboard: token-flow dashboard stop" in output
 
 
 @pytest.mark.asyncio
@@ -1701,7 +1701,7 @@ async def test_async_main_stop_hint_includes_custom_dashboard_address(monkeypatc
     async def fake_ensure_shared_dashboard(*, host, port, output_dir, open_browser, open_browser_fn):
         return f"http://127.0.0.1:{port}", False
 
-    monkeypatch.setenv("CLOUDTAP_DB", str(tmp_path / "async-main.sqlite3"))
+    monkeypatch.setenv("TOKEN_FLOW_DB", str(tmp_path / "async-main.sqlite3"))
     monkeypatch.setattr("claude_tap.cli.run_client", fake_run_client)
     monkeypatch.setattr("claude_tap.cli.ensure_shared_dashboard", fake_ensure_shared_dashboard)
 
@@ -1720,12 +1720,12 @@ async def test_async_main_stop_hint_includes_custom_dashboard_address(monkeypatc
 
     assert code == 0
     output = capsys.readouterr().err
-    assert "Stop dashboard: claude-tap dashboard stop --tap-live-port 3000 --tap-host 0.0.0.0" in output
+    assert "Stop dashboard: token-flow dashboard stop --tap-live-port 3000 --tap-host 0.0.0.0" in output
 
 
 @pytest.mark.asyncio
 async def test_async_main_reuses_existing_dashboard_without_reopening_browser(monkeypatch, tmp_path):
-    """A second claude-tap run should attach to an existing dashboard without opening another tab."""
+    """A second Token Flow run should attach to an existing dashboard without opening another tab."""
     from claude_tap import async_main, parse_args
     from claude_tap.live import LiveViewerServer
 
@@ -1747,7 +1747,7 @@ async def test_async_main_reuses_existing_dashboard_without_reopening_browser(mo
             return server.url, True
         return f"http://{host}:{port}", False
 
-    monkeypatch.setenv("CLOUDTAP_DB", str(tmp_path / "async-main-shared.sqlite3"))
+    monkeypatch.setenv("TOKEN_FLOW_DB", str(tmp_path / "async-main-shared.sqlite3"))
     monkeypatch.setattr("claude_tap.cli.run_client", fake_run_client)
     monkeypatch.setattr("claude_tap.cli._open_browser", opened_urls.append)
     monkeypatch.setattr("claude_tap.cli.ensure_shared_dashboard", fake_ensure_shared_dashboard)
@@ -1777,7 +1777,7 @@ async def test_async_main_live_viewer_respects_tap_host(monkeypatch, tmp_path):
         dashboard_calls.append({"host": host, "port": port, "output_dir": output_dir, "open_browser": open_browser})
         return f"http://{host}:{port}", False
 
-    monkeypatch.setenv("CLOUDTAP_DB", str(tmp_path / "async-main-host.sqlite3"))
+    monkeypatch.setenv("TOKEN_FLOW_DB", str(tmp_path / "async-main-host.sqlite3"))
     monkeypatch.setattr("claude_tap.cli.run_client", fake_run_client)
     monkeypatch.setattr("claude_tap.cli.ensure_shared_dashboard", fake_ensure_shared_dashboard)
 
@@ -1809,7 +1809,7 @@ async def test_async_main_continues_when_dashboard_migration_is_locked(monkeypat
     async def fail_dashboard(**_kwargs):
         raise sqlite3.OperationalError("database is locked")
 
-    monkeypatch.setenv("CLOUDTAP_DB", str(tmp_path / "async-main-dashboard-lock.sqlite3"))
+    monkeypatch.setenv("TOKEN_FLOW_DB", str(tmp_path / "async-main-dashboard-lock.sqlite3"))
     monkeypatch.setattr("claude_tap.cli.run_client", fake_run_client)
     monkeypatch.setattr("claude_tap.cli.ensure_shared_dashboard", fail_dashboard)
 
@@ -1829,7 +1829,7 @@ async def test_async_main_finalizes_session_when_proxy_startup_fails(monkeypatch
     async def fail_start(self):
         raise OSError("bind failed")
 
-    monkeypatch.setenv("CLOUDTAP_DB", str(tmp_path / "startup-failure.sqlite3"))
+    monkeypatch.setenv("TOKEN_FLOW_DB", str(tmp_path / "startup-failure.sqlite3"))
     monkeypatch.setattr("claude_tap.cli.web.TCPSite.start", fail_start)
 
     args = parse_args(
@@ -1862,7 +1862,7 @@ async def test_async_main_no_live_and_no_open_restore_non_browser_mode(monkeypat
 
     from unittest.mock import AsyncMock
 
-    monkeypatch.setenv("CLOUDTAP_DB", str(tmp_path / "async-main-no-live.sqlite3"))
+    monkeypatch.setenv("TOKEN_FLOW_DB", str(tmp_path / "async-main-no-live.sqlite3"))
     monkeypatch.setattr("claude_tap.cli.run_client", fake_run_client)
     monkeypatch.setattr("claude_tap.cli._open_browser", opened_urls.append)
     monkeypatch.setattr("claude_tap.cli.migrate_legacy_traces", migration_calls.append)
@@ -1893,7 +1893,7 @@ async def test_async_main_no_live_continues_when_legacy_migration_is_locked(monk
     def fail_migration(_output_dir):
         raise sqlite3.OperationalError("database is locked")
 
-    monkeypatch.setenv("CLOUDTAP_DB", str(tmp_path / "async-main-locked-migration.sqlite3"))
+    monkeypatch.setenv("TOKEN_FLOW_DB", str(tmp_path / "async-main-locked-migration.sqlite3"))
     monkeypatch.setattr("claude_tap.cli.run_client", fake_run_client)
     monkeypatch.setattr("claude_tap.cli.migrate_legacy_traces", fail_migration)
 
@@ -1913,7 +1913,7 @@ async def test_async_main_export_prompt_preserves_client_failure(monkeypatch, tm
     async def fake_run_client(*args, **kwargs):
         return 7
 
-    monkeypatch.setenv("CLOUDTAP_DB", str(tmp_path / "async-main-export-failure.sqlite3"))
+    monkeypatch.setenv("TOKEN_FLOW_DB", str(tmp_path / "async-main-export-failure.sqlite3"))
     monkeypatch.setattr("claude_tap.cli.run_client", fake_run_client)
     monkeypatch.setattr("claude_tap.cli._export_prompt_from_session", lambda *_args: 0)
 
@@ -2004,7 +2004,7 @@ def test_codex_client_reverse_proxy():
             }
         )
 
-    trace_dir = tempfile.mkdtemp(prefix="claude_tap_test_codex_")
+    trace_dir = tempfile.mkdtemp(prefix="packlite_test_codex_")
     fake_bin_dir = tempfile.mkdtemp(prefix="fake_bin_codex_")
     fake_codex = Path(fake_bin_dir) / "codex"
     _write_fake_client(fake_codex, FAKE_CODEX_SCRIPT)
@@ -2136,7 +2136,7 @@ def test_grok_client_reverse_proxy():
         await resp.write_eof()
         return resp
 
-    trace_dir = tempfile.mkdtemp(prefix="claude_tap_test_grok_")
+    trace_dir = tempfile.mkdtemp(prefix="packlite_test_grok_")
     fake_bin_dir = tempfile.mkdtemp(prefix="fake_bin_grok_")
     fake_grok = Path(fake_bin_dir) / "grok"
     _write_fake_client(fake_grok, FAKE_GROK_SCRIPT)
@@ -2266,7 +2266,7 @@ def test_dsh_client_forward_proxy_captures_local_gateway():
         await resp.write_eof()
         return resp
 
-    trace_dir = tempfile.mkdtemp(prefix="claude_tap_test_dsh_")
+    trace_dir = tempfile.mkdtemp(prefix="packlite_test_dsh_")
     fake_bin_dir = tempfile.mkdtemp(prefix="fake_bin_dsh_")
     fake_dsh = Path(fake_bin_dir) / "dsh"
     _write_fake_client(fake_dsh, FAKE_DSH_SCRIPT)
@@ -2374,7 +2374,7 @@ def test_kimi_client_reverse_proxy():
         await resp.write_eof()
         return resp
 
-    trace_dir = tempfile.mkdtemp(prefix="claude_tap_test_kimi_")
+    trace_dir = tempfile.mkdtemp(prefix="packlite_test_kimi_")
     fake_bin_dir = tempfile.mkdtemp(prefix="fake_bin_kimi_")
     fake_kimi = Path(fake_bin_dir) / "kimi"
     _write_fake_client(fake_kimi, FAKE_KIMI_SCRIPT)
@@ -2597,7 +2597,7 @@ def test_kimi_multiturn_tool_calls_reverse_proxy():
         await resp.write_eof()
         return resp
 
-    trace_dir = tempfile.mkdtemp(prefix="claude_tap_test_kimi_multiturn_")
+    trace_dir = tempfile.mkdtemp(prefix="packlite_test_kimi_multiturn_")
     fake_bin_dir = tempfile.mkdtemp(prefix="fake_bin_kimi_multiturn_")
     fake_kimi = Path(fake_bin_dir) / "kimi"
     _write_fake_client(fake_kimi, FAKE_KIMI_MULTITURN_SCRIPT)
@@ -2737,7 +2737,7 @@ def test_kimi_code_client_reverse_proxy():
         await resp.write_eof()
         return resp
 
-    trace_dir = tempfile.mkdtemp(prefix="claude_tap_test_kimi_code_")
+    trace_dir = tempfile.mkdtemp(prefix="packlite_test_kimi_code_")
     fake_bin_dir = tempfile.mkdtemp(prefix="fake_bin_kimi_code_")
     fake_kimi = Path(fake_bin_dir) / "kimi"
     _write_fake_client(fake_kimi, FAKE_KIMI_CODE_SCRIPT)
@@ -2814,7 +2814,7 @@ except Exception as e:
     sys.exit(1)
 """
 
-    trace_dir = tempfile.mkdtemp(prefix="claude_tap_test_zstd_")
+    trace_dir = tempfile.mkdtemp(prefix="packlite_test_zstd_")
     fake_bin_dir = tempfile.mkdtemp(prefix="fake_bin_zstd_")
     fake_codex = Path(fake_bin_dir) / "codex"
     _write_fake_client(fake_codex, zstd_codex_script)
@@ -2954,7 +2954,7 @@ except Exception as e:
     sys.exit(1)
 '''
 
-    trace_dir = tempfile.mkdtemp(prefix="claude_tap_test_double_serial_")
+    trace_dir = tempfile.mkdtemp(prefix="packlite_test_double_serial_")
     fake_bin_dir = tempfile.mkdtemp(prefix="fake_bin_double_serial_")
     fake_claude = Path(fake_bin_dir) / "claude"
     _write_fake_client(fake_claude, double_serial_script)
@@ -3105,7 +3105,7 @@ def test_upstream_unreachable():
     returns 502 and the trace contains no records (since we can't reach upstream)."""
 
     project_dir = PROJECT_ROOT
-    trace_dir = tempfile.mkdtemp(prefix="claude_tap_test_unreachable_")
+    trace_dir = tempfile.mkdtemp(prefix="packlite_test_unreachable_")
     fake_bin_dir = _create_fake_claude(FAKE_CLAUDE_UNREACHABLE_SCRIPT)
 
     # Point --tap-target at a port that nothing is listening on
@@ -3251,14 +3251,14 @@ def test_startup_does_not_contact_pypi():
     t.start()
 
     project_dir = PROJECT_ROOT
-    trace_dir = tempfile.mkdtemp(prefix="claude_tap_test_update_")
+    trace_dir = tempfile.mkdtemp(prefix="packlite_test_update_")
     fake_bin_dir = _create_fake_claude(FAKE_CLAUDE_NOOP_SCRIPT)
 
     try:
         env = os.environ.copy()
         env["PATH"] = fake_bin_dir + ":" + env.get("PATH", "")
         env = e2e_env(env, trace_dir)
-        env["CLAUDE_TAP_PYPI_URL"] = f"http://127.0.0.1:{pypi_port}/pypi/claude-tap/json"
+        env["PACKLITE_PYPI_URL"] = f"http://127.0.0.1:{pypi_port}/pypi/packlite/json"
 
         proc = subprocess.run(
             [
@@ -3303,7 +3303,7 @@ def test_trace_cleanup():
 
     with tempfile.TemporaryDirectory() as tmpdir:
         db_path = Path(tmpdir) / "cleanup.sqlite3"
-        os.environ["CLOUDTAP_DB"] = str(db_path)
+        os.environ["TOKEN_FLOW_DB"] = str(db_path)
         reset_trace_store()
         store = get_trace_store()
         session_ids = [store.create_session(client="claude", proxy_mode="reverse") for _ in range(5)]
@@ -3327,7 +3327,7 @@ def test_trace_tagging_safety():
 
     with tempfile.TemporaryDirectory() as tmpdir:
         db_path = Path(tmpdir) / "cleanup.sqlite3"
-        os.environ["CLOUDTAP_DB"] = str(db_path)
+        os.environ["TOKEN_FLOW_DB"] = str(db_path)
         reset_trace_store()
         store = get_trace_store()
         for _ in range(5):
@@ -3348,7 +3348,7 @@ def test_manifest_migration():
     with tempfile.TemporaryDirectory() as tmpdir:
         output_dir = Path(tmpdir)
         db_path = output_dir / "migrate.sqlite3"
-        os.environ["CLOUDTAP_DB"] = str(db_path)
+        os.environ["TOKEN_FLOW_DB"] = str(db_path)
         reset_trace_store()
 
         for i in range(4):
@@ -3368,19 +3368,19 @@ def test_manifest_migration():
 
 
 def test_e2e_with_cleanup():
-    """E2E test: pre-fill sessions, run claude-tap with --tap-max-traces, verify cleanup."""
+    """E2E test: pre-fill sessions, run Token Flow with --tap-max-traces, verify cleanup."""
     from claude_tap import get_trace_store, reset_trace_store
 
     stop_upstream, upstream_port = run_fake_upstream_in_thread()
 
     project_dir = PROJECT_ROOT
-    trace_dir = tempfile.mkdtemp(prefix="claude_tap_test_cleanup_")
+    trace_dir = tempfile.mkdtemp(prefix="packlite_test_cleanup_")
     output_dir = Path(trace_dir)
     fake_bin_dir = _create_fake_claude(FAKE_CLAUDE_SCRIPT)
 
     try:
-        db_path = output_dir / "claude-tap-test.sqlite3"
-        os.environ["CLOUDTAP_DB"] = str(db_path)
+        db_path = output_dir / "packlite-test.sqlite3"
+        os.environ["TOKEN_FLOW_DB"] = str(db_path)
         reset_trace_store()
         store = get_trace_store()
         for _ in range(4):
@@ -3418,7 +3418,7 @@ def test_e2e_with_cleanup():
         assert proc.returncode == 0
         assert "Cleaned up" in proc.stderr, f"Expected cleanup message in stderr:\n{proc.stderr}"
         reset_trace_store()
-        os.environ["CLOUDTAP_DB"] = str(db_path)
+        os.environ["TOKEN_FLOW_DB"] = str(db_path)
         assert len(get_trace_store().list_session_rows()) == 3
 
         print("  test_e2e_with_cleanup PASSED")
@@ -3481,7 +3481,7 @@ async def test_live_viewer_sse_incremental():
     from claude_tap import LiveViewerServer
 
     with tempfile.TemporaryDirectory() as tmpdir:
-        os.environ["CLOUDTAP_DB"] = str(Path(tmpdir) / "live.sqlite3")
+        os.environ["TOKEN_FLOW_DB"] = str(Path(tmpdir) / "live.sqlite3")
         from claude_tap.trace_store import get_trace_store, reset_trace_store
 
         reset_trace_store()
@@ -5181,7 +5181,7 @@ async def test_live_viewer_server():
     from claude_tap import LiveViewerServer
 
     with tempfile.TemporaryDirectory() as tmpdir:
-        os.environ["CLOUDTAP_DB"] = str(Path(tmpdir) / "live.sqlite3")
+        os.environ["TOKEN_FLOW_DB"] = str(Path(tmpdir) / "live.sqlite3")
         from claude_tap.trace_store import get_trace_store, reset_trace_store
 
         reset_trace_store()
@@ -5233,7 +5233,7 @@ async def test_dashboard_main_serves_viewer(monkeypatch, tmp_path):
 
     opened_urls: list[str] = []
     monkeypatch.setattr("claude_tap.cli._open_browser", opened_urls.append)
-    monkeypatch.setenv("CLOUDTAP_DB", str(tmp_path / "dashboard.sqlite3"))
+    monkeypatch.setenv("TOKEN_FLOW_DB", str(tmp_path / "dashboard.sqlite3"))
     monkeypatch.setattr("claude_tap.cli.is_dashboard_healthy", AsyncMock(return_value=False))
     monkeypatch.setattr(
         "claude_tap.cli.migrate_legacy_traces",
@@ -5256,7 +5256,8 @@ async def test_dashboard_main_serves_viewer(monkeypatch, tmp_path):
             async with session.get(opened_urls[0]) as resp:
                 assert resp.status == 200
                 html = await resp.text()
-                assert "session-list" in html
+                assert "Token Flow" in html
+                assert "/_next/static/" in html
     finally:
         task.cancel()
         try:
@@ -5277,7 +5278,7 @@ async def test_dashboard_main_bind_all_opens_loopback_url(monkeypatch, tmp_path)
 
     opened_urls: list[str] = []
     monkeypatch.setattr("claude_tap.cli._open_browser", opened_urls.append)
-    monkeypatch.setenv("CLOUDTAP_DB", str(tmp_path / "dashboard.sqlite3"))
+    monkeypatch.setenv("TOKEN_FLOW_DB", str(tmp_path / "dashboard.sqlite3"))
     monkeypatch.setattr("claude_tap.cli.is_dashboard_healthy", AsyncMock(return_value=False))
 
     with socket.socket() as sock:
@@ -5299,8 +5300,9 @@ async def test_dashboard_main_bind_all_opens_loopback_url(monkeypatch, tmp_path)
             async with session.get(opened_urls[0]) as resp:
                 assert resp.status == 200
                 html = await resp.text()
-                assert "session-list" in html
-                assert "DASHBOARD_QUIT_TOKEN" in html
+                assert "Token Flow" in html
+                assert "/_next/static/" in html
+                assert "DASHBOARD_QUIT_TOKEN" not in html
     finally:
         task.cancel()
         try:
@@ -5319,7 +5321,7 @@ async def test_dashboard_main_opens_reused_dashboard(monkeypatch, tmp_path):
     opened_urls: list[str] = []
     migration_calls: list[Path] = []
     monkeypatch.setattr("claude_tap.cli._open_browser", opened_urls.append)
-    monkeypatch.setenv("CLOUDTAP_DB", str(tmp_path / "dashboard.sqlite3"))
+    monkeypatch.setenv("TOKEN_FLOW_DB", str(tmp_path / "dashboard.sqlite3"))
     monkeypatch.setattr("claude_tap.cli.is_dashboard_healthy", AsyncMock(return_value=True))
     monkeypatch.setattr("claude_tap.cli.migrate_legacy_traces", migration_calls.append)
 
@@ -5338,7 +5340,7 @@ async def test_dashboard_main_stops_stale_dashboard_before_start(monkeypatch, tm
     from claude_tap import dashboard_main, parse_dashboard_args
 
     calls: list[tuple[str, object]] = []
-    monkeypatch.setenv("CLOUDTAP_DB", str(tmp_path / "dashboard.sqlite3"))
+    monkeypatch.setenv("TOKEN_FLOW_DB", str(tmp_path / "dashboard.sqlite3"))
     monkeypatch.setattr("claude_tap.cli._is_dashboard_reusable", AsyncMock(return_value=False))
 
     async def fake_stop_stale(host: str, port: int, url: str) -> None:
@@ -5382,7 +5384,7 @@ async def test_dashboard_main_stops_running_dashboard(monkeypatch, tmp_path):
 
     from claude_tap import dashboard_main, parse_dashboard_args
 
-    monkeypatch.setenv("CLOUDTAP_DB", str(tmp_path / "dashboard.sqlite3"))
+    monkeypatch.setenv("TOKEN_FLOW_DB", str(tmp_path / "dashboard.sqlite3"))
     monkeypatch.setattr("claude_tap.cli.is_dashboard_healthy", AsyncMock(return_value=True))
     stop_dashboard = AsyncMock(return_value=True)
     monkeypatch.setattr("claude_tap.cli.stop_dashboard_service", stop_dashboard)
@@ -5400,7 +5402,7 @@ async def test_dashboard_main_quit_alias_stops_running_dashboard(monkeypatch, tm
 
     from claude_tap import dashboard_main, parse_dashboard_args
 
-    monkeypatch.setenv("CLOUDTAP_DB", str(tmp_path / "dashboard.sqlite3"))
+    monkeypatch.setenv("TOKEN_FLOW_DB", str(tmp_path / "dashboard.sqlite3"))
     monkeypatch.setattr("claude_tap.cli.is_dashboard_healthy", AsyncMock(return_value=True))
     stop_dashboard = AsyncMock(return_value=True)
     monkeypatch.setattr("claude_tap.cli.stop_dashboard_service", stop_dashboard)
@@ -5418,7 +5420,7 @@ async def test_dashboard_main_stop_reports_missing_dashboard(monkeypatch, tmp_pa
 
     from claude_tap import dashboard_main, parse_dashboard_args
 
-    monkeypatch.setenv("CLOUDTAP_DB", str(tmp_path / "dashboard.sqlite3"))
+    monkeypatch.setenv("TOKEN_FLOW_DB", str(tmp_path / "dashboard.sqlite3"))
     monkeypatch.setattr("claude_tap.cli.is_dashboard_healthy", AsyncMock(return_value=False))
     stop_dashboard = AsyncMock(return_value=True)
     monkeypatch.setattr("claude_tap.cli.stop_dashboard_service", stop_dashboard)
@@ -5436,7 +5438,7 @@ async def test_dashboard_main_stop_reports_stop_failure(monkeypatch, tmp_path):
 
     from claude_tap import dashboard_main, parse_dashboard_args
 
-    monkeypatch.setenv("CLOUDTAP_DB", str(tmp_path / "dashboard.sqlite3"))
+    monkeypatch.setenv("TOKEN_FLOW_DB", str(tmp_path / "dashboard.sqlite3"))
     monkeypatch.setattr("claude_tap.cli.is_dashboard_healthy", AsyncMock(return_value=True))
     stop_dashboard = AsyncMock(return_value=False)
     monkeypatch.setattr("claude_tap.cli.stop_dashboard_service", stop_dashboard)

@@ -19,10 +19,21 @@ from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
 from cryptography.x509.oid import ExtendedKeyUsageOID, NameOID
 
-log = logging.getLogger("claude-tap")
+log = logging.getLogger("token-flow")
 
-# Default directory for CA files
-_DEFAULT_CA_DIR = Path.home() / ".claude-tap"
+_TOKEN_FLOW_CA_DIR = Path.home() / ".token-flow"
+_PACKLITE_CA_DIR = Path.home() / ".packlite"
+_INHERITED_CA_DIR = Path.home() / ".claude-tap"
+# Preserve an already trusted CA from either former product name. New
+# installations use Token Flow's state directory.
+if (_TOKEN_FLOW_CA_DIR / "ca.pem").exists():
+    _DEFAULT_CA_DIR = _TOKEN_FLOW_CA_DIR
+elif (_PACKLITE_CA_DIR / "ca.pem").exists():
+    _DEFAULT_CA_DIR = _PACKLITE_CA_DIR
+elif (_INHERITED_CA_DIR / "ca.pem").exists():
+    _DEFAULT_CA_DIR = _INHERITED_CA_DIR
+else:
+    _DEFAULT_CA_DIR = _TOKEN_FLOW_CA_DIR
 
 # CA validity: 5 years
 _CA_VALIDITY_DAYS = 5 * 365
@@ -57,8 +68,8 @@ def ensure_ca(ca_dir: Path | None = None) -> tuple[Path, Path]:
     key = _generate_key()
     name = x509.Name(
         [
-            x509.NameAttribute(NameOID.COMMON_NAME, "claude-tap CA"),
-            x509.NameAttribute(NameOID.ORGANIZATION_NAME, "claude-tap"),
+            x509.NameAttribute(NameOID.COMMON_NAME, "Token Flow CA"),
+            x509.NameAttribute(NameOID.ORGANIZATION_NAME, "Token Flow"),
         ]
     )
 

@@ -24,6 +24,7 @@ from claude_tap.dashboard import (
     load_trace_session,
     read_dashboard_template,
     redact_dashboard_summary,
+    select_trace_turn_records,
 )
 from claude_tap.history import delete_trace_history, migrate_legacy_traces
 from claude_tap.shared_dashboard import CLAUDE_TAP_VERSION, dashboard_url
@@ -43,6 +44,8 @@ from claude_tap.viewer import (
 _DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 DEFAULT_SESSION_PAGE_LIMIT = 100
 MAX_SESSION_PAGE_LIMIT = 500
+WEB_UI_DIR = Path(__file__).parent / "web_ui"
+WEB_UI_INDEX_PATH = WEB_UI_DIR / "index.html"
 
 _DASHBOARD_QUIT_TOKEN_HEADER = "X-Claude-Tap-Dashboard-Token"
 
@@ -224,6 +227,7 @@ class LiveViewerServer:
         app.router.add_get("/viewer", self._handle_index)
         app.router.add_get("/dashboard", self._handle_dashboard_index)
         app.router.add_get("/dashboard/session/{session_id}", self._handle_dashboard_session_detail)
+        app.router.add_get("/_next/{asset_path:.*}", self._handle_web_ui_asset)
         app.router.add_get("/dashboard/health", self._handle_dashboard_health)
         app.router.add_get("/dashboard/events", self._handle_dashboard_sse)
         app.router.add_post("/dashboard/quit", self._handle_dashboard_quit)
@@ -333,6 +337,8 @@ class LiveViewerServer:
         """Serve the session-first dashboard."""
         if session_id := request.query.get("session_id"):
             raise web.HTTPFound(location=f"/dashboard/session/{quote(session_id, safe='')}")
+        if WEB_UI_INDEX_PATH.exists():
+            return web.Response(text=WEB_UI_INDEX_PATH.read_text(encoding="utf-8"), content_type="text/html")
         try:
             html = read_dashboard_template()
         except OSError:
@@ -355,10 +361,21 @@ class LiveViewerServer:
         return web.Response(text=html, content_type="text/html")
 
     async def _handle_dashboard_session_detail(self, request: web.Request) -> web.Response:
-        """Serve the dashboard shell for a session detail route."""
-        if ensure_trace_store().load_session_row(request.match_info["session_id"]) is None:
+        """Serve the Next.js workspace shell for one session."""
+        if get_trace_store().load_session_row(request.match_info["session_id"]) is None:
             return web.Response(status=404, text="Session not found")
-        return await self._handle_dashboard_index(request)
+        if WEB_UI_INDEX_PATH.exists():
+            return web.Response(text=WEB_UI_INDEX_PATH.read_text(encoding="utf-8"), content_type="text/html")
+        return await self._session_html_response(request.match_info["session_id"])
+
+    async def _handle_web_ui_asset(self, request: web.Request) -> web.StreamResponse:
+        """Serve a hashed Next.js static asset without allowing path traversal."""
+        relative = Path(request.match_info["asset_path"])
+        root = (WEB_UI_DIR / "_next").resolve()
+        candidate = (root / relative).resolve()
+        if root not in candidate.parents or not candidate.is_file():
+            raise web.HTTPNotFound()
+        return web.FileResponse(candidate, headers={"Cache-Control": "public, max-age=31536000, immutable"})
 
     async def _handle_dashboard_health(self, request: web.Request) -> web.Response:
         payload = {
@@ -562,6 +579,8 @@ class LiveViewerServer:
         if session is None:
             return web.json_response({"error": "Session not found"}, status=404)
         session = dict(session)
+        if request.query.get("view") == "turns":
+            session["records"] = select_trace_turn_records(session.get("records") or [])
         session["records"] = [attach_cost_to_record(record) for record in session.get("records") or []]
         return web.json_response(session)
 

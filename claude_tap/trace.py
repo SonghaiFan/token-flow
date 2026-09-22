@@ -95,7 +95,7 @@ class TraceWriter:
         if self._storage_warning_emitted:
             return
         self._storage_warning_emitted = True
-        sys.stderr.write(f"claude-tap: trace storage failed; continuing without blocking proxy ({exc})\n")
+        sys.stderr.write(f"token-flow: trace storage failed; continuing without blocking proxy ({exc})\n")
 
     def _update_stats(self, record: dict) -> None:
         req_body = record.get("request", {}).get("body", {})

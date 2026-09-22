@@ -80,7 +80,7 @@ def _load_records_from_text(text: str) -> tuple[list[dict], dict | None]:
 def export_main(argv: list[str] | None = None) -> int:
     """Entry point for the export subcommand."""
     parser = argparse.ArgumentParser(
-        prog="claude-tap export",
+        prog="token-flow export",
         description="Export a trace file or SQLite session to Markdown, JSON, HTML, or compact trace.",
     )
     parser.add_argument("source", type=str, nargs="?", help="Path to a .jsonl trace file or a SQLite session id")

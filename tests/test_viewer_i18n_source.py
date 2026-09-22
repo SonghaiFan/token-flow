@@ -51,11 +51,11 @@ def test_viewer_i18n_translates_every_provenance_kind_the_classifier_emits() -> 
     assert entries["zh-CN"]["origin_kind_recap"] != entries["en"]["origin_kind_recap"]
 
 
-def test_viewer_session_sort_label_uses_query_language() -> None:
+def test_viewer_session_sort_label_uses_conversation_language() -> None:
     entries = _load_viewer_i18n()
 
-    assert entries["en"]["sort_session"] == "Query"
-    assert entries["zh-CN"]["sort_session"] == "用户输入"
+    assert entries["en"]["sort_session"] == "Conversation"
+    assert entries["zh-CN"]["sort_session"] == "对话内容"
     assert entries["en"]["tab_trace"] == "Trace"
     assert entries["zh-CN"]["tab_trace"] == "轨迹"
 
@@ -96,7 +96,7 @@ def test_split_viewer_js_assets_use_semantic_filenames() -> None:
     names = [path.name for path in VIEWER_JS_PATHS]
 
     assert names == [
-        "packlite_d3_layouts.min.js",
+        "token_flow_d3_layouts.min.js",
         "state.js",
         "responses.js",
         "lazy_loading.js",

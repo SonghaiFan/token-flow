@@ -50,13 +50,25 @@ def test_resolve_dashboard_port_honors_explicit_port() -> None:
 
 
 def test_resolve_dashboard_port_honors_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("TOKEN_FLOW_DASHBOARD_PORT", "8765")
+    assert resolve_dashboard_port(0) == 8765
+
+
+def test_resolve_dashboard_port_honors_packlite_compatibility_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("TOKEN_FLOW_DASHBOARD_PORT", raising=False)
+    monkeypatch.setenv("PACKLITE_DASHBOARD_PORT", "8766")
+    assert resolve_dashboard_port(0) == 8766
+
+
+def test_resolve_dashboard_port_honors_inherited_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("TOKEN_FLOW_DASHBOARD_PORT", raising=False)
     monkeypatch.setenv("CLOUDTAP_DASHBOARD_PORT", "8765")
     assert resolve_dashboard_port(0) == 8765
 
 
 @pytest.mark.parametrize("value", ["0", "-1", "not-a-port"])
 def test_resolve_dashboard_port_ignores_invalid_env(monkeypatch: pytest.MonkeyPatch, value: str) -> None:
-    monkeypatch.setenv("CLOUDTAP_DASHBOARD_PORT", value)
+    monkeypatch.setenv("TOKEN_FLOW_DASHBOARD_PORT", value)
     assert resolve_dashboard_port(0) == DEFAULT_DASHBOARD_PORT
 
 
@@ -83,22 +95,60 @@ def test_sync_dashboard_health_uses_proxyless_opener(monkeypatch: pytest.MonkeyP
         def __exit__(self, *_args: object) -> None:
             return None
 
+        def __init__(self, body: bytes) -> None:
+            self.body = body
+
         def read(self) -> bytes:
-            return json_bytes
+            return self.body
 
     class FakeOpener:
         def open(self, url: str, *, timeout: float) -> FakeResponse:
             calls.append((url, timeout))
-            return FakeResponse()
+            if url.endswith("/dashboard/health"):
+                return FakeResponse(health_json_bytes)
+            return FakeResponse(b'{"sessions":[]}')
 
     db_path = tmp_path / "health.sqlite3"
-    json_bytes = f'{{"ok":true,"db_path":"{db_path}","version":"{CLAUDE_TAP_VERSION}"}}'.encode()
+    health_json_bytes = f'{{"ok":true,"db_path":"{db_path}","version":"{CLAUDE_TAP_VERSION}"}}'.encode()
     calls: list[tuple[str, float]] = []
-    monkeypatch.setenv("CLOUDTAP_DB", str(db_path))
+    monkeypatch.setenv("TOKEN_FLOW_DB", str(db_path))
     monkeypatch.setattr("claude_tap.shared_dashboard._LOCAL_DASHBOARD_OPENER", FakeOpener())
 
     assert _sync_dashboard_healthy_for_current_db("127.0.0.1", 19527) is True
-    assert calls and calls[0][0] == "http://127.0.0.1:19527/dashboard/health"
+    assert [call[0] for call in calls] == [
+        "http://127.0.0.1:19527/dashboard/health",
+        "http://127.0.0.1:19527/api/sessions?offset=0&limit=1",
+    ]
+
+
+def test_sync_dashboard_health_rejects_broken_sessions_api(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    class FakeResponse:
+        def __init__(self, status: int, body: bytes) -> None:
+            self.status = status
+            self.body = body
+
+        def __enter__(self) -> "FakeResponse":
+            return self
+
+        def __exit__(self, *_args: object) -> None:
+            return None
+
+        def read(self) -> bytes:
+            return self.body
+
+    class FakeOpener:
+        def open(self, url: str, *, timeout: float) -> FakeResponse:
+            assert timeout > 0
+            if url.endswith("/dashboard/health"):
+                return FakeResponse(200, health_json_bytes)
+            return FakeResponse(500, b"Internal Server Error")
+
+    db_path = tmp_path / "health.sqlite3"
+    health_json_bytes = f'{{"ok":true,"db_path":"{db_path}","version":"{CLAUDE_TAP_VERSION}"}}'.encode()
+    monkeypatch.setenv("TOKEN_FLOW_DB", str(db_path))
+    monkeypatch.setattr("claude_tap.shared_dashboard._LOCAL_DASHBOARD_OPENER", FakeOpener())
+
+    assert _sync_dashboard_healthy_for_current_db("127.0.0.1", 19527) is False
 
 
 def test_sync_dashboard_health_rejects_stale_version(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
@@ -121,19 +171,19 @@ def test_sync_dashboard_health_rejects_stale_version(monkeypatch: pytest.MonkeyP
 
     db_path = tmp_path / "health.sqlite3"
     json_bytes = f'{{"ok":true,"db_path":"{db_path}","version":"0.1.106"}}'.encode()
-    monkeypatch.setenv("CLOUDTAP_DB", str(db_path))
+    monkeypatch.setenv("TOKEN_FLOW_DB", str(db_path))
     monkeypatch.setattr("claude_tap.shared_dashboard._LOCAL_DASHBOARD_OPENER", FakeOpener())
 
     assert _sync_dashboard_healthy_for_current_db("127.0.0.1", 19527) is False
 
 
 def test_dashboard_lock_path(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    monkeypatch.setenv("CLOUDTAP_DB", str(tmp_path / "test.sqlite3"))
+    monkeypatch.setenv("TOKEN_FLOW_DB", str(tmp_path / "test.sqlite3"))
     assert _dashboard_lock_path() == tmp_path / "dashboard.lock"
 
 
 def test_dashboard_spawn_lock(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    monkeypatch.setenv("CLOUDTAP_DB", str(tmp_path / "test.sqlite3"))
+    monkeypatch.setenv("TOKEN_FLOW_DB", str(tmp_path / "test.sqlite3"))
     with _dashboard_spawn_lock():
         pass
     with _dashboard_spawn_lock():
@@ -181,7 +231,7 @@ def test_spawn_dashboard_subprocess_hides_windows_console(
             captured["kwargs"] = kwargs
             self.pid = 99999
 
-    scripts_dir = tmp_path / "uv" / "tools" / "claude-tap" / "Scripts"
+    scripts_dir = tmp_path / "uv" / "tools" / "packlite" / "Scripts"
     scripts_dir.mkdir(parents=True)
     python_exe = scripts_dir / "python.exe"
     pythonw_exe = scripts_dir / "pythonw.exe"
@@ -223,7 +273,7 @@ async def test_is_dashboard_healthy_real_server(monkeypatch: pytest.MonkeyPatch,
     from claude_tap.live import LiveViewerServer
     from claude_tap.shared_dashboard import wait_for_dashboard_healthy
 
-    monkeypatch.setenv("CLOUDTAP_DB", str(tmp_path / "dashboard.sqlite3"))
+    monkeypatch.setenv("TOKEN_FLOW_DB", str(tmp_path / "dashboard.sqlite3"))
 
     # Before starting, it should be unhealthy
     assert await is_dashboard_healthy("127.0.0.1", 54321) is False
@@ -253,7 +303,7 @@ async def test_is_dashboard_healthy_real_server(monkeypatch: pytest.MonkeyPatch,
 async def test_stop_shared_dashboard_stops_real_server(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     from claude_tap.live import LiveViewerServer
 
-    monkeypatch.setenv("CLOUDTAP_DB", str(tmp_path / "dashboard.sqlite3"))
+    monkeypatch.setenv("TOKEN_FLOW_DB", str(tmp_path / "dashboard.sqlite3"))
 
     server = LiveViewerServer(port=0, migrate_from=tmp_path, dashboard_mode=True)
     port = await server.start()
@@ -271,7 +321,7 @@ async def test_bind_all_dashboard_uses_loopback_for_local_controls(
 ) -> None:
     from claude_tap.live import LiveViewerServer
 
-    monkeypatch.setenv("CLOUDTAP_DB", str(tmp_path / "dashboard.sqlite3"))
+    monkeypatch.setenv("TOKEN_FLOW_DB", str(tmp_path / "dashboard.sqlite3"))
 
     server = LiveViewerServer(port=0, host="0.0.0.0", migrate_from=tmp_path, dashboard_mode=True)
     port = await server.start()
@@ -392,6 +442,18 @@ def test_looks_like_legacy_dashboard_command_is_strict() -> None:
         "/usr/bin/python -m claude_tap dashboard --tap-live-port 19527",
         19527,
     )
+    assert _looks_like_legacy_dashboard_command(
+        "/usr/local/bin/claude-tap dashboard --tap-live-port 19527",
+        19527,
+    )
+    assert _looks_like_legacy_dashboard_command(
+        "/usr/local/bin/token-flow dashboard --tap-live-port 19527",
+        19527,
+    )
+    assert _looks_like_legacy_dashboard_command(
+        "/usr/local/bin/packlite dashboard --tap-live-port 19527",
+        19527,
+    )
     assert not _looks_like_legacy_dashboard_command(
         "/usr/bin/python -m claude_tap dashboard --tap-live-port 3000",
         19527,
@@ -462,7 +524,7 @@ def test_dashboard_process_command_reads_linux_proc(monkeypatch: pytest.MonkeyPa
 def test_dashboard_process_command_falls_back_to_ps(monkeypatch: pytest.MonkeyPatch) -> None:
     class Result:
         returncode = 0
-        stdout = "claude-tap dashboard --tap-live-port 19527\n"
+        stdout = "packlite dashboard --tap-live-port 19527\n"
 
     def fake_which(name: str) -> str | None:
         return "/bin/ps" if name == "ps" else None
@@ -471,7 +533,7 @@ def test_dashboard_process_command_falls_back_to_ps(monkeypatch: pytest.MonkeyPa
     monkeypatch.setattr("claude_tap.shared_dashboard.shutil.which", fake_which)
     monkeypatch.setattr("claude_tap.shared_dashboard.subprocess.run", lambda *_args, **_kwargs: Result())
 
-    assert _dashboard_process_command(123) == "claude-tap dashboard --tap-live-port 19527"
+    assert _dashboard_process_command(123) == "packlite dashboard --tap-live-port 19527"
 
 
 def test_terminate_legacy_dashboard_pids_filters_commands(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -517,11 +579,11 @@ async def test_stop_legacy_dashboard_process_terminates_and_waits(monkeypatch: p
 
 
 @pytest.mark.asyncio
-async def test_is_dashboard_healthy_prefers_lightweight_health_route(
+async def test_is_dashboard_healthy_checks_session_data_api(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
-    monkeypatch.setenv("CLOUDTAP_DB", str(tmp_path / "health.sqlite3"))
+    monkeypatch.setenv("TOKEN_FLOW_DB", str(tmp_path / "health.sqlite3"))
     sessions_seen = False
     app = web.Application()
 
@@ -538,14 +600,38 @@ async def test_is_dashboard_healthy_prefers_lightweight_health_route(
     runner, port = await _start_test_app(app)
     try:
         assert await is_dashboard_healthy("127.0.0.1", port) is True
-        assert sessions_seen is False
+        assert sessions_seen is True
+    finally:
+        await runner.cleanup()
+
+
+@pytest.mark.asyncio
+async def test_is_dashboard_healthy_rejects_broken_session_data_api(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.setenv("TOKEN_FLOW_DB", str(tmp_path / "health.sqlite3"))
+    app = web.Application()
+
+    async def health(request: web.Request) -> web.Response:
+        return web.json_response({"ok": True, "db_path": str(resolve_db_path()), "version": CLAUDE_TAP_VERSION})
+
+    async def sessions(request: web.Request) -> web.Response:
+        return web.Response(status=500, text="Internal Server Error")
+
+    app.router.add_get("/dashboard/health", health)
+    app.router.add_get("/api/sessions", sessions)
+    runner, port = await _start_test_app(app)
+    try:
+        assert await is_dashboard_healthy("127.0.0.1", port) is False
+        assert await is_dashboard_healthy("127.0.0.1", port, require_current_db=False) is True
     finally:
         await runner.cleanup()
 
 
 @pytest.mark.asyncio
 async def test_is_dashboard_healthy_rejects_stale_version(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    monkeypatch.setenv("CLOUDTAP_DB", str(tmp_path / "current.sqlite3"))
+    monkeypatch.setenv("TOKEN_FLOW_DB", str(tmp_path / "current.sqlite3"))
     app = web.Application()
 
     async def health(request: web.Request) -> web.Response:
@@ -563,7 +649,7 @@ async def test_is_dashboard_healthy_rejects_stale_version(monkeypatch: pytest.Mo
 
 @pytest.mark.asyncio
 async def test_is_dashboard_healthy_rejects_different_database(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    monkeypatch.setenv("CLOUDTAP_DB", str(tmp_path / "current.sqlite3"))
+    monkeypatch.setenv("TOKEN_FLOW_DB", str(tmp_path / "current.sqlite3"))
     app = web.Application()
 
     async def health(request: web.Request) -> web.Response:
@@ -681,7 +767,7 @@ async def test_ensure_shared_dashboard_reports_unstoppable_stale_dashboard(
     monkeypatch.setattr("claude_tap.shared_dashboard.is_dashboard_healthy", fake_is_dashboard_healthy)
     monkeypatch.setattr("claude_tap.shared_dashboard.stop_dashboard_service", fake_stop_dashboard_service)
 
-    with pytest.raises(RuntimeError, match="outdated claude-tap dashboard"):
+    with pytest.raises(RuntimeError, match="outdated Token Flow dashboard"):
         await ensure_shared_dashboard(
             host="127.0.0.1",
             port=19527,
@@ -722,7 +808,7 @@ async def test_ensure_shared_dashboard_migrates_after_lock_time_reuse(
 
 @pytest.mark.asyncio
 async def test_ensure_shared_dashboard_spawns(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    monkeypatch.setenv("CLOUDTAP_DB", str(tmp_path / "test.sqlite3"))
+    monkeypatch.setenv("TOKEN_FLOW_DB", str(tmp_path / "test.sqlite3"))
 
     health_calls: list[int] = []
 
@@ -759,7 +845,7 @@ async def test_ensure_shared_dashboard_spawns(monkeypatch: pytest.MonkeyPatch, t
 
 @pytest.mark.asyncio
 async def test_ensure_shared_dashboard_timeout_raises_error(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    monkeypatch.setenv("CLOUDTAP_DB", str(tmp_path / "test.sqlite3"))
+    monkeypatch.setenv("TOKEN_FLOW_DB", str(tmp_path / "test.sqlite3"))
 
     async def mock_false(h: str, p: int, *, require_current_db: bool = True) -> bool:
         return False

@@ -33,7 +33,7 @@ from claude_tap.cursor_metadata import (
 from claude_tap.trace import TraceWriter, create_trace_writer
 from claude_tap.trace_store import SessionQuery, TraceStore, get_trace_store
 
-log = logging.getLogger("claude-tap")
+log = logging.getLogger("token-flow")
 
 _DEFAULT_POLL_INTERVAL_SECONDS = 1.0
 _SYNC_ERROR_LOG_EVERY = 10
@@ -449,7 +449,7 @@ class CursorTranscriptWatcher:
     """Poll local Cursor agent transcripts and append new steps to traces.
 
     Each Cursor transcript JSONL (one IDE/CLI conversation) maps to its own
-    claude-tap session. Mixing conversations into one session is a bug.
+    Token Flow session. Mixing conversations into one session is a bug.
 
     Incremental import assumes transcripts are append-only. If Cursor truncates
     or rewrites a JSONL file (size shrinks), the per-file skip cursor is reset

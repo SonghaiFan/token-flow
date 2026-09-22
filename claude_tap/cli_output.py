@@ -1,4 +1,4 @@
-"""Output helpers shared by claude-tap command-line modules."""
+"""Output helpers shared by Token Flow command-line modules."""
 
 from __future__ import annotations
 

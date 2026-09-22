@@ -1,0 +1,99 @@
+@import "tailwindcss";
+@import "streamdown/styles.css";
+
+@theme inline {
+  --font-sans: var(--font-token-flow-sans);
+  --font-mono: var(--font-token-flow-mono);
+  --color-ink: var(--ink);
+  --color-muted: var(--muted);
+  --color-line: var(--line);
+  --color-canvas: var(--canvas);
+  --color-panel: var(--panel);
+  --color-accent: var(--accent);
+  --color-success: var(--success);
+  --color-warning: var(--warning);
+  --color-danger: var(--danger);
+}
+
+:root {
+  --font-token-flow-sans: -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", sans-serif;
+  --font-token-flow-mono: "SFMono-Regular", "SF Mono", "Cascadia Code", monospace;
+  --canvas: #f5f6f8;
+  --panel: #ffffff;
+  --ink: #171a1f;
+  --muted: #667085;
+  --line: #e4e7ec;
+  --accent: #171a1f;
+  --success: #0d9f6e;
+  --warning: #f79009;
+  --danger: #e5484d;
+  --cached: #12a87a;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --canvas: #0d1117;
+    --panel: #161b22;
+    --ink: #f0f3f6;
+    --muted: #8b949e;
+    --line: #30363d;
+    --accent: #f0f3f6;
+  }
+}
+
+:root[data-theme="dark"] {
+  --canvas: #0d1117;
+  --panel: #161b22;
+  --ink: #f0f3f6;
+  --muted: #8b949e;
+  --line: #30363d;
+  --accent: #f0f3f6;
+}
+
+* { box-sizing: border-box; }
+html { background: var(--canvas); }
+body {
+  min-height: 100dvh;
+  margin: 0;
+  background: var(--canvas);
+  color: var(--ink);
+  font-family: var(--font-token-flow-sans);
+  -webkit-font-smoothing: antialiased;
+}
+button, input, select { font: inherit; }
+button, a { -webkit-tap-highlight-color: transparent; }
+button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible {
+  outline: 2px solid var(--ink);
+  outline-offset: 2px;
+}
+.scrollbar-none { scrollbar-width: none; }
+.scrollbar-none::-webkit-scrollbar { display: none; }
+
+/* Keep the JSON viewer's hover-only copy action out of text flow. */
+.token-flow-json-tree .w-rjv-line > span,
+.token-flow-json-tree .w-rjv-inner > div:first-child {
+  position: relative;
+  padding-right: 1.35rem;
+  white-space: nowrap;
+}
+
+.token-flow-json-tree .token-flow-json-key-selected {
+  border-radius: 0.25rem;
+  background: color-mix(in srgb, var(--warning) 18%, transparent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--warning) 32%, transparent);
+}
+
+.token-flow-json-tree .w-rjv-line > span > .w-rjv-copied,
+.token-flow-json-tree .w-rjv-inner > div:first-child > .w-rjv-copied {
+  position: absolute;
+  top: 50%;
+  right: 0.15rem;
+  flex: 0 0 auto;
+  margin-left: 0 !important;
+  transform: translateY(-50%);
+}
+
+.token-flow-raw-json .raw-json-selected {
+  background: color-mix(in srgb, var(--warning) 18%, transparent);
+  box-shadow: inset 2px 0 0 var(--ink);
+}

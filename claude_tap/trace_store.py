@@ -59,15 +59,27 @@ _store_lock = threading.Lock()
 
 def resolve_db_path() -> Path:
     """Return the canonical local trace database path."""
-    override = os.environ.get("CLOUDTAP_DB", "").strip()
+    override = (
+        os.environ.get("TOKEN_FLOW_DB", "").strip()
+        or os.environ.get("PACKLITE_DB", "").strip()
+        or os.environ.get("CLOUDTAP_DB", "").strip()
+    )
     if override:
         return Path(override).expanduser().resolve()
     xdg_data = os.environ.get("XDG_DATA_HOME", "").strip()
-    if xdg_data:
-        base = Path(xdg_data).expanduser() / "claude-tap"
-    else:
-        base = Path.home() / ".local" / "share" / "claude-tap"
-    return (base / DB_FILENAME).resolve()
+    data_home = Path(xdg_data).expanduser() if xdg_data else Path.home() / ".local" / "share"
+    token_flow_db = data_home / "token-flow" / DB_FILENAME
+    packlite_db = data_home / "packlite" / DB_FILENAME
+    inherited_db = data_home / "claude-tap" / DB_FILENAME
+    # Existing installations keep seeing their captured conversations. New
+    # installations use Token Flow's own data directory.
+    if token_flow_db.exists():
+        return token_flow_db.resolve()
+    if packlite_db.exists():
+        return packlite_db.resolve()
+    if inherited_db.exists():
+        return inherited_db.resolve()
+    return token_flow_db.resolve()
 
 
 def get_trace_store() -> TraceStore:

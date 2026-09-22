@@ -1,11 +1,11 @@
-# Maintainer Docs
+# Token Flow internal product context
 
-This directory contains maintainer and agent automation materials that are useful for project operations but are not part of the public user documentation.
+This directory contains durable Token Flow-specific context only.
 
-- `standards/` contains required maintainer policies and validation rules.
-- `plans/` contains implementation plans and handoff notes.
-- `error-experience/` and `good-experience/` contain internal learning records.
-- `guides/` contains maintainer-facing workflow and integration playbooks.
-- `architecture/manifest.yaml` lists paths covered by the legibility check.
+- [`standards/product-design-system.md`](standards/product-design-system.md) is
+  the product, interaction, responsive-layout, and evidence-rendering contract.
 
-Keep public user documentation and README assets in `docs/`.
+Do not restore upstream release policy, PR evidence, recordings, generated
+screenshots, temporary plans, or repository skills here. The complete upstream
+Claude Tap source remains available in `/Users/songhaifan/Documents/Token Flow/claude-tap`
+for read-only comparison.

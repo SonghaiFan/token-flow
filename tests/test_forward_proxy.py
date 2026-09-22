@@ -68,7 +68,7 @@ async def test_forward_proxy_captures_codexapp_custom_responses_request(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setenv("CLOUDTAP_DB", str(tmp_path / "traces.sqlite3"))
+    monkeypatch.setenv("TOKEN_FLOW_DB", str(tmp_path / "traces.sqlite3"))
     reset_trace_store()
     store = get_trace_store()
     session_id = store.create_session(client="codexapp", proxy_mode="forward")
@@ -150,7 +150,7 @@ async def test_forward_proxy_captures_compressed_pi_request(
     encoding: str,
     compress: Callable[[bytes], bytes],
 ) -> None:
-    monkeypatch.setenv("CLOUDTAP_DB", str(tmp_path / "traces.sqlite3"))
+    monkeypatch.setenv("TOKEN_FLOW_DB", str(tmp_path / "traces.sqlite3"))
     reset_trace_store()
     store = get_trace_store()
     session_id = store.create_session(client="pi", proxy_mode="forward")

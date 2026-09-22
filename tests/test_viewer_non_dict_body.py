@@ -84,7 +84,7 @@ def test_extract_metadata_handles_non_dict_request_response_containers() -> None
 
 
 def test_extract_metadata_handles_talon_codex_trace_with_string_request_body() -> None:
-    """Regression for Talon-launched Codex traces captured by claude-tap 0.1.38.
+    """Regression for Talon-launched Codex traces captured by packlite 0.1.38.
 
     The crashed stack was in _generate_html_viewer -> _extract_metadata when a
     Codex WebSocket trace had request.body as a string. Metadata extraction must

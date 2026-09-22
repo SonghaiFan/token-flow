@@ -26,7 +26,7 @@ INJECTED_OPENERS = [
     "<environment_context>\ncwd: /tmp\n</environment_context>",
     "<session_context>\nid: abc\n</session_context>",
     "<local-command-caveat>\nOutput below\n</local-command-caveat>",
-    "<additional_metadata>\nrepo: claude-tap\n</additional_metadata>",
+    "<additional_metadata>\nrepo: packlite\n</additional_metadata>",
     "# AGENTS.md instructions\n\nRun ruff before committing.",
     "# Files mentioned by the user:\n\n- viewer.py",
 ]

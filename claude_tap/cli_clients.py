@@ -1,4 +1,4 @@
-"""Client launch and target detection helpers for claude-tap CLI."""
+"""Client launch and target detection helpers for the Token Flow CLI."""
 
 from __future__ import annotations
 
@@ -44,7 +44,18 @@ _CODEX_APP_DEFAULT_EXECUTABLES = (
     Path("/Applications/ChatGPT.app/Contents/MacOS/ChatGPT"),
     Path("/Applications/Codex.app/Contents/MacOS/Codex"),
 )
-_CODEX_APP_ISOLATED_PROFILE_ROOT = Path.home() / ".claude-tap" / "codex-app-profiles"
+_TOKEN_FLOW_STATE_ROOT = Path.home() / ".token-flow"
+_PACKLITE_STATE_ROOT = Path.home() / ".packlite"
+_INHERITED_STATE_ROOT = Path.home() / ".claude-tap"
+if _TOKEN_FLOW_STATE_ROOT.exists():
+    _ACTIVE_STATE_ROOT = _TOKEN_FLOW_STATE_ROOT
+elif _PACKLITE_STATE_ROOT.exists():
+    _ACTIVE_STATE_ROOT = _PACKLITE_STATE_ROOT
+elif _INHERITED_STATE_ROOT.exists():
+    _ACTIVE_STATE_ROOT = _INHERITED_STATE_ROOT
+else:
+    _ACTIVE_STATE_ROOT = _TOKEN_FLOW_STATE_ROOT
+_CODEX_APP_ISOLATED_PROFILE_ROOT = _ACTIVE_STATE_ROOT / "codex-app-profiles"
 # Kept for tests/docs that refer to the historical fixed path; launches now use a
 # per-run directory under ``_CODEX_APP_ISOLATED_PROFILE_ROOT``.
 _CODEX_APP_ISOLATED_PROFILE_DIR = _CODEX_APP_ISOLATED_PROFILE_ROOT / "tap"
@@ -824,7 +835,7 @@ async def run_client(
     # Give TUI children their own process group and make them the foreground
     # group so they have full terminal control (e.g. Cmd+Delete, Ctrl+U).
     # Codex App is a GUI process with very noisy app-server logs; keep its
-    # stdio detached so claude-tap's terminal only shows capture status.
+    # stdio detached so Token Flow's terminal only shows capture status.
     hide_child_output = client == "codexapp"
     use_fg = not hide_child_output and hasattr(os, "tcsetpgrp") and sys.stdin.isatty()
 
@@ -936,7 +947,7 @@ async def run_client(
             "   Codex App exited immediately. If macOS printed something like "
             "'opening in an existing browser session', an already-running "
             "Codex/ChatGPT App handled the launch and did not inherit "
-            "claude-tap's HTTPS_PROXY/CA environment. Quit the app completely, "
+            "Token Flow's HTTPS_PROXY/CA environment. Quit the app completely, "
             "then run this command again."
         )
     return code
@@ -978,7 +989,7 @@ def _maybe_rewrite_hermes_gateway_start(client: str, cmd_args: list[str]) -> lis
     if i + 1 < len(cmd_args) and cmd_args[i] == "gateway" and cmd_args[i + 1] == "start":
         _print(
             "ℹ️  Rewriting `hermes gateway start` to `hermes gateway run` so the "
-            "gateway runs in the foreground under claude-tap. Recent hermes "
+            "gateway runs in the foreground under Token Flow. Recent hermes "
             "versions delegate `gateway start` to systemd / launchd, which spawns "
             "the gateway in a fresh env that does NOT inherit the proxy / CA env "
             "we inject — trace capture would silently fail. Pass --tap-no-launch "
@@ -1162,10 +1173,10 @@ def _codex_reverse_args(proxy_base_url: str, args: list[str]) -> list[str]:
         ]
         args = _without_config_overrides(args, {provider_base_url_key, f"{provider_key}.supports_websockets"})
     else:
-        provider_key = "model_providers.claude-tap-openai"
+        provider_key = "model_providers.token-flow-openai"
         overrides = [
-            'model_provider="claude-tap-openai"',
-            f'{provider_key}.name="claude-tap"',
+            'model_provider="token-flow-openai"',
+            f'{provider_key}.name="Token Flow"',
             f'{provider_key}.base_url="{proxy_base_url}"',
             f'{provider_key}.wire_api="responses"',
             f"{provider_key}.requires_openai_auth=true",
@@ -1778,7 +1789,7 @@ _KIMI_CODE_SANDBOX_LINKS: tuple[tuple[str, bool], ...] = (
     ("mcp.json", False),
     ("tui.toml", False),
 )
-_KIMI_CODE_CONFIG_METADATA = ".claude-tap-config-metadata.json"
+_KIMI_CODE_CONFIG_METADATA = ".token-flow-config-metadata.json"
 
 
 def _link_kimi_code_sandbox_path(source_home: Path, sandbox: Path, rel: str, *, is_dir: bool) -> None:

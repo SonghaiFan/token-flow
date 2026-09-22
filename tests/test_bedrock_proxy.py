@@ -150,7 +150,7 @@ def _bedrock_body_with_error() -> bytes:
 
 
 def _make_writer(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[Any, str, TraceWriter]:
-    monkeypatch.setenv("CLOUDTAP_DB", str(tmp_path / "traces.sqlite3"))
+    monkeypatch.setenv("TOKEN_FLOW_DB", str(tmp_path / "traces.sqlite3"))
     reset_trace_store()
     store = get_trace_store()
     session_id = store.create_session(client="claude", proxy_mode="reverse")
@@ -367,7 +367,7 @@ def test_capture_only_response_shapes_model_probes_by_provider() -> None:
     assert is_capture_only_request("/v1internal:streamGenerateContent?alt=sse", {"request": {"contents": []}})
 
     openai_model = capture_only_response("/v1/models/gpt-5", None)
-    assert openai_model == {"id": "gpt-5", "object": "model", "created": 0, "owned_by": "claude-tap"}
+    assert openai_model == {"id": "gpt-5", "object": "model", "created": 0, "owned_by": "token-flow"}
 
     gemini = capture_only_response("/v1beta/models/gemini-pro:generateContent", None)
     assert "candidates" in gemini

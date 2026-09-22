@@ -19,7 +19,7 @@ from claude_tap.proxy import capture_only_response, filter_headers, is_capture_o
 from claude_tap.trace import TraceWriter
 from claude_tap.upstream import build_upstream_url, format_upstream_error
 
-log = logging.getLogger("claude-tap")
+log = logging.getLogger("token-flow")
 
 # ---------------------------------------------------------------------------
 # WebSocket proxy

@@ -1,27 +1,23 @@
-## Summary
+## Outcome
 
--
-
-## Type
-
-- [ ] Bug fix
-- [ ] Feature
-- [ ] Documentation
-- [ ] Test or tooling
-- [ ] Maintenance
+- What user problem does this solve?
+- What changed?
 
 ## Validation
 
+- [ ] Relevant Python tests
 - [ ] `uv run ruff check .`
 - [ ] `uv run ruff format --check .`
-- [ ] `uv run pytest tests/ -x --timeout=60`
-- [ ] Not required; docs-only or metadata-only change.
+- [ ] `npm run lint` and `npm run build` in `ui/` when UI changed
+- [ ] Real dashboard → conversation → request flow when behavior changed
 
-## Evidence
+## Evidence and privacy
 
-- Screenshots / recordings / trace files:
-- If runtime, viewer, client, proxy, or UI behavior changed, include `raw.githubusercontent.com` screenshot URLs here.
+- Screenshots or recordings, if useful:
+- [ ] No secrets, private prompts, raw trace databases, or unredacted exports
+  are included.
 
-## Privacy
+## Risk
 
-- [ ] This PR does not include API keys, auth tokens, private prompts, raw trace files, or generated HTML viewers.
+- Main regression risk:
+- Rollback or recovery path:

@@ -1,8 +1,7 @@
-"""claude-tap: Proxy to trace Claude Code API requests.
+"""Token Flow capture backend.
 
-A CLI tool that wraps Claude Code with a local proxy (reverse or forward)
-to intercept and record all API requests. Useful for studying Claude Code's
-Context Engineering.
+The inherited ``claude_tap`` module name is retained for storage and import
+compatibility while the product and command-line interface use Token Flow.
 """
 
 from __future__ import annotations

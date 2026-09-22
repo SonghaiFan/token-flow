@@ -29,13 +29,13 @@ _CODEX_PROXY_BASE_URL = "http://127.0.0.1:43123/v1"
 
 
 def _builtin_codex_http_args(*tail: str) -> tuple[str, ...]:
-    provider = "model_providers.claude-tap-openai"
+    provider = "model_providers.token-flow-openai"
     return (
         "/tmp/codex",
         "-c",
-        'model_provider="claude-tap-openai"',
+        'model_provider="token-flow-openai"',
         "-c",
-        f'{provider}.name="claude-tap"',
+        f'{provider}.name="Token Flow"',
         "-c",
         f'{provider}.base_url="{_CODEX_PROXY_BASE_URL}"',
         "-c",

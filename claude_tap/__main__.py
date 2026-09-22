@@ -1,4 +1,4 @@
-"""Allow running as `python -m claude_tap`."""
+"""Run Token Flow through the compatibility backend module."""
 
 from claude_tap.cli import main_entry
 

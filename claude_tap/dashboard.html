@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <link rel="icon" href="data:,">
-<title>PackLite dashboard</title>
+<title>Token Flow dashboard</title>
 <style>
 :root {
   --bg: #f4f5f7;
@@ -18,6 +18,12 @@
   --shadow-md: 0 2px 8px rgba(0,0,0,0.08);
   --radius: 10px;
   --radius-sm: 6px;
+  --app-toolbar-height: 52px;
+  --control-height: 32px;
+  --touch-target: 44px;
+  --content-max: 1440px;
+  --turn-rail-width: 270px;
+  --motion-fast: 160ms;
 
   --text: #1c2024;
   --text-secondary: #60646c;
@@ -89,7 +95,7 @@ button { cursor: pointer; }
 
 .header {
   display: flex; align-items: center; gap: 16px;
-  padding: 0 20px; min-height: 52px;
+  padding: 0 20px; min-height: var(--app-toolbar-height);
   background: var(--bg-card);
   border-bottom: 1px solid var(--border);
   flex-shrink: 0; z-index: 10;
@@ -111,7 +117,7 @@ button { cursor: pointer; }
 .filter-chip {
   font-size: 12px; font-family: var(--mono); padding: 4px 10px; border-radius: 20px;
   border: 1px solid var(--border); background: var(--bg-card); color: var(--text-secondary);
-  transition: all .15s; white-space: nowrap; line-height: 1;
+  transition: all var(--motion-fast); white-space: nowrap; line-height: 1;
 }
 .filter-chip:hover { border-color: var(--blue); color: var(--blue); }
 .filter-chip.active { background: var(--blue); border-color: var(--blue); color: #fff; }
@@ -164,6 +170,7 @@ button { cursor: pointer; }
   font-size: 11px; color: var(--text-tertiary); font-family: var(--mono);
   flex-shrink: 0;
 }
+body:not(.detail-route) .trace-path-bar { display: none; }
 .trace-path-bar .tp-label { font-family: var(--sans); font-weight: 500; color: var(--text-secondary); flex-shrink: 0; }
 .trace-path-bar .tp-val { flex: 1 1 0; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; direction: rtl; text-align: left; }
 .trace-path-bar .tp-sep { width: 1px; height: 14px; background: var(--border); flex-shrink: 0; }
@@ -180,7 +187,7 @@ button { cursor: pointer; }
   overflow-y: auto;
   min-height: 0;
   background: var(--bg);
-  padding: 14px 20px 20px;
+  padding: 26px clamp(18px, 4vw, 56px) 36px;
 }
 .main::-webkit-scrollbar { width: 6px; }
 .main::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
@@ -209,10 +216,10 @@ body.detail-route .main {
   margin-bottom: 12px;
 }
 .dashboard-title {
-  color: var(--text-secondary);
-  font-size: 14px;
-  font-weight: 600;
-  letter-spacing: .02em;
+  color: var(--text);
+  font-size: 24px;
+  font-weight: 680;
+  letter-spacing: -.035em;
 }
 .dashboard-load-status {
   display: inline-flex;
@@ -231,7 +238,7 @@ body.detail-route .main {
 }
 	.control-panel {
 	  display: grid;
-	  grid-template-columns: minmax(190px, 260px) minmax(160px, 210px) minmax(260px, 1fr) auto;
+	  grid-template-columns: minmax(280px, 1fr) minmax(150px, 190px) minmax(150px, 190px) auto;
 	  gap: 10px;
 	  align-items: center;
 	  margin-bottom: 12px;
@@ -975,14 +982,14 @@ pre {
 <div class="header">
   <div class="logo">
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
-    <span>PackLite</span>
+    <span>Token Flow</span>
     <span class="logo-version" id="logo-version"></span>
   </div>
   <div class="divider"></div>
   <div class="path-filter" id="agent-list"></div>
   <div class="stats">
-    <div class="stat-group"><span data-i18n="stats_sessions">Sessions</span> <span class="stat-val" id="stat-sessions">0</span></div>
-    <div class="stat-group"><span data-i18n="stats_records">Records</span> <span class="stat-val" id="stat-records">0</span></div>
+    <div class="stat-group"><span data-i18n="stats_sessions">Conversations</span> <span class="stat-val" id="stat-sessions">0</span></div>
+    <div class="stat-group"><span data-i18n="stats_records">Turns</span> <span class="stat-val" id="stat-records">0</span></div>
     <div class="live-status"><span id="live-label">Watching</span></div>
   </div>
   <button class="theme-toggle" id="theme-toggle" title="Toggle dark mode" data-i18n-title="theme_toggle">&#9790;</button>
@@ -1001,12 +1008,15 @@ pre {
 <div class="main">
   <section id="list-view" class="list-view">
     <div class="dashboard-title-row">
-      <h1 class="dashboard-title" data-i18n="dashboard_title">Conversation Log</h1>
+      <h1 class="dashboard-title" data-i18n="dashboard_title">Recent conversations</h1>
       <span class="dashboard-load-status" id="dashboard-load-status" hidden></span>
       <span class="dashboard-clock" id="dashboard-clock"></span>
     </div>
 
     <div class="control-panel">
+	      <div class="session-search" role="search">
+	        <input id="search" type="search" placeholder="Search conversations..." data-i18n-placeholder="search_placeholder">
+	      </div>
       <label class="control-field">
         <span class="control-label" data-i18n="filter_date">Date</span>
         <select id="date-filter" class="history-select"></select>
@@ -1021,27 +1031,24 @@ pre {
           <option value="empty">Empty</option>
         </select>
       </label>
-	      <div class="session-search" role="search">
-	        <input id="search" type="search" placeholder="Search messages, agents, models, paths..." data-i18n-placeholder="search_placeholder">
-	      </div>
 	      <div class="history-actions">
 	        <button id="edit-sessions" class="history-edit" type="button" data-i18n="edit_sessions">Edit</button>
-	        <button id="refresh" class="history-refresh" title="Refresh" data-i18n-title="refresh">R</button>
+	        <button id="refresh" class="history-refresh" title="Refresh" data-i18n="refresh" data-i18n-title="refresh">Refresh</button>
 	      </div>
 	    </div>
 
     <section class="overview-card" aria-label="Dashboard summary">
       <div class="metric">
-        <div class="metric-label" data-i18n="metric_threads">Threads</div>
+        <div class="metric-label" data-i18n="metric_threads">Conversations</div>
         <div class="metric-value" id="overview-threads">0</div>
       </div>
       <div class="metric">
-        <div class="metric-label" data-i18n="metric_traces">Traces</div>
+        <div class="metric-label" data-i18n="metric_traces">Turns</div>
         <div class="metric-value" id="overview-traces">0</div>
       </div>
       <div class="metric">
-        <div class="metric-label" data-i18n="metric_error_rate">Error Rate</div>
-        <div class="metric-value" id="overview-error-rate">0.0%</div>
+        <div class="metric-label" data-i18n="metric_error_rate">Problems</div>
+        <div class="metric-value" id="overview-error-rate">0</div>
       </div>
       <div class="metric">
         <div class="metric-label" data-i18n="metric_total_tokens">Total Tokens</div>
@@ -1065,14 +1072,12 @@ pre {
 	          <thead>
 	            <tr>
 	              <th class="session-select-col" aria-label="Select"></th>
-	              <th data-i18n="table_start_time">Start Time</th>
-	              <th data-i18n="table_first_message">First Message</th>
-	              <th data-i18n="table_traces">Traces</th>
+	              <th data-i18n="table_first_message">Conversation</th>
+	              <th data-i18n="table_agent">Agent</th>
+	              <th data-i18n="table_start_time">Started</th>
+	              <th data-i18n="table_traces">Turns</th>
               <th data-i18n="table_tokens">Tokens</th>
-              <th data-i18n="table_model">Model</th>
-              <th data-i18n="table_agent">Agent</th>
               <th data-i18n="table_status">Status</th>
-              <th data-i18n="table_actions">Actions</th>
             </tr>
           </thead>
 	          <tbody id="session-list"></tbody>
@@ -1187,9 +1192,9 @@ function sessionDetailUrl(sessionId) {
 
 const DASHBOARD_I18N = {
   en: {
-    document_title: "PackLite dashboard",
-    stats_sessions: "Sessions",
-    stats_records: "Records",
+    document_title: "Token Flow dashboard",
+    stats_sessions: "Conversations",
+    stats_records: "Turns",
     live_watching: "Watching",
     live_polling: "Polling",
     live_reconnecting: "Reconnecting",
@@ -1197,12 +1202,12 @@ const DASHBOARD_I18N = {
     theme_toggle: "Toggle dark mode",
     language: "Language",
     quit_dashboard: "Stop dashboard service",
-    quit_dashboard_confirm: "Stop the PackLite dashboard service?",
+    quit_dashboard_confirm: "Stop the Token Flow dashboard service?",
     quitting_dashboard: "Stopping",
     dashboard_quit_failed: "Unable to stop dashboard service: {error}",
     dashboard: "Dashboard",
     trace_history_sessions: "trace history sessions",
-    dashboard_title: "Conversation Log",
+    dashboard_title: "Recent conversations",
     filter_date: "Date",
     filter_status: "Status",
     status_all: "All status",
@@ -1210,10 +1215,10 @@ const DASHBOARD_I18N = {
     status_complete: "Complete",
     status_error: "Error",
     status_empty: "Empty",
-    status_empty_short: "EMPTY",
-	    search_placeholder: "Search messages, agents, models, paths...",
+    status_empty_short: "Empty",
+	    search_placeholder: "Search conversations...",
 	    refresh: "Refresh",
-	    edit_sessions: "Edit",
+	    edit_sessions: "Select",
 	    done: "Done",
 	    select_all_sessions: "Select all",
 	    selected_sessions: "{count} selected",
@@ -1221,13 +1226,13 @@ const DASHBOARD_I18N = {
 	    load_more_sessions: "Load more sessions",
 	    loading_more_sessions: "Loading more sessions...",
 	    sessions_loaded: "Showing {shown} of {total} sessions.",
-	    metric_threads: "Threads",
-    metric_traces: "Traces",
-    metric_error_rate: "Error Rate",
+	    metric_threads: "Conversations",
+    metric_traces: "Turns",
+    metric_error_rate: "Problems",
     metric_total_tokens: "Total Tokens",
-    table_start_time: "Start Time",
-    table_first_message: "First Message",
-    table_traces: "Traces",
+    table_start_time: "Started",
+    table_first_message: "Conversation",
+    table_traces: "Turns",
     table_tokens: "Tokens",
     table_model: "Model",
     table_agent: "Agent",
@@ -1243,7 +1248,7 @@ const DASHBOARD_I18N = {
     loading_more_records: "Loading more records...",
     load_more_records: "Load more records",
     limited_records: "Showing {shown} of {total} records.",
-    no_user_prompt: "No captured user prompt.",
+    no_user_prompt: "Untitled conversation",
     unknown: "unknown",
     view_details: "View session details",
     details: "Details",
@@ -1294,9 +1299,9 @@ const DASHBOARD_I18N = {
     empty_session: "This session has no captured API records yet."
   },
   "zh-CN": {
-    document_title: "PackLite 会话面板",
-    stats_sessions: "会话",
-    stats_records: "记录",
+    document_title: "Token Flow 会话面板",
+    stats_sessions: "对话",
+    stats_records: "轮次",
     live_watching: "监听中",
     live_polling: "轮询中",
     live_reconnecting: "重连中",
@@ -1304,12 +1309,12 @@ const DASHBOARD_I18N = {
     theme_toggle: "切换深色模式",
     language: "语言",
     quit_dashboard: "停止面板服务",
-    quit_dashboard_confirm: "停止 PackLite dashboard 服务？",
+    quit_dashboard_confirm: "停止 Token Flow dashboard 服务？",
     quitting_dashboard: "正在停止",
     dashboard_quit_failed: "无法停止面板服务：{error}",
     dashboard: "面板",
     trace_history_sessions: "轨迹历史会话",
-    dashboard_title: "对话日志",
+    dashboard_title: "最近对话",
     filter_date: "日期",
     filter_status: "状态",
     status_all: "全部状态",
@@ -1318,9 +1323,9 @@ const DASHBOARD_I18N = {
     status_error: "错误",
     status_empty: "空会话",
     status_empty_short: "空",
-	    search_placeholder: "搜索消息、Agent、模型、路径...",
+	    search_placeholder: "搜索对话...",
 	    refresh: "刷新",
-	    edit_sessions: "编辑",
+	    edit_sessions: "选择",
 	    done: "完成",
 	    select_all_sessions: "全选",
 	    selected_sessions: "已选择 {count} 个",
@@ -1328,13 +1333,13 @@ const DASHBOARD_I18N = {
 	    load_more_sessions: "加载更多会话",
 	    loading_more_sessions: "正在加载更多会话...",
 	    sessions_loaded: "正在展示 {shown} / {total} 个会话。",
-	    metric_threads: "会话数",
-    metric_traces: "轨迹数",
-    metric_error_rate: "错误率",
+	    metric_threads: "对话",
+    metric_traces: "轮次",
+    metric_error_rate: "问题",
     metric_total_tokens: "总 Token",
-    table_start_time: "开始时间",
-    table_first_message: "首条用户 Prompt",
-    table_traces: "轨迹",
+    table_start_time: "开始于",
+    table_first_message: "对话",
+    table_traces: "轮次",
     table_tokens: "Token",
     table_model: "模型",
     table_agent: "Agent",
@@ -1350,7 +1355,7 @@ const DASHBOARD_I18N = {
     loading_more_records: "正在加载更多记录...",
     load_more_records: "加载更多记录",
     limited_records: "正在展示 {shown} / {total} 条记录。",
-    no_user_prompt: "未捕获到用户 prompt。",
+    no_user_prompt: "未命名对话",
     unknown: "未知",
     view_details: "查看会话详情",
     details: "详情",
@@ -1402,7 +1407,7 @@ const DASHBOARD_I18N = {
   }
 };
 
-let currentLang = localStorage.getItem("claude-tap-lang") || detectLang();
+let currentLang = localStorage.getItem("token-flow-lang") || localStorage.getItem("packlite-lang") || detectLang();
 
 function detectLang() {
   const nav = navigator.language || navigator.userLanguage || "en";
@@ -1437,7 +1442,7 @@ function applyI18n() {
 
 function setLang(lang) {
   currentLang = DASHBOARD_I18N[lang] ? lang : "en";
-  localStorage.setItem("claude-tap-lang", currentLang);
+  localStorage.setItem("token-flow-lang", currentLang);
   applyI18n();
   renderFilters();
   renderAgents();
@@ -1782,11 +1787,11 @@ function renderAgents() {
 	  renderBulkEditControls(sessions);
 	  renderSessionPagination();
 	  if (state.loadingSessions && !state.sessions.length) {
-	    $("#session-list").innerHTML = `<tr><td class="loading-cell" colspan="9">${loadingMarkup(t("loading_sessions"))}</td></tr>`;
+	    $("#session-list").innerHTML = `<tr><td class="loading-cell" colspan="7">${loadingMarkup(t("loading_sessions"))}</td></tr>`;
 	    return;
 	  }
 	  if (!sessions.length) {
-	    $("#session-list").innerHTML = `<tr><td class="table-empty" colspan="9">${esc(t("no_matching_sessions"))}</td></tr>`;
+	    $("#session-list").innerHTML = `<tr><td class="table-empty" colspan="7">${esc(t("no_matching_sessions"))}</td></tr>`;
 	    return;
 	  }
 
@@ -1844,22 +1849,16 @@ function isSessionRowActionTarget(target) {
 	    ? t("select_all_sessions")
 	    : (session.live ? t("delete_live_session_title") : t("delete_active_session_title"));
 	  return `
-	    <tr class="session-row ${state.selectedSessionId === session.id ? "active" : ""} ${isSelected ? "selected" : ""} ${!canSelect ? "select-disabled" : ""}" data-session="${esc(session.id)}" tabindex="0">
+	    <tr class="session-row ${state.selectedSessionId === session.id ? "active" : ""} ${isSelected ? "selected" : ""} ${!canSelect ? "select-disabled" : ""}" data-session="${esc(session.id)}" tabindex="0" aria-label="${esc(t("view_details"))}">
 	      <td class="session-select-col">
 	        <input class="session-checkbox" type="checkbox" data-select-session="${esc(session.id)}" aria-label="${esc(selectTitle)}" ${isSelected ? "checked" : ""} ${!canSelect || isDeleting ? "disabled" : ""}>
 	      </td>
-	      <td class="mono-cell">${esc(fmtTableTime(session.started_at || session.updated_at))}</td>
 	      <td><div class="first-message" title="${esc(firstMessage)}">${esc(firstMessage)}</div></td>
+	      <td><span class="agent-pill">${esc(session.agent || t("unknown"))}</span></td>
+	      <td class="mono-cell">${esc(fmtTableTime(session.started_at || session.updated_at))}</td>
 	      <td><span class="trace-count">${fmtNumber(session.record_count)}</span></td>
       <td><span class="token-pill">${fmtNumber(session.total_tokens)}</span></td>
-      <td><span class="model-pill" title="${esc(session.model || t("unknown"))}">${esc(session.model || t("unknown"))}</span></td>
-      <td><span class="agent-pill">${esc(session.agent || t("unknown"))}</span></td>
       <td><span class="status-pill ${status.className}">${esc(status.label)}</span></td>
-	      <td>
-	        <div class="row-actions">
-	          <button class="row-action" type="button" data-open-session="${esc(session.id)}" aria-label="${esc(t("view_details"))}" aria-busy="${isLoading ? "true" : "false"}" ${isLoading ? "disabled" : ""}>${esc(isLoading ? t("loading_session") : t("details"))}</button>
-	        </div>
-	      </td>
 	    </tr>
 	  `;
 	}
@@ -1869,18 +1868,17 @@ function renderOverview() {
   const traces = state.sessionRecordTotal;
   const tokens = state.sessionTotalTokens;
   const errors = state.sessionTotalErrors;
-  const errorRate = threads ? `${((errors / threads) * 100).toFixed(1)}%` : "0.0%";
   $("#overview-threads").textContent = fmtNumber(threads);
   $("#overview-traces").textContent = fmtNumber(traces);
-  $("#overview-error-rate").textContent = errorRate;
+  $("#overview-error-rate").textContent = fmtNumber(errors);
   $("#overview-tokens").textContent = fmtNumber(tokens);
 }
 
 	function statusInfo(session) {
-	  if (session.status === "error") return {label: "ERR", className: "err"};
+	  if (session.status === "error") return {label: t("status_error"), className: "err"};
 	  if (session.status === "empty") return {label: t("status_empty_short"), className: "empty-status"};
-	  if (session.live || session.status === "active") return {label: "LIVE", className: "live"};
-	  return {label: "OK", className: "ok"};
+	  if (session.live || session.status === "active") return {label: t("status_active"), className: "live"};
+	  return {label: t("status_complete"), className: "ok"};
 	}
 
 	function canDeleteSession(session) {
@@ -2449,14 +2447,14 @@ function closeDashboardEvents() {
 }
 
 function initTheme() {
-  const saved = localStorage.getItem("claude-tap-theme");
+  const saved = localStorage.getItem("token-flow-theme") || localStorage.getItem("packlite-theme");
   const prefersDark = window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches;
   applyTheme(saved || (prefersDark ? "dark" : "light"));
 }
 
 function toggleTheme() {
   const next = document.documentElement.dataset.theme === "dark" ? "light" : "dark";
-  localStorage.setItem("claude-tap-theme", next);
+  localStorage.setItem("token-flow-theme", next);
   applyTheme(next);
 }
 

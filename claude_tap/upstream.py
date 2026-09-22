@@ -43,12 +43,12 @@ def format_upstream_error(exc: BaseException, *, target_url: str, upstream_url: 
     safe_upstream = _redact_url_userinfo(upstream_url)
     return (
         f"{base}\n\n"
-        "claude-tap could not verify the upstream TLS certificate. This commonly happens when "
+        "token-flow could not verify the upstream TLS certificate. This commonly happens when "
         "a corporate proxy, private gateway, or local network tool presents a certificate that "
         "Python/aiohttp does not trust.\n\n"
         "Set SSL_CERT_FILE to a CA bundle that trusts that proxy or gateway, then retry. On "
         "macOS with the system CA bundle this is often:\n"
-        "  SSL_CERT_FILE=/etc/ssl/cert.pem claude-tap --tap-live --tap-target <upstream-base-url>\n\n"
+        "  SSL_CERT_FILE=/etc/ssl/cert.pem token-flow --tap-live --tap-target <upstream-base-url>\n\n"
         "Also make sure --tap-target is the provider base URL, not a full request endpoint such "
         "as /v1/messages.\n"
         f"Configured target: {safe_target}\n"

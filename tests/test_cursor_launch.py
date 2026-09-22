@@ -669,7 +669,7 @@ async def test_async_main_cursor_transcript_only_skips_proxy(monkeypatch, tmp_pa
 
     ca_calls: list[object] = []
 
-    monkeypatch.setenv("CLOUDTAP_DB", str(tmp_path / "cursor-async-main.sqlite3"))
+    monkeypatch.setenv("TOKEN_FLOW_DB", str(tmp_path / "cursor-async-main.sqlite3"))
     monkeypatch.setattr("claude_tap.cli.run_client", fake_run_client)
     monkeypatch.setattr("claude_tap.cli.CursorTranscriptWatcher", FakeWatcher)
     monkeypatch.setattr("claude_tap.cli.ensure_ca", lambda: ca_calls.append("ca") or (Path("c"), Path("k")))
@@ -747,7 +747,7 @@ async def test_async_main_cursor_no_launch_watch_only(monkeypatch, tmp_path: Pat
         dashboard_started_at["t"] = __import__("time").time()
         return "http://127.0.0.1:9/dashboard", True
 
-    monkeypatch.setenv("CLOUDTAP_DB", str(tmp_path / "cursor-no-launch.sqlite3"))
+    monkeypatch.setenv("TOKEN_FLOW_DB", str(tmp_path / "cursor-no-launch.sqlite3"))
     monkeypatch.setattr("claude_tap.cli.CursorTranscriptWatcher", FakeWatcher)
     monkeypatch.setattr("claude_tap.cli.asyncio.sleep", fake_sleep)
     monkeypatch.setattr("claude_tap.cli.ensure_shared_dashboard", slow_dashboard)

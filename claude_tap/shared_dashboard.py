@@ -1,4 +1,4 @@
-"""Shared local dashboard process used by concurrent claude-tap sessions."""
+"""Shared local dashboard process used by concurrent Token Flow sessions."""
 
 from __future__ import annotations
 
@@ -27,11 +27,12 @@ DEFAULT_DASHBOARD_PORT = 19527
 _DASHBOARD_HEALTH_TIMEOUT = 1.5
 _DASHBOARD_SESSIONS_HEALTH_TIMEOUT = 3.0
 _DASHBOARD_QUIT_TIMEOUT = 2.0
+_DASHBOARD_DATA_HEALTH_PATH = "/api/sessions?offset=0&limit=1"
 _DASHBOARD_LOCK_NAME = "dashboard.lock"
 _DASHBOARD_QUIT_TOKEN_HEADER = "X-Claude-Tap-Dashboard-Token"
 
 try:
-    CLAUDE_TAP_VERSION = _pkg_version("claude-tap")
+    CLAUDE_TAP_VERSION = _pkg_version("token-flow")
 except Exception:
     CLAUDE_TAP_VERSION = "0.0.0"
 
@@ -40,7 +41,11 @@ def resolve_dashboard_port(explicit: int | None = None) -> int:
     """Return the shared dashboard port (fixed default unless overridden)."""
     if explicit is not None and explicit > 0:
         return explicit
-    override = os.environ.get("CLOUDTAP_DASHBOARD_PORT", "").strip()
+    override = (
+        os.environ.get("TOKEN_FLOW_DASHBOARD_PORT", "").strip()
+        or os.environ.get("PACKLITE_DASHBOARD_PORT", "").strip()
+        or os.environ.get("CLOUDTAP_DASHBOARD_PORT", "").strip()
+    )
     if override.isdigit() and int(override) > 0:
         return int(override)
     return DEFAULT_DASHBOARD_PORT
@@ -137,16 +142,32 @@ def _dashboard_health_matches_current_instance(payload: dict | None) -> bool:
     )
 
 
+def _dashboard_sessions_payload_is_healthy(payload: dict | None) -> bool:
+    return bool(payload and isinstance(payload.get("sessions"), list))
+
+
 def _sync_dashboard_healthy_for_current_db(host: str, port: int) -> bool:
-    url = f"{dashboard_url(host, port)}/dashboard/health"
+    base_url = dashboard_url(host, port)
     try:
-        with _LOCAL_DASHBOARD_OPENER.open(url, timeout=_DASHBOARD_HEALTH_TIMEOUT) as resp:
+        with _LOCAL_DASHBOARD_OPENER.open(
+            f"{base_url}/dashboard/health",
+            timeout=_DASHBOARD_HEALTH_TIMEOUT,
+        ) as resp:
             if resp.status != 200:
                 return False
             payload = json.loads(resp.read().decode("utf-8"))
+        if not _dashboard_health_matches_current_instance(payload if isinstance(payload, dict) else None):
+            return False
+        with _LOCAL_DASHBOARD_OPENER.open(
+            f"{base_url}{_DASHBOARD_DATA_HEALTH_PATH}",
+            timeout=_DASHBOARD_SESSIONS_HEALTH_TIMEOUT,
+        ) as resp:
+            if resp.status != 200:
+                return False
+            sessions_payload = json.loads(resp.read().decode("utf-8"))
     except (OSError, TimeoutError, urllib.error.URLError, json.JSONDecodeError, UnicodeDecodeError):
         return False
-    return _dashboard_health_matches_current_instance(payload if isinstance(payload, dict) else None)
+    return _dashboard_sessions_payload_is_healthy(sessions_payload if isinstance(sessions_payload, dict) else None)
 
 
 def _spawn_dashboard_subprocess_if_needed(host: str, port: int, output_dir: Path) -> bool:
@@ -164,14 +185,22 @@ def _migrate_legacy_traces(output_dir: Path) -> None:
 
 
 async def is_dashboard_healthy(host: str, port: int, *, require_current_db: bool = True) -> bool:
-    """Return True when the shared dashboard responds to a cheap health check."""
+    """Return True when the dashboard shell and its session data API are usable."""
     base_url = dashboard_url(host, port)
     status, payload = await _dashboard_get_status_and_payload(
         f"{base_url}/dashboard/health",
         timeout_seconds=_DASHBOARD_HEALTH_TIMEOUT,
     )
     if status == 200:
-        return not require_current_db or _dashboard_health_matches_current_instance(payload)
+        if not require_current_db:
+            return True
+        if not _dashboard_health_matches_current_instance(payload):
+            return False
+        sessions_status, sessions_payload = await _dashboard_get_status_and_payload(
+            f"{base_url}{_DASHBOARD_DATA_HEALTH_PATH}",
+            timeout_seconds=_DASHBOARD_SESSIONS_HEALTH_TIMEOUT,
+        )
+        return sessions_status == 200 and _dashboard_sessions_payload_is_healthy(sessions_payload)
     if status not in {404, 405}:
         return False
 
@@ -337,7 +366,10 @@ def _dashboard_process_command(pid: int) -> str:
 def _looks_like_legacy_dashboard_command(command: str, port: int) -> bool:
     normalized = " ".join(command.split())
     lower = normalized.lower()
-    if "claude_tap" not in lower and "claude-tap" not in lower:
+    # The active module path is still ``claude_tap`` and older installed
+    # versions used the ``packlite`` or ``claude-tap`` command. Keep every
+    # generation recognizable so Token Flow can stop incompatible dashboards.
+    if not any(name in lower for name in ("token-flow", "packlite", "claude_tap", "claude-tap")):
         return False
     if not re.search(r"(^|\s)dashboard($|\s)", lower):
         return False
@@ -365,7 +397,8 @@ def _terminate_legacy_dashboard_pids(pids: list[int], port: int) -> bool:
 async def stop_incompatible_dashboard_if_running(host: str, port: int, url: str) -> None:
     """Stop a dashboard that is listening on the shared port but cannot be reused.
 
-    The common case is an older claude-tap dashboard left running after the CLI
+    The common case is an older Token Flow-compatible dashboard left running
+    after the CLI
     was upgraded. Reusing it would keep serving the old packaged HTML/JS.
     """
     if not await is_dashboard_healthy(host, port, require_current_db=False):
@@ -373,8 +406,8 @@ async def stop_incompatible_dashboard_if_running(host: str, port: int, url: str)
     if await stop_dashboard_service(host, port):
         return
     raise RuntimeError(
-        "A different or outdated claude-tap dashboard is already running on "
-        f"{url}. Stop it first with `claude-tap dashboard stop --tap-live-port {port}`. "
+        "A different or outdated Token Flow dashboard is already running on "
+        f"{url}. Stop it first with `token-flow dashboard stop --tap-live-port {port}`. "
         "If that fails, terminate the old dashboard process manually."
     )
 

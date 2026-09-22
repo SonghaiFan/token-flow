@@ -1,4 +1,4 @@
-"""CLI entry points for claude-tap."""
+"""CLI entry points for token-flow."""
 
 from __future__ import annotations
 
@@ -79,7 +79,7 @@ if hasattr(sys.stdout, "reconfigure"):
 if hasattr(sys.stderr, "reconfigure"):
     sys.stderr.reconfigure(encoding="utf-8", errors="backslashreplace")
 
-log = logging.getLogger("claude-tap")
+log = logging.getLogger("token-flow")
 
 
 def _create_trace_writer(
@@ -162,7 +162,7 @@ class _LazyTraceWriter:
 try:
     from importlib.metadata import version as _pkg_version
 
-    __version__ = _pkg_version("claude-tap")
+    __version__ = _pkg_version("token-flow")
 except Exception:
     __version__ = "0.0.0"
 
@@ -199,7 +199,7 @@ async def _is_dashboard_reusable(host: str, port: int) -> bool:
 
 
 def _dashboard_stop_command(host: str, port: int) -> str:
-    parts = ["claude-tap", "dashboard", "stop"]
+    parts = ["token-flow", "dashboard", "stop"]
     if port != DEFAULT_DASHBOARD_PORT:
         parts.extend(["--tap-live-port", str(port)])
     if host != "127.0.0.1":
@@ -269,18 +269,18 @@ def _trust_ca_for_current_user(ca_cert_path: Path) -> int:
     result = trust_macos_ca(ca_cert_path)
     if result.returncode != 0:
         details = (result.stderr or result.stdout or "").strip()
-        _print("Error: failed to trust claude-tap CA in the macOS login keychain.", file=sys.stderr)
+        _print("Error: failed to trust token-flow CA in the macOS login keychain.", file=sys.stderr)
         if details:
             _print(details, file=sys.stderr)
         _print("This command does not use sudo; macOS may require unlocking your login keychain.", file=sys.stderr)
         return result.returncode or 1
 
     if not is_macos_ca_trusted(ca_cert_path):
-        _print("Error: macOS did not report the claude-tap CA as trusted after installation.", file=sys.stderr)
+        _print("Error: macOS did not report the token-flow CA as trusted after installation.", file=sys.stderr)
         _print(f"CA certificate: {ca_cert_path}", file=sys.stderr)
         return 1
 
-    _print(f"🔐 Trusted claude-tap CA in the current user's macOS login keychain: {ca_cert_path}")
+    _print(f"🔐 Trusted token-flow CA in the current user's macOS login keychain: {ca_cert_path}")
     return 0
 
 
@@ -299,7 +299,7 @@ def _ensure_ca_trust_for_forward_proxy(args: argparse.Namespace, ca_cert_path: P
     if is_macos_ca_trusted(ca_cert_path):
         return 0
 
-    _print(f"🔐 {cfg.label} needs the claude-tap CA trusted in your macOS login keychain.")
+    _print(f"🔐 {cfg.label} needs the token-flow CA trusted in your macOS login keychain.")
     _print("   Installing for the current user only; no sudo or System keychain write is used.")
     return _trust_ca_for_current_user(ca_cert_path)
 
@@ -312,7 +312,7 @@ async def _async_main(args: argparse.Namespace) -> int:
             migrate_legacy_traces(output_dir)
         except sqlite3.Error as exc:
             _print(
-                f"claude-tap: legacy trace migration skipped because storage is unavailable ({exc})",
+                f"token-flow: legacy trace migration skipped because storage is unavailable ({exc})",
                 file=sys.stderr,
             )
 
@@ -408,7 +408,7 @@ async def _async_main(args: argparse.Namespace) -> int:
         _print("📝 Prompt export mode: upstream calls are skipped after capture.")
     try:
         if transcript_only:
-            _print(f"🔍 claude-tap v{__version__} watching Cursor agent-transcripts")
+            _print(f"🔍 token-flow v{__version__} watching Cursor agent-transcripts")
             _print("   Mode: one tap session per Cursor conversation JSONL")
             _print(f"🗄️  Trace database: {resolve_db_path()}")
             cursor_watcher = CursorTranscriptWatcher(
@@ -421,7 +421,7 @@ async def _async_main(args: argparse.Namespace) -> int:
             )
             await cursor_watcher.start()
             if not args.no_launch:
-                # Bare `claude-tap --tap-client cursor` launches cursor-agent (TUI)
+                # Bare `token-flow --tap-client cursor` launches cursor-agent (TUI)
                 # while the watcher streams local transcripts into the dashboard.
                 try:
                     exit_code = await run_client(
@@ -481,7 +481,7 @@ async def _async_main(args: argparse.Namespace) -> int:
                     capture_only=capture_only,
                 )
                 actual_port = await forward_server.start()
-                _print(f"🔍 claude-tap v{__version__} forward proxy on http://{args.host}:{actual_port}")
+                _print(f"🔍 token-flow v{__version__} forward proxy on http://{args.host}:{actual_port}")
                 _print(f"   CA cert: {ca_cert_path}")
             else:
                 assert session is not None
@@ -513,7 +513,7 @@ async def _async_main(args: argparse.Namespace) -> int:
                     actual_port = site._server.sockets[0].getsockname()[1]
                 except (AttributeError, IndexError, OSError):
                     actual_port = args.port
-                _print(f"🔍 claude-tap v{__version__} listening on http://{args.host}:{actual_port}")
+                _print(f"🔍 token-flow v{__version__} listening on http://{args.host}:{actual_port}")
 
             _print(f"📁 Trace session: {session_id}")
             _print(f"🗄️  Trace database: {resolve_db_path()}")
@@ -595,7 +595,7 @@ async def _async_main(args: argparse.Namespace) -> int:
                     protected_session_ids=protected_ids or None,
                 )
             except sqlite3.Error as exc:
-                _print(f"\nclaude-tap: trace cleanup skipped because storage is unavailable ({exc})", file=sys.stderr)
+                _print(f"\ntoken-flow: trace cleanup skipped because storage is unavailable ({exc})", file=sys.stderr)
             else:
                 if cleaned:
                     _print(f"\n🧹 Cleaned up {cleaned} old trace session(s)")
@@ -684,7 +684,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         argv = sys.argv[1:]
 
     tap_parser = argparse.ArgumentParser(
-        prog="claude-tap",
+        prog="token-flow",
         description=(
             "Trace Claude Code, Codex CLI, Codex App, Gemini CLI, Kimi CLI, MiMo Code, OpenCode, OpenClaw, Pi, Hermes Agent, "
             "Cursor CLI, Qoder CLI, Antigravity CLI, or CodeBuddy CLI API requests via a local proxy or transcript import. "
@@ -692,118 +692,118 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         ),
         epilog=(
             "claude code:\n"
-            "  claude-tap                            Basic tracing with live viewer enabled by default\n"
-            "  claude-tap --tap-no-live              Disable live viewer server/browser auto-open\n"
-            "  claude-tap --tap-no-open              Keep viewers from auto-opening in a browser\n"
-            "  claude-tap -- --model claude-opus-4-6  Pass flags to Claude Code\n"
-            "  claude-tap -- -c                      Continue last conversation\n"
-            "  claude-tap -- --dangerously-skip-permissions  Auto-accept tool calls\n"
-            "  claude-tap -- --dangerously-skip-permissions --model claude-sonnet-4-6\n"
+            "  token-flow                            Basic tracing with live viewer enabled by default\n"
+            "  token-flow --tap-no-live              Disable live viewer server/browser auto-open\n"
+            "  token-flow --tap-no-open              Keep viewers from auto-opening in a browser\n"
+            "  token-flow -- --model claude-opus-4-6  Pass flags to Claude Code\n"
+            "  token-flow -- -c                      Continue last conversation\n"
+            "  token-flow -- --dangerously-skip-permissions  Auto-accept tool calls\n"
+            "  token-flow -- --dangerously-skip-permissions --model claude-sonnet-4-6\n"
             "\n"
             "codex cli:\n"
             "  # Target is auto-detected from Codex auth state when possible\n"
-            "  claude-tap --tap-client codex\n"
+            "  token-flow --tap-client codex\n"
             "  # If auto-detection cannot read Codex auth, specify OAuth target explicitly\n"
-            "  claude-tap --tap-client codex --tap-target https://chatgpt.com/backend-api/codex\n"
+            "  token-flow --tap-client codex --tap-target https://chatgpt.com/backend-api/codex\n"
             "  # With model and full auto-approval\n"
-            "  claude-tap --tap-client codex -- --model codex-mini-latest --full-auto\n"
+            "  token-flow --tap-client codex -- --model codex-mini-latest --full-auto\n"
             "\n"
             "codex app:\n"
             "  # Launch Codex App through the forward proxy to capture backend HTTP/WebSocket requests\n"
-            "  claude-tap --tap-client codexapp\n"
+            "  token-flow --tap-client codexapp\n"
             "\n"
             "kimi cli (legacy kimi-cli; uses shell KIMI_BASE_URL):\n"
-            "  claude-tap --tap-client kimi\n"
-            "  claude-tap --tap-client kimi -- --thinking\n"
-            "  claude-tap --tap-client kimi --tap-target https://api.moonshot.ai/v1\n"
+            "  token-flow --tap-client kimi\n"
+            "  token-flow --tap-client kimi -- --thinking\n"
+            "  token-flow --tap-client kimi --tap-target https://api.moonshot.ai/v1\n"
             "\n"
             "kimi-code cli (MoonshotAI/kimi-code; patches ~/.kimi-code/config.toml via sandbox):\n"
-            "  claude-tap --tap-client kimi-code\n"
-            "  claude-tap --tap-client kimi-code -- --thinking\n"
-            "  claude-tap --tap-client kimi-code --tap-target https://api.moonshot.ai/v1\n"
+            "  token-flow --tap-client kimi-code\n"
+            "  token-flow --tap-client kimi-code -- --thinking\n"
+            "  token-flow --tap-client kimi-code --tap-target https://api.moonshot.ai/v1\n"
             "\n"
             "gemini cli (defaults to forward proxy mode):\n"
-            '  claude-tap --tap-client gemini -- -p "hello"\n'
+            '  token-flow --tap-client gemini -- -p "hello"\n'
             "  # Reverse mode sets GOOGLE_GEMINI_BASE_URL and GOOGLE_VERTEX_BASE_URL\n"
-            "  claude-tap --tap-client gemini --tap-proxy-mode reverse\n"
+            "  token-flow --tap-client gemini --tap-proxy-mode reverse\n"
             "\n"
             "grok build cli (reverse proxy mode):\n"
-            '  claude-tap --tap-client grok -- -p "hello"\n'
+            '  token-flow --tap-client grok -- -p "hello"\n'
             "  # Authenticate first with `grok login`\n"
             "\n"
             "deepseek harness (forward proxy mode):\n"
-            '  claude-tap --tap-client dsh -- --profile headless "Reply OK"\n'
+            '  token-flow --tap-client dsh -- --profile headless "Reply OK"\n'
             "  # Forward mode captures both stored and environment-configured DeepSeek endpoints\n"
             "\n"
             "opencode (multi-provider; defaults to forward proxy mode):\n"
             "  # Forward proxy captures every provider opencode talks to\n"
-            "  claude-tap --tap-client opencode\n"
+            "  token-flow --tap-client opencode\n"
             "  # Force reverse mode (single ANTHROPIC_BASE_URL provider only)\n"
-            "  claude-tap --tap-client opencode --tap-proxy-mode reverse\n"
+            "  token-flow --tap-client opencode --tap-proxy-mode reverse\n"
             "\n"
             "mimo (MiMo Code — OpenCode fork; defaults to forward proxy mode):\n"
             "  # Forward proxy captures every provider MiMo Code talks to\n"
-            "  claude-tap --tap-client mimo\n"
+            "  token-flow --tap-client mimo\n"
             "  # Reverse mode — single Anthropic provider with mimo-only disabled\n"
-            "  claude-tap --tap-client mimo --tap-proxy-mode reverse\n"
+            "  token-flow --tap-client mimo --tap-proxy-mode reverse\n"
             "\n"
             "openclaw:\n"
             "  # Reads OpenClaw config and points the selected provider at the local proxy\n"
-            "  claude-tap --tap-client openclaw -- agent\n"
+            "  token-flow --tap-client openclaw -- agent\n"
             "\n"
             "pi (multi-provider; defaults to forward proxy mode):\n"
             "  # Forward proxy captures OpenAI Codex OAuth and other providers\n"
-            '  claude-tap --tap-client pi -- --model openai-codex/gpt-5.3-codex-spark -p "hello"\n'
+            '  token-flow --tap-client pi -- --model openai-codex/gpt-5.3-codex-spark -p "hello"\n'
             "  # Pi OAuth is configured with /login inside pi, or via PI_CODING_AGENT_DIR\n"
             "\n"
             "hermes agent (multi-provider Python agent — forward proxy default):\n"
             "  # Interactive TUI — captures LLM calls directly\n"
-            "  claude-tap --tap-client hermes\n"
+            "  token-flow --tap-client hermes\n"
             "  # Gateway mode — captures LLM calls triggered by Slack/Telegram/etc. messages\n"
             "  #   (requires messaging platform configured in ~/.hermes/.env)\n"
-            "  claude-tap --tap-client hermes -- gateway start\n"
+            "  token-flow --tap-client hermes -- gateway start\n"
             "\n"
             "cursor cli (defaults to forward proxy mode):\n"
-            '  claude-tap --tap-client cursor -- -p --trust --model auto "hello"\n'
+            '  token-flow --tap-client cursor -- -p --trust --model auto "hello"\n'
             "  # Cursor readable messages are imported from local transcripts after exit\n"
             "\n"
             "qoder cli (defaults to forward proxy mode):\n"
-            '  claude-tap --tap-client qoder -- -p "hello" --permission-mode dont_ask\n'
+            '  token-flow --tap-client qoder -- -p "hello" --permission-mode dont_ask\n'
             "  # Authenticate first with `qodercli login` or QODER_PERSONAL_ACCESS_TOKEN / QODER_JOB_TOKEN\n"
             "\n"
             "antigravity cli (defaults to forward proxy mode):\n"
-            "  # On macOS, claude-tap auto-trusts the local CA in your user login keychain without sudo\n"
-            "  claude-tap --tap-client agy --tap-live\n"
+            "  # On macOS, token-flow auto-trusts the local CA in your user login keychain without sudo\n"
+            "  token-flow --tap-client agy --tap-live\n"
             "\n"
             "codebuddy (reverse proxy mode):\n"
             "  # Auto-detects the endpoint from CodeBuddy's own login cache,\n"
             "  # so internal, iOA, and external users all work out of the box.\n"
-            "  claude-tap --tap-client codebuddy\n"
+            "  token-flow --tap-client codebuddy\n"
             "  # Or override explicitly (custom/staging deployments)\n"
-            "  claude-tap --tap-client codebuddy --tap-target https://www.codebuddy.ai/v2\n"
-            '  CODEBUDDY_BASE_URL=https://your-host/v2 claude-tap --tap-client codebuddy -- -p "Reply OK"\n'
+            "  token-flow --tap-client codebuddy --tap-target https://www.codebuddy.ai/v2\n"
+            '  CODEBUDDY_BASE_URL=https://your-host/v2 token-flow --tap-client codebuddy -- -p "Reply OK"\n'
             "\n"
             "proxy-only mode (connect from another terminal):\n"
-            "  claude-tap --tap-no-launch --tap-port 8080\n"
+            "  token-flow --tap-no-launch --tap-port 8080\n"
             "  # then: ANTHROPIC_BASE_URL=http://127.0.0.1:8080 claude\n"
             "\n"
             "export traces:\n"
-            "  claude-tap export <session-id> -o trace.ctap.json Export compact trace bundle\n"
-            "  claude-tap export trace.jsonl              Export compact trace bundle to stdout\n"
-            "  claude-tap export trace.jsonl --format markdown -o out.md Export to markdown\n"
-            "  claude-tap export trace.jsonl --format prompt-md -o prompt.md Export prompt snapshot\n"
-            "  claude-tap export trace.jsonl --format json Export as full JSON\n"
-            "  claude-tap export trace.jsonl -o out.html  Export as HTML viewer\n"
+            "  token-flow export <session-id> -o trace.ctap.json Export compact trace bundle\n"
+            "  token-flow export trace.jsonl              Export compact trace bundle to stdout\n"
+            "  token-flow export trace.jsonl --format markdown -o out.md Export to markdown\n"
+            "  token-flow export trace.jsonl --format prompt-md -o prompt.md Export prompt snapshot\n"
+            "  token-flow export trace.jsonl --format json Export as full JSON\n"
+            "  token-flow export trace.jsonl -o out.html  Export as HTML viewer\n"
             "\n"
             "dashboard:\n"
-            "  claude-tap dashboard                       Browse trace history\n"
-            "  claude-tap dashboard stop                  Stop the shared dashboard service\n"
-            "  claude-tap dashboard --tap-live-port 3000  Use a fixed dashboard port\n"
+            "  token-flow dashboard                       Browse trace history\n"
+            "  token-flow dashboard stop                  Stop the shared dashboard service\n"
+            "  token-flow dashboard --tap-live-port 3000  Use a fixed dashboard port\n"
             "\n"
             "trust local CA:\n"
-            "  claude-tap trust-ca                        Trust forward-proxy CA in macOS user keychain\n"
+            "  token-flow trust-ca                        Trust forward-proxy CA in macOS user keychain\n"
             "\n"
-            "homepage: https://github.com/liaohch3/claude-tap"
+            "homepage: https://github.com/SonghaiFan/token-flow"
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
@@ -1005,7 +1005,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 
 
 async def async_main(args: argparse.Namespace) -> int:
-    """Run claude-tap while keeping operational output off command stdout."""
+    """Run token-flow while keeping operational output off command stdout."""
     command_stdout = _COMMAND_STDOUT.set(sys.stdout)
     try:
         return await _async_main(args)
@@ -1016,8 +1016,8 @@ async def async_main(args: argparse.Namespace) -> int:
 def parse_dashboard_args(argv: list[str] | None = None) -> argparse.Namespace:
     """Parse arguments for the standalone dashboard command."""
     parser = argparse.ArgumentParser(
-        prog="claude-tap dashboard",
-        description="Open a local claude-tap dashboard for browsing trace history.",
+        prog="token-flow dashboard",
+        description="Open a local token-flow dashboard for browsing trace history.",
     )
     parser.add_argument(
         "command",
@@ -1062,12 +1062,12 @@ async def dashboard_main(args: argparse.Namespace) -> int:
     port = resolve_dashboard_port(args.live_port)
     if args.command in {"stop", "quit"}:
         if not await is_dashboard_healthy(host, port, require_current_db=False):
-            _print(f"claude-tap dashboard is not running on {dashboard_url(host, port)}")
+            _print(f"token-flow dashboard is not running on {dashboard_url(host, port)}")
             return 1
         if not await stop_dashboard_service(host, port):
-            _print(f"Unable to stop claude-tap dashboard on {dashboard_url(host, port)}")
+            _print(f"Unable to stop token-flow dashboard on {dashboard_url(host, port)}")
             return 1
-        _print(f"Stopped claude-tap dashboard on {dashboard_url(host, port)}")
+        _print(f"Stopped token-flow dashboard on {dashboard_url(host, port)}")
         return 0
 
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -1075,7 +1075,7 @@ async def dashboard_main(args: argparse.Namespace) -> int:
     if await _is_dashboard_reusable(host, port):
         migrate_legacy_traces(output_dir)
         url = dashboard_url(host, port)
-        _print(f"🌐 claude-tap dashboard already running: {url}")
+        _print(f"🌐 token-flow dashboard already running: {url}")
         _print(f"🗄️  Trace database: {resolve_db_path()}")
         if args.open_viewer:
             _open_browser(url)
@@ -1096,12 +1096,12 @@ async def dashboard_main(args: argparse.Namespace) -> int:
         if await _is_dashboard_reusable(host, port):
             migrate_legacy_traces(output_dir)
             url = dashboard_url(host, port)
-            _print(f"🌐 claude-tap dashboard already running: {url}")
+            _print(f"🌐 token-flow dashboard already running: {url}")
             if args.open_viewer:
                 _open_browser(url)
             return 0
         raise
-    _print(f"🌐 claude-tap dashboard: {server.url}")
+    _print(f"🌐 token-flow dashboard: {server.url}")
     _print(f"🗄️  Trace database: {resolve_db_path()}")
     if output_dir.exists():
         _print(f"📁 Legacy import dir: {output_dir}")
@@ -1122,9 +1122,9 @@ async def dashboard_main(args: argparse.Namespace) -> int:
 def parse_trust_ca_args(argv: list[str] | None = None) -> argparse.Namespace:
     """Parse arguments for the trust-ca subcommand."""
     parser = argparse.ArgumentParser(
-        prog="claude-tap trust-ca",
+        prog="token-flow trust-ca",
         description=(
-            "Trust the claude-tap forward-proxy CA in the current user's macOS login keychain. "
+            "Trust the token-flow forward-proxy CA in the current user's macOS login keychain. "
             "This does not use sudo or the System keychain."
         ),
     )
@@ -1139,7 +1139,7 @@ def trust_ca_main(argv: list[str] | None = None) -> int:
 
 
 def main_entry() -> None:
-    """Entry point for the claude-tap CLI."""
+    """Entry point for the token-flow CLI."""
     # Check if first argument is "export" subcommand
     if len(sys.argv) > 1 and sys.argv[1] == "export":
         from claude_tap.export import export_main

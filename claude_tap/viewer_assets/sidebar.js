@@ -1009,11 +1009,11 @@ function turnTokenCount(entry) {
 
 function binaryTreemapLayout(items, rect = { x: 0, y: 0, width: 100, height: 100 }) {
   if (!items.length) return [];
-  const root = PackLiteD3.hierarchy({ children: items })
+  const root = TokenFlowD3.hierarchy({ children: items })
     .sum(item => Math.max(0, Number(item.weight) || 0))
     .sort((a, b) => (b.value || 0) - (a.value || 0));
-  PackLiteD3.treemap()
-    .tile(PackLiteD3.treemapBinary)
+  TokenFlowD3.treemap()
+    .tile(TokenFlowD3.treemapBinary)
     .size([rect.width, rect.height])
     .paddingInner(0)(root);
   return root.leaves().map(node => ({
@@ -1132,7 +1132,7 @@ function attributionTokenCategories(entry, catalog = buildAttributionCatalog()) 
 }
 
 function buildTurnTokenMap(items, columnWidth = 152, columnGap = 40, mapHeight = 520) {
-  const catalog = buildAttributionCatalog();
+  const catalog = buildAttributionCatalog(items.map(item => item.entry));
   const turns = items.map((item, position) => {
     const categories = attributionTokenCategories(item.entry, catalog);
     const x = 24 + position * (columnWidth + columnGap);
@@ -1157,7 +1157,7 @@ function compactTokenNumber(value) {
 }
 
 function visualDashboardModel(items) {
-  const catalog = buildAttributionCatalog();
+  const catalog = buildAttributionCatalog(items.map(item => item.entry));
   const summaries = items.map(item => ({ ...item, ...tokenTurnSummary(item.entry, catalog) }));
   let selectedPosition = summaries.findIndex(item => item.idx === activeIdx);
   if (selectedPosition < 0) selectedPosition = 0;
@@ -1166,14 +1166,150 @@ function visualDashboardModel(items) {
   return { summaries, selectedPosition, selected, previous };
 }
 
+/* Dashboard session pages start with lightweight metadata stubs. Those stubs
+   intentionally contain aggregate usage only; the request input and provider
+   attribution needed by the token visuals live in the full record. Detail view
+   already hydrates one record on demand. Token Map and Token Flow need the same
+   treatment before classifying categories, otherwise every turn collapses into
+   "Unattributed input" even though the capture is complete. */
+let tokenVisualHydrationPromise = null;
+const tokenVisualHydrationFailures = new Set();
+
+function tokenVisualHydrationCandidates(sourceEntries = filtered) {
+  return sourceEntries.filter(entry => (
+    typeof shouldFetchRemoteEntry === 'function'
+    && shouldFetchRemoteEntry(entry)
+    && !entryCache.has(entry._rawIdx)
+    && !tokenVisualHydrationFailures.has(entry._rawIdx)
+  ));
+}
+
+function resolvedTokenVisualEntries(sourceEntries = filtered) {
+  return sourceEntries.map(entry => (
+    typeof resolveEntryForDetail === 'function' ? resolveEntryForDetail(entry) : entry
+  ));
+}
+
+function beginTokenVisualHydration(sourceEntries = filtered) {
+  const pending = tokenVisualHydrationCandidates(sourceEntries);
+  if (!pending.length) return null;
+  if (tokenVisualHydrationPromise) return tokenVisualHydrationPromise;
+
+  const hydration = Promise.allSettled(pending.map(entry => resolveEntryForDetailAsync(entry)))
+    .then(results => {
+      results.forEach((result, index) => {
+        if (result.status !== 'rejected') return;
+        const rawIdx = pending[index]._rawIdx;
+        tokenVisualHydrationFailures.add(rawIdx);
+        console.error('Failed to load token attribution for record', rawIdx, result.reason);
+      });
+      return results;
+    })
+    .finally(() => {
+      if (tokenVisualHydrationPromise === hydration) tokenVisualHydrationPromise = null;
+    });
+  tokenVisualHydrationPromise = hydration;
+  return hydration;
+}
+
+function waitForTokenVisualHydration(sb) {
+  const mode = sidebarOrderMode;
+  const hydration = beginTokenVisualHydration(filtered);
+  if (!hydration) return false;
+  document.body.classList.add('token-visual-mode');
+  sb.className = 'sidebar token-map';
+  sb.innerHTML = `<div class="empty-state">${esc(tokenCategoryText('token_loading', 'Loading token categories…'))}</div>`;
+  hydration.then(() => {
+    if (sidebarOrderMode === mode) renderSidebar(true);
+  });
+  return true;
+}
+
+function timelineConversationMeta(summaries) {
+  const meta = new Map();
+  buildSessionGroups(summaries.map(item => ({ entry: item.entry, idx: item.idx }))).forEach((group, groupIdx) => {
+    const label = `${t('sort_session')} ${groupIdx + 1}`;
+    const title = sessionTextSnippet(group.userText, 30);
+    group.items.forEach((item, position) => {
+      meta.set(item.idx, { label, title, first: position === 0 });
+    });
+  });
+  return meta;
+}
+
+function timelineTurnMeta(turn, position) {
+  const entry = turn.entry;
+  const usage = getUsage(entry) || {};
+  const input = Number(usage.input_tokens) || 0;
+  const output = Number(usage.output_tokens) || 0;
+  const statusCode = getResponseStatus(entry);
+  const failed = statusCode >= 400;
+  const taskInfo = getTaskFingerprint(entry);
+  const taskColor = taskInfo ? getTaskColor(taskInfo.fp) : TASK_COLORS[0];
+  const model = entry.request?.body?.model || '';
+  const shortModel = model.replace(/^claude-/, '').replace(/-\d{8}$/, '');
+  const time = entry.timestamp ? new Date(entry.timestamp).toLocaleTimeString() : '';
+  const method = entry.request?.method || '';
+  const path = entry.request?.path || '';
+  const requestPath = `${method} ${path}`.trim();
+  const total = input + output;
+  const tooltip = [
+    `${t('turn')} ${position + 1}`,
+    taskInfo?.label || '',
+    shortModel,
+    `${total.toLocaleString()} ${t('tok')}`,
+    fmtDuration(entry.duration_ms || 0),
+    time,
+    requestPath,
+    failed ? `HTTP ${statusCode}` : '',
+  ].filter(Boolean).join(' · ');
+  return {
+    failed,
+    statusCode,
+    taskLabel: taskInfo?.label || '',
+    taskColor,
+    shortModel,
+    modelBadge: modelBadge(model),
+    input,
+    output,
+    total,
+    duration: fmtDuration(entry.duration_ms || 0),
+    time,
+    requestPath,
+    tooltip,
+  };
+}
+
 function visualTimelineMarkup(model) {
-  return `<div class="token-timeline" role="tablist" aria-label="${esc(t('turn'))}">${model.summaries.map((turn, position) => {
+  const groupedByConversation = workspaceLensForMode() === 'request' && requestGroupMode === 'session';
+  const conversationMeta = groupedByConversation ? timelineConversationMeta(model.summaries) : new Map();
+  const previousPosition = Math.max(0, model.selectedPosition - 1);
+  const nextPosition = Math.min(model.summaries.length - 1, model.selectedPosition + 1);
+  return `<div class="turn-rail">
+    <button class="turn-rail-nav previous" type="button" data-target-idx="${model.summaries[previousPosition]?.idx ?? ''}" aria-label="${esc(`${t('turn')} ${previousPosition + 1}`)}"${model.selectedPosition === 0 ? ' disabled' : ''}>&lsaquo;</button>
+    <div class="turn-rail-viewport">
+      <div class="token-timeline" role="tablist" aria-label="${esc(t('turn'))}">${model.summaries.map((turn, position) => {
     const active = position === model.selectedPosition;
-    return `<button class="token-timeline-turn${active ? ' active' : ''}" type="button" role="tab" aria-selected="${active ? 'true' : 'false'}" data-idx="${turn.idx}">
+    const conversation = conversationMeta.get(turn.idx);
+    const groupClass = conversation ? ` conversation${conversation.first ? ' conversation-start' : ''}` : '';
+    const conversationTitle = conversation ? `${conversation.label}${conversation.title ? `: ${conversation.title}` : ''}` : '';
+    const meta = timelineTurnMeta(turn, position);
+    const title = [conversationTitle, meta.tooltip].filter(Boolean).join('\n');
+    return `<button class="token-timeline-turn${groupClass}${active ? ' active' : ''}${meta.failed ? ' is-error' : ''}" type="button" role="tab" aria-selected="${active ? 'true' : 'false'}" data-idx="${turn.idx}" title="${esc(title)}" style="--turn-accent:${meta.failed ? 'var(--red)' : meta.taskColor.color};--turn-accent-bg:${meta.taskColor.bg}">
       <span class="timeline-index">${position + 1}</span>
-      <span class="timeline-value">${compactTokenNumber(turn.input)}</span>
+      <span class="timeline-turn-label">${esc(`${t('turn')} ${position + 1}`)}</span>
+      <span class="timeline-agent" style="background:${meta.taskColor.bg};color:${meta.taskColor.color}">${esc(meta.taskLabel || 'API')}</span>
+      ${meta.shortModel ? `<span class="timeline-model" style="background:${meta.modelBadge.bg};color:${meta.modelBadge.fg}">${esc(meta.shortModel)}</span>` : ''}
+      <span class="timeline-value">${compactTokenNumber(meta.total)} ${esc(t('tok'))}</span>
+      <span class="timeline-duration">${esc(meta.duration)}</span>
+      ${meta.time ? `<span class="timeline-time">${esc(meta.time)}</span>` : ''}
+      ${meta.requestPath ? `<span class="timeline-path">${esc(meta.requestPath)}</span>` : ''}
+      ${conversation?.first ? `<span class="timeline-group">${esc(conversation.label)}</span>` : ''}
     </button>`;
-  }).join('')}</div>`;
+  }).join('')}</div>
+    </div>
+    <button class="turn-rail-nav next" type="button" data-target-idx="${model.summaries[nextPosition]?.idx ?? ''}" aria-label="${esc(`${t('turn')} ${nextPosition + 1}`)}"${model.selectedPosition === model.summaries.length - 1 ? ' disabled' : ''}>&rsaquo;</button>
+  </div>`;
 }
 
 function visualMetricsMarkup(model) {
@@ -1184,7 +1320,7 @@ function visualMetricsMarkup(model) {
   const deltaClass = !model.previous || delta === 0 ? 'neutral' : delta < 0 ? 'good' : 'bad';
   const deltaText = model.previous ? `${delta > 0 ? '+' : ''}${delta.toLocaleString()}` : 'N/A';
   return `<div class="token-kpis">
-    <div class="token-kpi"><strong>${selected.input.toLocaleString()}</strong><span>${esc(t('tok_input'))} ${esc(t('tok'))}</span></div>
+    <div class="token-kpi"><strong>${selected.input.toLocaleString()}</strong><span>${esc(t('token_input_label'))}</span></div>
     <div class="token-kpi"><strong>${hitRate.toFixed(0)}%</strong><span>${esc(t('token_cache_hit'))} (${selected.cached.toLocaleString()})</span></div>
     <div class="token-kpi"><strong>${selected.fresh.toLocaleString()}</strong><span>${esc(t('flow_fresh'))}</span></div>
     <div class="token-kpi ${deltaClass}"><strong>${deltaText}</strong><span>${esc(t('token_vs_previous'))}</span></div>
@@ -1195,21 +1331,79 @@ function visualDashboardHeader(model) {
   const selected = model.selected;
   if (!selected) return '';
   return `<div class="token-dashboard-header">
-    <div class="token-breadcrumb"><span>Trace</span><i>/</i><strong>${esc(`${t('turn')} ${model.selectedPosition + 1} ${t('token_of')} ${model.summaries.length}`)}</strong></div>
+    <div class="token-breadcrumb"><span>${esc(t('sort_session'))}</span><i>/</i><strong>${esc(`${t('turn')} ${model.selectedPosition + 1} ${t('token_of')} ${model.summaries.length}`)}</strong></div>
     ${visualTimelineMarkup(model)}
     ${visualMetricsMarkup(model)}
   </div>`;
 }
 
 function bindVisualTimeline(root) {
-  root.querySelectorAll('.token-timeline-turn').forEach(button => {
-    button.addEventListener('click', () => {
-      activeIdx = parseInt(button.dataset.idx);
-      selectedTokenCategoryId = null;
-      renderSidebar(true);
-      updatePositionIndicator();
+  const activate = idx => {
+    if (!Number.isFinite(idx)) return;
+    if (workspaceLensForMode() === 'request') {
+      selectEntry(idx);
+      return;
+    }
+    activeIdx = idx;
+    selectedTokenCategoryId = null;
+    renderSidebar(true);
+    updatePositionIndicator();
+  };
+  const buttons = Array.from(root.querySelectorAll('.token-timeline-turn'));
+  buttons.forEach((button, position) => {
+    button.addEventListener('click', () => activate(parseInt(button.dataset.idx)));
+    button.addEventListener('keydown', event => {
+      let target = null;
+      if (event.key === 'ArrowLeft') target = buttons[position - 1];
+      if (event.key === 'ArrowRight') target = buttons[position + 1];
+      if (event.key === 'Home') target = buttons[0];
+      if (event.key === 'End') target = buttons[buttons.length - 1];
+      if (!target) return;
+      event.preventDefault();
+      activate(parseInt(target.dataset.idx));
     });
   });
+  root.querySelectorAll('.turn-rail-nav').forEach(button => {
+    button.addEventListener('click', () => activate(parseInt(button.dataset.targetIdx)));
+  });
+  const viewport = root.querySelector('.turn-rail-viewport');
+  const active = root.querySelector('.token-timeline-turn.active');
+  if (viewport && active) {
+    requestAnimationFrame(() => {
+      viewport.scrollLeft = Math.max(0, active.offsetLeft - (viewport.clientWidth - active.offsetWidth) / 2);
+    });
+  }
+}
+
+function renderWorkspaceTurnNavigator() {
+  const navigator = $('#turn-navigator');
+  const summary = $('#turn-summary');
+  const shell = $('#workspace-shell');
+  if (!navigator || !summary) return;
+  const items = resolvedTokenVisualEntries().map((entry, idx) => ({ entry, idx }));
+  const model = visualDashboardModel(items);
+  if (!model.selected) {
+    navigator.style.display = 'none';
+    summary.style.display = 'none';
+    navigator.innerHTML = '';
+    summary.innerHTML = '';
+    shell?.classList.remove('has-turns');
+    return;
+  }
+  shell?.classList.add('has-turns');
+  navigator.style.display = '';
+  summary.style.display = '';
+  navigator.innerHTML = `<div class="workspace-turn-inner">
+    <div class="workspace-turn-heading">
+      <strong>${esc(`${t('turn')} ${model.selectedPosition + 1} ${t('token_of')} ${model.summaries.length}`)}</strong>
+      <span>${compactTokenNumber(model.selected.input)} ${esc(t('token_input_label'))}</span>
+    </div>
+    ${visualTimelineMarkup(model)}
+  </div>`;
+  summary.innerHTML = `<div class="workspace-summary-inner">
+    ${visualMetricsMarkup(model)}
+  </div>`;
+  bindVisualTimeline(navigator);
 }
 
 function categoryInspectorMarkup(category, current, previous) {
@@ -1233,11 +1427,12 @@ function categoryInspectorMarkup(category, current, previous) {
   </div>`;
 }
 
-function turnInspectorMarkup(turn) {
+function turnInspectorMarkup(turn, position = null) {
   if (!turn) return `<div class="token-inspector-empty">${esc(t('token_no_attribution'))}</div>`;
   const ranked = [...turn.categories].sort((a, b) => freshCategoryTokens(b) - freshCategoryTokens(a)).slice(0, 7);
+  const turnLabel = position === null ? displayTurnLabel(turn.entry) : position + 1;
   return `<div class="token-inspector-content">
-    <div class="token-inspector-heading"><div><span>${esc(t('turn'))}</span><h3>${esc(`${t('turn')} ${displayTurnLabel(turn.entry)}`)}</h3></div></div>
+    <div class="token-inspector-heading"><div><span>${esc(t('turn'))}</span><h3>${esc(`${t('turn')} ${turnLabel}`)}</h3></div></div>
     <div class="token-inspector-total"><strong>${turn.fresh.toLocaleString()}</strong><span>${esc(t('flow_fresh'))}</span></div>
     <dl class="token-inspector-rows compact">
       ${ranked.map(category => `<div><dt><i style="background:${category.color}"></i>${esc(sessionTextSnippet(category.label, 28))}</dt><dd><strong>${freshCategoryTokens(category).toLocaleString()}</strong></dd></div>`).join('')}
@@ -1246,11 +1441,12 @@ function turnInspectorMarkup(turn) {
 }
 
 function renderTreemap(sb, preserveDetail) {
+  if (waitForTokenVisualHydration(sb)) return;
   document.body.classList.add('token-visual-mode');
   sb.className = 'sidebar token-map';
   sb.innerHTML = '';
   virtualMode = false;
-  const items = filtered.map((entry, idx) => ({ entry, idx }));
+  const items = resolvedTokenVisualEntries().map((entry, idx) => ({ entry, idx }));
   const model = visualDashboardModel(items);
   if (!model.selected) {
     sb.innerHTML = `<div class="empty-state">${esc(t('empty_state'))}</div>`;
@@ -1265,7 +1461,7 @@ function renderTreemap(sb, preserveDetail) {
 
   const workspace = document.createElement('div');
   workspace.className = 'token-dashboard';
-  workspace.innerHTML = visualDashboardHeader(model) + `<div class="token-dashboard-grid">
+  workspace.innerHTML = `<div class="token-dashboard-grid">
     <section class="token-chart-panel">
       <div class="token-panel-heading"><div><h2>${esc(t('treemap_title'))}</h2><p>${esc(t('treemap_note'))}</p></div><div class="token-legend"><span><i class="cached"></i>${esc(t('tok_cache_read'))}</span><span><i class="fresh"></i>${esc(t('flow_fresh'))}</span></div></div>
       <div class="token-chart-canvas"></div>
@@ -1319,7 +1515,7 @@ function freshCategoryTokens(category) {
 }
 
 function buildFreshTokenSankey(items, width, height) {
-  const catalog = buildAttributionCatalog();
+  const catalog = buildAttributionCatalog(items.map(item => item.entry));
   const turns = items.map(item => ({ ...item, categories: attributionTokenCategories(item.entry, catalog) }));
   const nodes = [];
   const links = [];
@@ -1390,7 +1586,7 @@ function buildFreshTokenSankey(items, width, height) {
       ensureNode({ id: `turn-0:${category.id}`, layer: 0, flowKind: 'category', turn: turns[0], category, fixedValue: fresh });
     });
   }
-  const graph = PackLiteD3.sankey()
+  const graph = TokenFlowD3.sankey()
     .nodeId(node => node.id)
     .nodeAlign(node => node.layer)
     .nodeWidth(12)
@@ -1400,11 +1596,12 @@ function buildFreshTokenSankey(items, width, height) {
 }
 
 function renderTokenFlow(sb, preserveDetail) {
+  if (waitForTokenVisualHydration(sb)) return;
   document.body.classList.add('token-visual-mode');
   sb.className = 'sidebar token-map';
   sb.innerHTML = '';
   virtualMode = false;
-  const items = filtered.map((entry, idx) => ({ entry, idx }));
+  const items = resolvedTokenVisualEntries().map((entry, idx) => ({ entry, idx }));
   const model = visualDashboardModel(items);
   if (!model.selected) {
     sb.innerHTML = `<div class="empty-state">${esc(t('empty_state'))}</div>`;
@@ -1416,12 +1613,12 @@ function renderTokenFlow(sb, preserveDetail) {
   const graph = buildFreshTokenSankey(items, width, height);
   const workspace = document.createElement('div');
   workspace.className = 'token-dashboard';
-  workspace.innerHTML = visualDashboardHeader(model) + `<div class="token-dashboard-grid">
+  workspace.innerHTML = `<div class="token-dashboard-grid">
     <section class="token-chart-panel">
       <div class="token-panel-heading"><div><h2>${esc(t('flow_title'))}</h2><p>${esc(t('flow_width_note'))}</p></div><div class="token-legend"><span><i class="fresh"></i>${esc(t('flow_fresh'))}</span><span><i class="saved"></i>${esc(t('flow_saved'))}</span></div></div>
       <div class="token-chart-canvas token-flow-scroll"></div>
     </section>
-    <aside class="token-inspector" id="token-inspector">${turnInspectorMarkup(model.selected)}</aside>
+    <aside class="token-inspector" id="token-inspector">${turnInspectorMarkup(model.selected, model.selectedPosition)}</aside>
   </div>`;
   const scroller = workspace.querySelector('.token-chart-canvas');
   const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
@@ -1432,7 +1629,7 @@ function renderTokenFlow(sb, preserveDetail) {
   svg.setAttribute('role', 'img');
   svg.setAttribute('aria-label', t('flow_title'));
 
-  const linkPath = PackLiteD3.sankeyLinkHorizontal();
+  const linkPath = TokenFlowD3.sankeyLinkHorizontal();
   const linkMarkup = graph.links.filter(link => link.flowKind !== 'anchor').map(link => {
     const color = link.flowKind === 'saved' ? 'var(--green)' : link.flowKind === 'new' ? 'var(--text-tertiary)' : link.category.color;
     const label = link.flowKind === 'saved' ? t('flow_saved') : link.flowKind === 'new' ? t('flow_new_tokens') : link.category.label;
@@ -1457,7 +1654,7 @@ function renderTokenFlow(sb, preserveDetail) {
     const fresh = turn.categories.reduce((sum, category) => sum + freshCategoryTokens(category), 0);
     const cached = turn.categories.reduce((sum, category) => sum + category.cached, 0);
     const x = 34 + position * ((width - 80) / Math.max(1, graph.turns.length - 1));
-    return `<text class="flow-turn-label" x="${x}" y="24">${esc(`${t('turn')} ${displayTurnLabel(turn.entry)}`)}</text><text class="flow-token-total" x="${x}" y="42">${fresh.toLocaleString()} fresh · ${cached.toLocaleString()} cached</text>`;
+    return `<text class="flow-turn-label" x="${x}" y="24">${esc(`${t('turn')} ${position + 1}`)}</text><text class="flow-token-total" x="${x}" y="42">${fresh.toLocaleString()} fresh · ${cached.toLocaleString()} cached</text>`;
   }).join('');
   svg.innerHTML = headings + `<g>${linkMarkup}</g><g>${nodeMarkup}</g>`;
   svg.querySelectorAll('.fresh-flow-node.category').forEach(node => {
@@ -1485,6 +1682,7 @@ function renderTokenFlow(sb, preserveDetail) {
 function renderSidebar(preserveDetail) {
   const sb = $('#sidebar');
   updateSidebarSortControls();
+  renderWorkspaceTurnNavigator();
   if (sidebarOrderMode === 'treemap') {
     renderTreemap(sb, preserveDetail);
     return;
@@ -1698,6 +1896,7 @@ function selectEntry(idx, opts) {
     if (active) active.scrollIntoView({ block: 'nearest' });
   }
   updatePositionIndicator();
+  renderWorkspaceTurnNavigator();
   if (!document.body.classList.contains('token-visual-mode')) mobileShowDetail();
   updateMobileNav();
 }

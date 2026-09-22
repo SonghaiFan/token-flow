@@ -9,7 +9,7 @@ function detectLang() {
   const match = supported.find(s => s.startsWith(prefix));
   return match || 'en';
 }
-let currentLang = safeLocalStorageGet('claude-tap-lang') || detectLang();
+let currentLang = safeLocalStorageGet('token-flow-lang') || safeLocalStorageGet('packlite-lang') || detectLang();
 function t(key) {
   const en = I18N.en || {};
   return (I18N[currentLang] || en)[key] || en[key] || key;
@@ -29,7 +29,7 @@ function formatText(key, values = {}) {
 }
 function setLang(lang) {
   currentLang = lang;
-  safeLocalStorageSet('claude-tap-lang', lang);
+  safeLocalStorageSet('token-flow-lang', lang);
   document.documentElement.dir = lang === 'ar' ? 'rtl' : 'ltr';
   document.documentElement.lang = lang;
   $('#lang-select').value = lang;
@@ -70,7 +70,7 @@ function updateStaticTexts() {
   if (e('empty-trace-hint')) e('empty-trace-hint').textContent = t('empty_trace_hint');
   if (e('search-input')) e('search-input').placeholder = t('search_placeholder');
   if (e('date-label')) e('date-label').textContent = t('history_date');
-  if (e('sidebar-sort-label')) e('sidebar-sort-label').textContent = t('sort_label');
+  if (e('sessions-link')) e('sessions-link').textContent = currentLang === 'zh-CN' ? '所有对话' : 'Sessions';
   updateHistoryDeleteButton();
   updateSidebarSortControls();
   renderViewerActions();
@@ -105,7 +105,7 @@ function renderViewerActions() {
 
 /* ─── Theme ─── */
 function initTheme() {
-  const saved = safeLocalStorageGet('claude-tap-theme');
+  const saved = safeLocalStorageGet('token-flow-theme') || safeLocalStorageGet('packlite-theme');
   const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
   const theme = EMBED_QUERY_OPTIONS.theme || saved || (prefersDark ? 'dark' : 'light');
   applyTheme(theme);
@@ -113,7 +113,7 @@ function initTheme() {
 function toggleTheme() {
   const next = document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark';
   applyTheme(next);
-  safeLocalStorageSet('claude-tap-theme', next);
+  safeLocalStorageSet('token-flow-theme', next);
 }
 function applyTheme(theme) {
   if (theme === 'dark') {
@@ -145,6 +145,7 @@ function initLang() {
 }
 
 function initCommonUi() {
+  document.body.classList.toggle('dashboard-session', /^\/dashboard\/session\//.test(window.location.pathname));
   initEmbedMode();
   initTheme();
   initLang();

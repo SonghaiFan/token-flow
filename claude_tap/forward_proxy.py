@@ -1,7 +1,7 @@
 """Forward proxy server with CONNECT/TLS termination.
 
 Implements an HTTP forward proxy that handles CONNECT tunneling with
-man-in-the-middle TLS termination. This allows claude-tap to intercept
+man-in-the-middle TLS termination. This allows Token Flow to intercept
 HTTPS traffic while Claude Code uses the real api.anthropic.com endpoint
 (preserving OAuth authentication).
 
@@ -67,7 +67,7 @@ from claude_tap.ws_proxy import (
     reconstruct_ws_request_body,
 )
 
-log = logging.getLogger("claude-tap")
+log = logging.getLogger("token-flow")
 
 DEFAULT_TRACE_IGNORED_HOSTS = frozenset(
     {

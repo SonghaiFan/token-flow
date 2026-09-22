@@ -29,7 +29,7 @@ import urllib.request
 
 locker = None
 if os.environ.get("LOCK_SQLITE_DURING_REQUEST") == "1":
-    locker = sqlite3.connect(os.environ["CLOUDTAP_DB"], timeout=0.1)
+    locker = sqlite3.connect(os.environ["TOKEN_FLOW_DB"], timeout=0.1)
     locker.execute("BEGIN IMMEDIATE")
     locker.execute("UPDATE sessions SET status = status")
 

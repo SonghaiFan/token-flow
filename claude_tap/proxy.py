@@ -26,7 +26,7 @@ from claude_tap.upstream import build_upstream_url, format_upstream_error
 from claude_tap.usage import normalize_usage
 from claude_tap.viewer import _decode_bedrock_eventstream_events
 
-log = logging.getLogger("claude-tap")
+log = logging.getLogger("token-flow")
 
 # ---------------------------------------------------------------------------
 # Header helpers
@@ -292,7 +292,7 @@ def capture_only_content_type(path: str, is_streaming: bool) -> str:
 
 def capture_only_response(path: str, req_body: object) -> dict:
     """Return a protocol-shaped success response without contacting upstream."""
-    model = req_body.get("model", "claude-tap-capture") if isinstance(req_body, dict) else "claude-tap-capture"
+    model = req_body.get("model", "token-flow-capture") if isinstance(req_body, dict) else "token-flow-capture"
     clean_path = path.split("?", 1)[0]
     if clean_path.startswith("/model/") and clean_path.rstrip("/").endswith("/converse"):
         return {
@@ -320,7 +320,7 @@ def capture_only_response(path: str, req_body: object) -> dict:
         return {"object": "list", "data": [{"id": str(model), "object": "model"}]}
     if clean_path.startswith(("/v1/models/", "/models/")):
         model_id = clean_path.rsplit("/", 1)[-1] or str(model)
-        return {"id": model_id, "object": "model", "created": 0, "owned_by": "claude-tap"}
+        return {"id": model_id, "object": "model", "created": 0, "owned_by": "token-flow"}
     if clean_path.startswith(("/v1beta/models", "/v1alpha/models")):
         if ":" not in clean_path.rsplit("/", 1)[-1]:
             return _capture_only_gemini_model_response(clean_path, model)
@@ -484,7 +484,7 @@ def _capture_only_anthropic_message_stream_bytes(resp_body: dict) -> bytes:
 
 
 def _capture_only_bedrock_eventstream_bytes(path: str) -> bytes:
-    model = bedrock_model_from_path(path) or "claude-tap-capture"
+    model = bedrock_model_from_path(path) or "token-flow-capture"
     if path.split("?", 1)[0].rstrip("/").endswith("/converse-stream"):
         events = [
             {"messageStart": {"role": "assistant"}},

@@ -31,6 +31,7 @@ from claude_tap.dashboard import (
     list_trace_sessions,
     load_trace_session,
     read_dashboard_template,
+    select_trace_turn_records,
 )
 from claude_tap.history import migrate_legacy_traces
 from claude_tap.live import LiveViewerServer, _record_limit_from_request
@@ -56,6 +57,69 @@ def test_record_limit_from_request_preserves_large_loaded_windows() -> None:
     request = make_mocked_request("GET", "/api/sessions/example/records?limit=1500")
 
     assert _record_limit_from_request(request) == 1500
+
+
+def test_select_trace_turn_records_excludes_model_discovery_calls() -> None:
+    model_probe = {
+        "request_id": "req_models",
+        "request": {"method": "GET", "path": "/v1/models", "body": None},
+        "response": {"status": 200, "body": {"models": [{"slug": "large-payload"}]}},
+    }
+    model_turn = _anthropic_record()
+
+    assert select_trace_turn_records([model_probe, model_turn]) == [model_turn]
+
+
+def test_select_trace_turn_records_excludes_count_and_codex_prefetch_calls() -> None:
+    count_tokens = {
+        "request_id": "req_count",
+        "request": {"method": "POST", "path": "/v1/messages/count_tokens", "body": {}},
+        "response": {"status": 200, "body": {"input_tokens": 1200}},
+    }
+    prefetch = {
+        "request_id": "req_prefetch",
+        "request": {"method": "POST", "path": "/v1/responses", "body": {"generate": False}},
+        "response": {
+            "status": 200,
+            "body": {"generate": False, "output": [], "usage": {"input_tokens": 12, "output_tokens": 0}},
+        },
+    }
+    visible = {
+        "request_id": "req_visible",
+        "request": {"method": "POST", "path": "/v1/responses", "body": {"model": "gpt-5.6"}},
+        "response": {"status": 200, "body": {"output": [{"type": "message"}], "usage": {"output_tokens": 1}}},
+    }
+
+    assert select_trace_turn_records([count_tokens, prefetch, visible]) == [visible]
+
+
+def test_dashboard_turn_count_matches_user_visible_records(trace_db) -> None:
+    store = get_trace_store()
+    session_id = store.create_session(client="codex", proxy_mode="reverse")
+    records = [
+        {
+            "request_id": "req_count",
+            "request": {"method": "POST", "path": "/v1/messages/count_tokens", "body": {}},
+            "response": {"status": 200, "body": {"input_tokens": 1200}},
+        },
+        {
+            "request_id": "req_prefetch",
+            "request": {"method": "POST", "path": "/v1/responses", "body": {"generate": False}},
+            "response": {"status": 200, "body": {"generate": False, "output": [], "usage": {"output_tokens": 0}}},
+        },
+        {
+            "request_id": "req_visible",
+            "request": {"method": "POST", "path": "/v1/responses", "body": {"model": "gpt-5.6"}},
+            "response": {"status": 200, "body": {"output": [{"type": "message"}], "usage": {"output_tokens": 1}}},
+        },
+    ]
+    for record in records:
+        store.append_record(session_id, record)
+
+    summary = next(item for item in list_trace_sessions(current_session_id=session_id) if item["id"] == session_id)
+
+    assert summary["record_count"] == 3
+    assert summary["turn_count"] == 1
 
 
 def test_dashboard_lists_sessions_by_normalized_updated_at(trace_db) -> None:
@@ -834,7 +898,7 @@ def test_dashboard_rejects_missing_session_ids(trace_db) -> None:
     assert "DASHBOARD_I18N" in template
     assert 'tab_trace: "Trace"' in template
     assert 'tab_trace: "轨迹"' in template
-    assert 'metric_traces: "轨迹数"' in template
+    assert 'metric_traces: "轮次"' in template
     assert 'data-i18n="table_first_message"' in template
     assert "export_jsonl" in template
     assert 'export_compact: "Export JSON"' in template
@@ -844,43 +908,21 @@ def test_dashboard_rejects_missing_session_ids(trace_db) -> None:
     assert load_trace_session("not-a-valid-session-id") is None
 
 
-def test_dashboard_detail_navigation_uses_lazy_shell_route() -> None:
+def test_dashboard_session_navigation_goes_directly_to_workspace() -> None:
     template = read_dashboard_template()
 
     assert "function sessionDetailUrl(sessionId)" in template
     assert "window.location.assign(sessionDetailUrl(sessionId))" in template
     assert "/dashboard/session/" in template
-    assert "detailRecordTotal: 0" in template
-    assert 'detailFingerprint: ""' in template
-    assert "detailSession: null" in template
-    assert 'activeTab: "raw"' in template
-    assert "function detailRecordFetchLimit(sessionId, preserveLoaded)" in template
-    assert "function sessionDetailFingerprint(session)" in template
-    assert "function updateDetailSessionSummary(session)" in template
-    assert "function updateDetailI18n(session)" in template
     assert 'params.set("search", search)' in template
     assert 'params.set("agent", state.selectedAgent)' in template
     assert "function refreshForFilters()" in template
-    assert 'state.view === "detail" && state.selectedSessionId' in template
-    assert "const detailLoaded = state.detailSessionId === state.selectedSessionId" in template
-    assert "refreshDetail || selectedFingerprint !== state.detailFingerprint" in template
     assert "silent: true" in template
-    assert "updateDetailSessionSummary(selected)" in template
-    assert "updateDetailI18n(state.detailSession)" in template
-    assert "knownTotal > previousTotal && previousTotal <= loadedRecords" in template
-    assert "const limit = detailRecordFetchLimit(sessionId, preserveLoaded)" in template
-    assert "state.detailRecordTotal = totalRecords" in template
-    assert "state.detailFingerprint = sessionDetailFingerprint(session)" in template
-    assert "function ensureViewerFrame(session)" in template
-    assert "data-tab-toggle" in template
-    assert 'container.querySelector("[data-viewer-frame]")' in template
-    assert "setDetailTab(event.currentTarget.dataset.tab, session)" in template
 
 
 def test_dashboard_template_exposes_session_delete_controls() -> None:
     template = read_dashboard_template()
 
-    assert 'data-i18n="table_actions"' in template
     assert 'id="edit-sessions"' in template
     assert 'id="select-all-sessions"' in template
     assert 'id="delete-selected-sessions"' in template
@@ -1255,12 +1297,9 @@ async def test_dashboard_server_serves_session_api_and_exports(trace_db, tmp_pat
             async with session.get(f"http://127.0.0.1:{port}/") as resp:
                 assert resp.status == 200
                 html = await resp.text()
-                assert "session-list" in html
-                assert "export_jsonl" in html
-                assert 'export_compact: "Export JSON"' in html
-                assert "export_log" not in html
-                assert "export_html" in html
-                assert "export_menu" in html
+                assert "Token Flow" in html
+                assert "Understand what your coding agent sends to the model" in html
+                assert "/_next/static/" in html
 
             async with session.get(f"http://127.0.0.1:{port}/api/sessions") as resp:
                 assert resp.status == 200
@@ -1279,11 +1318,9 @@ async def test_dashboard_server_serves_session_api_and_exports(trace_db, tmp_pat
             async with session.get(f"http://127.0.0.1:{port}/dashboard/session/{session_id}") as resp:
                 assert resp.status == 200
                 html = await resp.text()
-                assert "session-list" in html
-                assert "back-to-list" not in html
-                assert "EMBEDDED_TRACE_COMPACT_DATA" not in html
-                assert "req_claude" not in html
-                assert "/api/sessions/${encodeURIComponent(session.id)}/html" in html
+                assert "session-list" not in html
+                assert "Token Flow" in html
+                assert "/_next/static/" in html
 
             async with session.get(f"http://127.0.0.1:{port}/api/agents") as resp:
                 assert resp.status == 200
@@ -1291,6 +1328,11 @@ async def test_dashboard_server_serves_session_api_and_exports(trace_db, tmp_pat
                 assert payload["agents"][0]["label"] == "Claude Code"
 
             async with session.get(f"http://127.0.0.1:{port}/api/sessions/{session_id}/records") as resp:
+                assert resp.status == 200
+                payload = await resp.json()
+                assert payload["records"][0]["request_id"] == "req_claude"
+
+            async with session.get(f"http://127.0.0.1:{port}/api/sessions/{session_id}/records?view=turns") as resp:
                 assert resp.status == 200
                 payload = await resp.json()
                 assert payload["records"][0]["request_id"] == "req_claude"
@@ -1728,9 +1770,8 @@ async def test_dashboard_server_quit_route_stops_dashboard(trace_db) -> None:
             async with session.get(f"http://127.0.0.1:{port}/dashboard") as resp:
                 assert resp.status == 200
                 html = await resp.text()
-                assert f'const CLAUDE_TAP_VERSION = "{CLAUDE_TAP_VERSION}";' in html
-                assert f'const DASHBOARD_QUIT_TOKEN = "{server._dashboard_quit_token}";' in html
-                assert "const DASHBOARD_CAN_STOP = true;" in html
+                assert "Token Flow" in html
+                assert server._dashboard_quit_token not in html
 
             async with session.post(f"http://127.0.0.1:{port}/dashboard/quit") as resp:
                 assert resp.status == 403
@@ -1771,10 +1812,8 @@ async def test_dashboard_quit_token_requires_trusted_host_and_origin(trace_db) -
             ) as resp:
                 assert resp.status == 200
                 html = await resp.text()
-                assert f'const CLAUDE_TAP_VERSION = "{CLAUDE_TAP_VERSION}";' in html
-                assert 'const DASHBOARD_QUIT_TOKEN = "";' in html
-                assert "const DASHBOARD_CAN_STOP = false;" in html
-                assert "session-list" in html
+                assert "Token Flow" in html
+                assert server._dashboard_quit_token not in html
 
             async with session.get(
                 f"http://127.0.0.1:{port}/dashboard/health",
@@ -1849,41 +1888,19 @@ async def test_dashboard_session_route_serves_standalone_viewer(trace_db, tmp_pa
                     f"http://127.0.0.1:{port}/dashboard/session/{session_id}",
                     wait_until="domcontentloaded",
                 )
-                await page.wait_for_selector("#raw-tab .section", timeout=5000)
+                await page.wait_for_selector(".token-dashboard", timeout=5000)
                 assert await page.locator(".header").count() == 1
                 assert await page.locator(".viewer-frame").count() == 0
-                assert await page.locator("#back-to-list").count() == 0
-                assert await page.locator("#list-view.hidden").count() == 1
-                assert await page.locator("#raw-tab .section").count() == 10
-                assert await page.locator("[data-load-more]").count() == 1
-                tab_toggle = page.locator("[data-tab-toggle]")
-                assert await tab_toggle.inner_text() == "Full viewer"
+                assert await page.locator("#sessions-link").is_visible()
+                assert await page.locator("#sessions-link").get_attribute("href") == "/dashboard"
+                assert await page.locator('.sidebar-sort-btn[data-lens="treemap"]').inner_text() == "Composition"
+                assert await page.locator('.sidebar-sort-btn[data-lens="flow"]').inner_text() == "Cache flow"
+                assert await page.locator('.sidebar-sort-btn[data-lens="request"]').inner_text() == "Request"
 
-                await tab_toggle.click()
-                await page.wait_for_selector("#conversation-tab:not(.hidden) .viewer-frame", timeout=5000)
-                assert await page.locator(".viewer-frame").count() == 1
-                frame = page.frame_locator(".viewer-frame")
-                await frame.locator(".sidebar-item").first.wait_for(timeout=5000)
-                await frame.locator("#detail .section").first.wait_for(timeout=5000)
-                assert not await frame.locator("#drop-zone").is_visible()
-                await page.locator(".viewer-frame").evaluate("(frame) => { frame.dataset.reuseMarker = 'kept'; }")
-                assert await tab_toggle.inner_text() == "Trace"
-
-                await tab_toggle.click()
-                await page.wait_for_selector("#raw-tab:not(.hidden) .section", timeout=5000)
-                assert await page.locator(".viewer-frame").count() == 1
-                assert await page.locator(".viewer-frame").get_attribute("data-reuse-marker") == "kept"
-                assert await tab_toggle.inner_text() == "Full viewer"
-
-                await tab_toggle.click()
-                await page.wait_for_selector("#conversation-tab:not(.hidden) .viewer-frame", timeout=5000)
-                assert await page.locator(".viewer-frame").count() == 1
-                assert await page.locator(".viewer-frame").get_attribute("data-reuse-marker") == "kept"
-
-                export_button = page.locator(".detail-inspector-bar .export-menu > summary")
+                export_button = page.locator(".viewer-actions .export-menu > summary")
                 assert await export_button.count() == 1
                 assert await export_button.inner_text() == "Export"
-                export_items = page.locator(".detail-inspector-bar .export-menu-item")
+                export_items = page.locator(".viewer-actions .export-menu-item")
                 assert await export_items.count() == 2
                 assert await export_items.all_text_contents() == ["Export JSON", "Export HTML"]
                 hrefs = await export_items.evaluate_all("(links) => links.map((link) => link.getAttribute('href'))")
@@ -1893,7 +1910,7 @@ async def test_dashboard_session_route_serves_standalone_viewer(trace_db, tmp_pa
 
                 async with page.expect_download() as download_info:
                     await export_button.click()
-                    await page.locator('.detail-inspector-bar .export-menu-item[href$="/export/html"]').click()
+                    await page.locator('.viewer-actions .export-menu-item[href$="/export/html"]').click()
                 download = await download_info.value
                 assert download.suggested_filename == f"trace_{session_id[:8]}.html"
                 download_path = await download.path()
@@ -1929,19 +1946,19 @@ async def test_dashboard_session_export_menu_is_not_clipped_on_mobile(trace_db, 
                     f"http://127.0.0.1:{port}/dashboard/session/{session_id}",
                     wait_until="domcontentloaded",
                 )
-                await page.wait_for_selector(".detail-inspector-bar .export-menu > summary", timeout=5000)
+                await page.wait_for_selector(".viewer-actions .export-menu > summary", timeout=5000)
 
-                await page.locator(".detail-inspector-bar .export-menu > summary").click()
-                menu = page.locator(".detail-inspector-bar .export-menu-list")
+                await page.locator(".viewer-actions .export-menu > summary").click()
+                menu = page.locator(".viewer-actions .export-menu-list")
                 assert await menu.is_visible()
-                export_items = page.locator(".detail-inspector-bar .export-menu-item")
+                export_items = page.locator(".viewer-actions .export-menu-item")
                 assert await export_items.count() == 2
                 assert await export_items.all_text_contents() == ["Export JSON", "Export HTML"]
 
                 layout = await page.evaluate(
                     """() => {
-                      const actions = document.querySelector('.detail-inspector-bar .action-bar');
-                      const menu = document.querySelector('.detail-inspector-bar .export-menu-list');
+                      const actions = document.querySelector('.viewer-actions');
+                      const menu = document.querySelector('.viewer-actions .export-menu-list');
                       const actionsBox = actions.getBoundingClientRect();
                       const menuBox = menu.getBoundingClientRect();
                       const actionStyles = getComputedStyle(actions);

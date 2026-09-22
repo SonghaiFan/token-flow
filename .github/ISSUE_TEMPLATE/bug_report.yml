@@ -1,86 +1,38 @@
 name: Bug report
-description: Report a reproducible problem with claude-tap.
+description: Report a reproducible Token Flow problem.
 title: "bug: "
 labels: ["bug"]
 body:
   - type: markdown
     attributes:
-      value: |
-        Thanks for reporting a bug. Do not include API keys, auth tokens, private prompts, raw trace files, or generated HTML viewers unless they are fully redacted.
-  - type: checkboxes
-    id: preflight
+      value: Do not include secrets, private prompts, raw traces, or unredacted exports.
+  - type: textarea
+    id: problem
     attributes:
-      label: Preflight
-      options:
-        - label: I searched existing issues and pull requests.
-          required: true
-        - label: I removed secrets and private trace data from this report.
-          required: true
-  - type: input
-    id: version
-    attributes:
-      label: claude-tap version
-      description: Output of `claude-tap --version` or package version.
-      placeholder: "0.1.39"
-    validations:
-      required: true
-  - type: dropdown
-    id: client
-    attributes:
-      label: Client
-      options:
-        - Claude Code
-        - Codex CLI
-        - Other
-    validations:
-      required: true
-  - type: dropdown
-    id: proxy-mode
-    attributes:
-      label: Proxy mode
-      options:
-        - reverse
-        - forward
-        - not sure
+      label: What happened?
     validations:
       required: true
   - type: textarea
     id: expected
     attributes:
-      label: Expected behavior
+      label: What did you expect?
     validations:
       required: true
   - type: textarea
-    id: actual
+    id: reproduction
     attributes:
-      label: Actual behavior
+      label: Sanitized reproduction steps
     validations:
       required: true
-  - type: textarea
-    id: steps
-    attributes:
-      label: Reproduction steps
-      description: Use sanitized commands and data.
-      placeholder: |
-        1. Run ...
-        2. Open ...
-        3. See ...
-    validations:
-      required: true
-  - type: textarea
-    id: logs
-    attributes:
-      label: Sanitized logs or trace summary
-      description: Paste only redacted excerpts. Do not attach private trace files.
-      render: text
   - type: textarea
     id: environment
     attributes:
       label: Environment
-      description: OS, Python version, install method, Claude Code/Codex version, relevant proxy/VPN setup.
-      placeholder: |
-        OS:
-        Python:
-        Install method:
-        Client version:
-        Network/proxy setup:
+      description: Token Flow version, agent client, OS, Python, Node, and install method.
+  - type: checkboxes
+    id: privacy
+    attributes:
+      label: Privacy
+      options:
+        - label: I removed credentials and private trace data.
+          required: true

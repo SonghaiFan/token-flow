@@ -24,7 +24,7 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 
-log = logging.getLogger("claude-tap")
+log = logging.getLogger("token-flow")
 
 
 @dataclass(frozen=True)

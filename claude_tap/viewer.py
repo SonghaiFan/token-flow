@@ -27,7 +27,7 @@ from claude_tap.sse import SSEReassembler
 from claude_tap.usage import normalize_usage
 
 try:
-    CLAUDE_TAP_VERSION = _pkg_version("claude-tap")
+    CLAUDE_TAP_VERSION = _pkg_version("token-flow")
 except Exception:
     CLAUDE_TAP_VERSION = "0.0.0"
 
@@ -37,7 +37,7 @@ VIEWER_TEMPLATE_PATH = Path(__file__).parent / "viewer.html"
 VIEWER_ASSETS_DIR = Path(__file__).parent / "viewer_assets"
 VIEWER_CSS_PATH = VIEWER_ASSETS_DIR / "viewer.css"
 VIEWER_JS_PATHS = (
-    VIEWER_ASSETS_DIR / "packlite_d3_layouts.min.js",
+    VIEWER_ASSETS_DIR / "token_flow_d3_layouts.min.js",
     VIEWER_ASSETS_DIR / "state.js",
     VIEWER_ASSETS_DIR / "responses.js",
     VIEWER_ASSETS_DIR / "lazy_loading.js",

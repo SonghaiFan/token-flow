@@ -25,7 +25,7 @@ def trace_dir():
     d = tempfile.mkdtemp(prefix="claude_tap_ws_test_")
     saved_no_proxy = {key: os.environ.get(key) for key in ("NO_PROXY", "no_proxy")}
     _extend_no_proxy(os.environ, ("localhost", "127.0.0.1", "::1"))
-    os.environ["CLOUDTAP_DB"] = str(Path(d) / "ws-test.sqlite3")
+    os.environ["TOKEN_FLOW_DB"] = str(Path(d) / "ws-test.sqlite3")
     reset_trace_store()
     yield d
     for key, value in saved_no_proxy.items():

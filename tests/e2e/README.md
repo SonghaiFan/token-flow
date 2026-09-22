@@ -1,7 +1,7 @@
 # Real E2E Tests
 
-These tests exercise claude-tap with the **real Claude CLI** — no mocks, no fakes.
-They start claude-tap from local source code, connect to an actual `claude` binary,
+These tests exercise Token Flow with the **real Claude CLI** — no mocks, no fakes.
+They start Token Flow from local source code, connect to an actual `claude` binary,
 send real prompts, and verify the resulting trace output.
 
 ## Prerequisites
@@ -12,7 +12,7 @@ send real prompts, and verify the resulting trace output.
    claude -p "hello"   # Should work without errors
    ```
 
-2. **claude-tap installed from local source:**
+2. **Token Flow installed from local source:**
    The test fixtures handle this automatically via `pip install -e .`
 
 3. **Python dependencies:**
@@ -41,11 +41,11 @@ uv run pytest tests/e2e/ --run-real-e2e --timeout=300 -v -s
 
 # Recommended: reverse mode with API key
 ANTHROPIC_API_KEY=sk-ant-... \
-CLAUDE_TAP_REAL_E2E_PROXY_MODE=reverse \
+TOKEN_FLOW_REAL_E2E_PROXY_MODE=reverse \
 uv run pytest tests/e2e/ --run-real-e2e --timeout=300 -v
 
 # Experimental: forward mode
-CLAUDE_TAP_REAL_E2E_PROXY_MODE=forward \
+TOKEN_FLOW_REAL_E2E_PROXY_MODE=forward \
 uv run pytest tests/e2e/ --run-real-e2e --timeout=300 -v
 ```
 
@@ -80,8 +80,8 @@ the `--run-real-e2e` flag is explicitly passed. This is controlled by the
 conftest.py
   ├── pytest_addoption      # Adds --run-real-e2e flag
   ├── pytest_collection_modifyitems  # Skips tests when flag not set
-  ├── installed_claude_tap   # pip install -e from local source
-  ├── proxy_server           # Starts claude-tap --tap-no-launch
+  ├── installed_packlite   # pip install -e from local source
+  ├── proxy_server           # Starts Token Flow --tap-no-launch
   └── claude_env             # Selects reverse/forward proxy mode via env
 
 test_real_proxy.py

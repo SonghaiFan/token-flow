@@ -5,14 +5,20 @@ let selectedTokenCategoryId = null;
 let sessionImageRegistryCache = null, sessionImageRegistrySize = -1;
 let visualOrder = []; // filtered indices in sidebar visual (DOM) order, excludes collapsed items
 const SIDEBAR_ORDER_MODES = ['treemap', 'flow', 'turn', 'session'];
+const WORKSPACE_LENSES = ['treemap', 'flow', 'request'];
+const REQUEST_GROUP_MODES = ['turn', 'session'];
 function safeLocalStorageGet(key) {
   try { return window.localStorage.getItem(key); } catch(e) { return null; }
 }
 function safeLocalStorageSet(key, value) {
   try { window.localStorage.setItem(key, value); } catch(e) {}
 }
-const savedSidebarOrderMode = safeLocalStorageGet('claude-tap-sidebar-order');
+const savedSidebarOrderMode = safeLocalStorageGet('token-flow-sidebar-order') || safeLocalStorageGet('packlite-sidebar-order');
 let sidebarOrderMode = SIDEBAR_ORDER_MODES.includes(savedSidebarOrderMode) ? savedSidebarOrderMode : 'treemap';
+const savedRequestGroupMode = safeLocalStorageGet('token-flow-request-group') || safeLocalStorageGet('packlite-request-group');
+let requestGroupMode = REQUEST_GROUP_MODES.includes(savedRequestGroupMode)
+  ? savedRequestGroupMode
+  : sidebarOrderMode === 'session' ? 'session' : 'turn';
 
 function readBooleanQuery(params, key) {
   const value = params.get(key);

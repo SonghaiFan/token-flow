@@ -549,7 +549,7 @@ async def test_run_client_agy_forward_sets_proxy_ca_and_cloud_code_url(
         ["--print", "ok"],
         client="agy",
         proxy_mode="forward",
-        ca_cert_path=Path("/tmp/claude-tap-ca.pem"),
+        ca_cert_path=Path("/tmp/packlite-ca.pem"),
     )
 
     assert code == 0

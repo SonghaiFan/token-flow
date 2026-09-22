@@ -40,7 +40,7 @@ def test_parse_args_rejects_tap_trust_ca_with_reverse_proxy() -> None:
 
 
 def test_macos_trust_ca_command_uses_user_keychain_without_sudo() -> None:
-    ca_path = Path("/tmp/claude-tap-ca.pem")
+    ca_path = Path("/tmp/packlite-ca.pem")
     keychain_path = Path("/Users/test/Library/Keychains/login.keychain-db")
 
     cmd = build_macos_trust_ca_command(ca_path, keychain_path)
@@ -60,7 +60,7 @@ def test_macos_trust_ca_command_uses_user_keychain_without_sudo() -> None:
 
 
 def test_macos_verify_ca_command_is_non_mutating() -> None:
-    ca_path = Path("/tmp/claude-tap-ca.pem")
+    ca_path = Path("/tmp/packlite-ca.pem")
     keychain_path = Path("/Users/test/Library/Keychains/login.keychain-db")
 
     cmd = build_macos_verify_ca_command(ca_path, keychain_path)
@@ -72,7 +72,7 @@ def test_macos_verify_ca_command_is_non_mutating() -> None:
 
 
 def test_is_macos_ca_trusted_reads_security_verify_result(monkeypatch: pytest.MonkeyPatch) -> None:
-    ca_path = Path("/tmp/claude-tap-ca.pem")
+    ca_path = Path("/tmp/packlite-ca.pem")
     calls: list[list[str]] = []
 
     def fake_run(cmd, **kwargs):
@@ -92,11 +92,11 @@ def test_is_macos_ca_trusted_returns_false_on_verify_failure(monkeypatch: pytest
 
     monkeypatch.setattr("claude_tap.certs.subprocess.run", fake_run)
 
-    assert is_macos_ca_trusted(Path("/tmp/claude-tap-ca.pem")) is False
+    assert is_macos_ca_trusted(Path("/tmp/packlite-ca.pem")) is False
 
 
 def test_trust_macos_ca_runs_add_trusted_cert(monkeypatch: pytest.MonkeyPatch) -> None:
-    ca_path = Path("/tmp/claude-tap-ca.pem")
+    ca_path = Path("/tmp/packlite-ca.pem")
     calls: list[list[str]] = []
 
     def fake_run(cmd, **kwargs):
@@ -116,13 +116,13 @@ def test_trust_macos_ca_runs_add_trusted_cert(monkeypatch: pytest.MonkeyPatch) -
 def test_trust_ca_for_current_user_rejects_non_macos(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr("claude_tap.cli.sys.platform", "linux")
 
-    code = _trust_ca_for_current_user(Path("/tmp/claude-tap-ca.pem"))
+    code = _trust_ca_for_current_user(Path("/tmp/packlite-ca.pem"))
 
     assert code == 1
 
 
 def test_trust_ca_for_current_user_skips_when_already_trusted(monkeypatch: pytest.MonkeyPatch) -> None:
-    ca_path = Path("/tmp/claude-tap-ca.pem")
+    ca_path = Path("/tmp/packlite-ca.pem")
 
     monkeypatch.setattr("claude_tap.cli.sys.platform", "darwin")
     monkeypatch.setattr("claude_tap.cli.is_macos_ca_trusted", lambda _: True)
@@ -135,7 +135,7 @@ def test_trust_ca_for_current_user_skips_when_already_trusted(monkeypatch: pytes
 
 
 def test_trust_ca_for_current_user_reports_install_failure(monkeypatch: pytest.MonkeyPatch) -> None:
-    ca_path = Path("/tmp/claude-tap-ca.pem")
+    ca_path = Path("/tmp/packlite-ca.pem")
 
     monkeypatch.setattr("claude_tap.cli.sys.platform", "darwin")
     monkeypatch.setattr("claude_tap.cli.is_macos_ca_trusted", lambda _: False)
@@ -148,7 +148,7 @@ def test_trust_ca_for_current_user_reports_install_failure(monkeypatch: pytest.M
 
 
 def test_trust_ca_for_current_user_reports_verify_failure_after_install(monkeypatch: pytest.MonkeyPatch) -> None:
-    ca_path = Path("/tmp/claude-tap-ca.pem")
+    ca_path = Path("/tmp/packlite-ca.pem")
     trusted_checks = iter([False, False])
 
     monkeypatch.setattr("claude_tap.cli.sys.platform", "darwin")
@@ -162,7 +162,7 @@ def test_trust_ca_for_current_user_reports_verify_failure_after_install(monkeypa
 
 
 def test_trust_ca_for_current_user_installs_and_rechecks(monkeypatch: pytest.MonkeyPatch) -> None:
-    ca_path = Path("/tmp/claude-tap-ca.pem")
+    ca_path = Path("/tmp/packlite-ca.pem")
     trusted_checks = iter([False, True])
     installed: list[Path] = []
 
@@ -197,7 +197,7 @@ def test_trust_ca_main_uses_generated_ca(monkeypatch: pytest.MonkeyPatch, tmp_pa
 
 
 def test_auto_ca_trust_skips_non_agy_clients(monkeypatch: pytest.MonkeyPatch) -> None:
-    ca_path = Path("/tmp/claude-tap-ca.pem")
+    ca_path = Path("/tmp/packlite-ca.pem")
     args = parse_args(["--tap-client", "gemini"])
 
     monkeypatch.setattr("claude_tap.cli.sys.platform", "darwin")
@@ -210,7 +210,7 @@ def test_auto_ca_trust_skips_non_agy_clients(monkeypatch: pytest.MonkeyPatch) ->
 
 
 def test_auto_ca_trust_skips_when_agy_ca_is_already_trusted(monkeypatch: pytest.MonkeyPatch) -> None:
-    ca_path = Path("/tmp/claude-tap-ca.pem")
+    ca_path = Path("/tmp/packlite-ca.pem")
     args = parse_args(["--tap-client", "agy"])
 
     monkeypatch.setattr("claude_tap.cli.sys.platform", "darwin")
@@ -224,7 +224,7 @@ def test_auto_ca_trust_skips_when_agy_ca_is_already_trusted(monkeypatch: pytest.
 
 
 def test_auto_ca_trust_installs_for_agy_on_macos(monkeypatch: pytest.MonkeyPatch) -> None:
-    ca_path = Path("/tmp/claude-tap-ca.pem")
+    ca_path = Path("/tmp/packlite-ca.pem")
     args = parse_args(["--tap-client", "agy"])
     trusted: list[Path] = []
 
@@ -237,7 +237,7 @@ def test_auto_ca_trust_installs_for_agy_on_macos(monkeypatch: pytest.MonkeyPatch
 
 
 def test_auto_ca_trust_skips_agy_on_non_macos(monkeypatch: pytest.MonkeyPatch) -> None:
-    ca_path = Path("/tmp/claude-tap-ca.pem")
+    ca_path = Path("/tmp/packlite-ca.pem")
     args = parse_args(["--tap-client", "agy"])
 
     monkeypatch.setattr("claude_tap.cli.sys.platform", "linux")
@@ -250,7 +250,7 @@ def test_auto_ca_trust_skips_agy_on_non_macos(monkeypatch: pytest.MonkeyPatch) -
 
 
 def test_explicit_ca_trust_still_runs_for_other_forward_clients(monkeypatch: pytest.MonkeyPatch) -> None:
-    ca_path = Path("/tmp/claude-tap-ca.pem")
+    ca_path = Path("/tmp/packlite-ca.pem")
     args = parse_args(["--tap-client", "gemini", "--tap-trust-ca"])
     trusted: list[Path] = []
 
@@ -268,7 +268,7 @@ async def test_async_main_returns_before_starting_proxy_when_trust_ca_fails(
     ca_path = tmp_path / "ca.pem"
     key_path = tmp_path / "ca-key.pem"
     proxy_started = False
-    monkeypatch.setenv("CLOUDTAP_DB", str(tmp_path / "trust-failed.sqlite3"))
+    monkeypatch.setenv("TOKEN_FLOW_DB", str(tmp_path / "trust-failed.sqlite3"))
     reset_trace_store()
 
     def fail_if_proxy_starts(*args, **kwargs):
@@ -309,7 +309,7 @@ async def test_async_main_preflights_codex_app_before_creating_or_trusting_ca(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
-    monkeypatch.setenv("CLOUDTAP_DB", str(tmp_path / "codex-app-preflight.sqlite3"))
+    monkeypatch.setenv("TOKEN_FLOW_DB", str(tmp_path / "codex-app-preflight.sqlite3"))
     reset_trace_store()
 
     async def reject_launch() -> CodexAppLaunchPlan:

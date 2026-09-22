@@ -40,7 +40,7 @@ CLIENT_LABELS = {
     "pi": "Pi",
     "qoder": "Qoder",
 }
-DASHBOARD_SUMMARY_VERSION = 4
+DASHBOARD_SUMMARY_VERSION = 6
 VALID_SESSION_STATUSES = {"active", "complete", "error", "empty"}
 _REDACTED_VALUE = "REDACTED"
 _SENSITIVE_KEY_NAMES = {
@@ -278,7 +278,10 @@ def merge_record_into_summary(
     summary["summary_version"] = DASHBOARD_SUMMARY_VERSION
     usage = _record_usage(record)
     summary["record_count"] = record_count
-    summary["turn_count"] = max(int(summary.get("turn_count") or 0), record_count)
+    if _is_user_visible_turn_record(record):
+        summary["turn_count"] = int(summary.get("turn_count") or 0) + 1
+    else:
+        summary["turn_count"] = int(summary.get("turn_count") or 0)
     summary["input_tokens"] = int(summary.get("input_tokens") or 0) + (usage.get("input_tokens") or 0)
     summary["output_tokens"] = int(summary.get("output_tokens") or 0) + (usage.get("output_tokens") or 0)
     summary["cache_read_tokens"] = int(summary.get("cache_read_tokens") or 0) + (
@@ -381,6 +384,16 @@ def _session_summary_from_row(
             cached = None
         if isinstance(cached, dict) and (not cached.get("id") or cached.get("id") == row["id"]):
             needs_error_repair = row["status"] == "error" and not cached.get("error")
+            cached_version = cached.get("summary_version")
+            needs_full_rebuild = not is_dashboard_summary_current(cached, row["id"]) and (
+                row["status"] != "active" or isinstance(cached_version, int)
+            )
+            if repair_stale_summary and needs_full_rebuild:
+                records = store.load_records(row["id"])
+                if records:
+                    summary = build_stored_session_summary(row, records)
+                    store.store_summary(row["id"], summary)
+                    return summary
             if (
                 repair_stale_summary
                 and row["status"] != "active"
@@ -522,7 +535,8 @@ def _summary_from_boundary_records(
         summary["total_tokens"] = cached["total_tokens"]
     summary["summary_version"] = DASHBOARD_SUMMARY_VERSION
     summary["record_count"] = int(row["record_count"] or summary.get("record_count") or 0)
-    summary["turn_count"] = max(int(summary.get("turn_count") or 0), summary["record_count"])
+    if "turn_count" in cached:
+        summary["turn_count"] = int(cached.get("turn_count") or 0)
     return redact_dashboard_summary(summary)
 
 
@@ -539,7 +553,7 @@ def _normalize_cached_session_summary(row: sqlite3.Row, cached: dict[str, Any]) 
     summary["live"] = False
     db_count = int(row["record_count"] or 0)
     summary["record_count"] = db_count
-    summary["turn_count"] = max(int(summary.get("turn_count") or 0), db_count)
+    summary["turn_count"] = int(summary.get("turn_count") or 0)
     row_status = row["status"] or ""
     if row_status == "active" and db_count > 0 and summary.get("status") != "error":
         summary["status"] = "active"
@@ -572,7 +586,6 @@ def _apply_current_session_state(
         if live_record_count is not None:
             count = max(count, live_record_count)
             session["record_count"] = count
-            session["turn_count"] = max(int(session.get("turn_count") or 0), count)
         if count > 0 and session.get("status") != "error":
             session["status"] = "active"
     return session
@@ -600,7 +613,7 @@ def _summarize_session(
     cache_read_in_input_tokens = 0
     models: dict[str, int] = {}
     duration_ms = 0
-    turns: set[int] = set()
+    turn_count = 0
 
     for record in records:
         usage = _record_usage(record)
@@ -617,9 +630,8 @@ def _summarize_session(
         if model:
             models[model] = models.get(model, 0) + 1
         duration_ms += _duration_ms(record)
-        turn = record.get("turn")
-        if isinstance(turn, int):
-            turns.add(turn)
+        if _is_user_visible_turn_record(record):
+            turn_count += 1
 
     error_records = [record for record in records if _is_session_error_record(record)]
     auxiliary_error_records = [record for record in records if _is_auxiliary_status_error_record(record)]
@@ -652,7 +664,7 @@ def _summarize_session(
             "started_at": started_at,
             "updated_at": updated_at,
             "record_count": count,
-            "turn_count": len(turns) if turns else count,
+            "turn_count": turn_count,
             "duration_ms": duration_ms,
             "input_tokens": input_tokens,
             "output_tokens": output_tokens,
@@ -916,6 +928,47 @@ def _preview_records(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
     if primary:
         return primary
     return [record for record in records if not _is_auxiliary_record(record) and not _is_protobuf_noise_record(record)]
+
+
+def select_trace_turn_records(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Return records that represent user-visible model turns.
+
+    A captured session can also contain model discovery, authentication, and
+    telemetry calls. Those records are useful in raw exports, but they are not
+    conversation turns and can be disproportionately large.
+    """
+    candidates = _preview_records(records)
+    return [record for record in candidates if _is_user_visible_turn_record(record)]
+
+
+def _is_user_visible_turn_record(record: dict[str, Any]) -> bool:
+    if _is_cursor_transcript_record(record):
+        return True
+    if _is_auxiliary_record(record) or _is_protobuf_noise_record(record):
+        return False
+
+    path = _record_path(record).split("?", 1)[0].lower()
+    if "/count_tokens" in path or path.endswith("/models"):
+        return False
+    if path not in {"/responses", "/v1/responses"} and not path.endswith("/backend-api/codex/responses"):
+        return True
+
+    request = record.get("request")
+    request_body = request.get("body") if isinstance(request, dict) else {}
+    response = record.get("response")
+    response_body = response.get("body") if isinstance(response, dict) else {}
+    if not isinstance(request_body, dict):
+        request_body = {}
+    if not isinstance(response_body, dict):
+        response_body = {}
+    payload = response_body.get("response")
+    if not isinstance(payload, dict):
+        payload = response_body
+    output = payload.get("output")
+    usage = payload.get("usage")
+    output_tokens = usage.get("output_tokens", 0) if isinstance(usage, dict) else 0
+    generate_false = request_body.get("generate") is False or payload.get("generate") is False
+    return not (generate_false and not output and not output_tokens)
 
 
 def _redact_sensitive_value(value: Any, key: str = "") -> Any:

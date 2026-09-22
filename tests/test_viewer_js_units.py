@@ -76,7 +76,7 @@ def test_viewer_split_js_core_units_run_without_playwright() -> None:
         vm.createContext(context);
 
         for (const assetName of [
-          'packlite_d3_layouts.min.js',
+          'token_flow_d3_layouts.min.js',
           'state.js',
           'responses.js',
           'lazy_loading.js',
@@ -152,6 +152,25 @@ def test_viewer_split_js_core_units_run_without_playwright() -> None:
           ['<skills_instructions>', 33, 10],
           ['Unattributed input', 2, 0],
         ]);
+
+        /* Remote dashboard token views must build their attribution catalog
+           from the hydrated records passed into the view, not from the global
+           metadata stubs. */
+        vm.runInContext('entries = []', context);
+        const hydratedModel = context.visualDashboardModel([{ entry: attributedTurn, idx: 0 }]);
+        assert.deepEqual(plain(hydratedModel.selected.categories.map(item => item.label)), [
+          'Tool definitions', '<app-context>', '<skills_instructions>', 'Unattributed input',
+        ]);
+
+        const remoteVisualStub = { _isStub: true, _rawIdx: 77 };
+        const originalShouldFetchRemoteEntry = context.shouldFetchRemoteEntry;
+        context.shouldFetchRemoteEntry = entry => entry === remoteVisualStub;
+        assert.deepEqual(context.tokenVisualHydrationCandidates([remoteVisualStub]), [remoteVisualStub]);
+        context.remoteVisualFull = attributedTurn;
+        vm.runInContext('entryCache.set(77, remoteVisualFull)', context);
+        assert.equal(context.tokenVisualHydrationCandidates([remoteVisualStub]).length, 0);
+        assert.equal(context.resolvedTokenVisualEntries([remoteVisualStub])[0].request.body.input.length, 2);
+        context.shouldFetchRemoteEntry = originalShouldFetchRemoteEntry;
 
         context.attributedTurn = attributedTurn;
         vm.runInContext('entries = [attributedTurn, attributedTurn]', context);
@@ -323,7 +342,7 @@ def test_viewer_split_js_core_units_run_without_playwright() -> None:
             status: 200,
             body: {
               content: [
-                { type: 'tool_use', name: 'WebSearch', input: { search_term: 'claude-tap' } },
+                { type: 'tool_use', name: 'WebSearch', input: { search_term: 'packlite' } },
               ],
             },
           },
@@ -1078,10 +1097,10 @@ def test_viewer_split_js_core_units_run_without_playwright() -> None:
              disagree, the cleaner wins the title and the classifier wins the badge,
              so a message ends up blanked and labelled human prose. */
           const injectedOpeners = [
-            '<environment_context>\\nrepo: claude-tap\\n</environment_context>',
+            '<environment_context>\\nrepo: packlite\\n</environment_context>',
             '<skills>\\nartifact-design\\n</skills>',
             '<user_information>\\nname: someone\\n</user_information>',
-            '<additional_metadata>\\nrepo: claude-tap\\n</additional_metadata>',
+            '<additional_metadata>\\nrepo: packlite\\n</additional_metadata>',
             '# AGENTS.md instructions\\nRun ruff before committing.',
             '<INSTRUCTIONS>\\nBe concise.\\n</INSTRUCTIONS>',
             '# Files mentioned by the user:\\n- viewer.py',
