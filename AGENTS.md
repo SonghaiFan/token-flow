@@ -1,4 +1,32 @@
-# Token Flow repository guide
+# Token Flow — session handoff
+
+Start every new session in this directory:
+
+```bash
+cd "/Users/songhaifan/Documents/Token Flow/token-flow"
+```
+
+This is the active repository, on `main`, with remote
+`https://github.com/SonghaiFan/token-flow.git`. The current clean baseline is
+commit `0b60dfe` (`feat: rename project to Token Flow`). Read this file before
+changing code; it is the durable handoff for this project, not Claude Tap's.
+
+## Fast start
+
+```bash
+# Backend / full product dashboard
+uv sync --extra dev
+uv run token-flow dashboard --tap-no-open
+
+# UI-only development (source of truth)
+cd ui
+npm ci
+npm run dev
+```
+
+The product dashboard is normally served at `http://127.0.0.1:19527/`.
+When changing UI source, create the backend-served build with
+`npm run lint && npm run build && npm run sync` from `ui/`.
 
 Token Flow is a local-first trace viewer for AI coding agents. It captures model
 requests, groups them into conversations and turns, and explains context/token
@@ -18,6 +46,17 @@ composition without requiring users to understand provider protocols.
 - `/Users/songhaifan/Documents/Token Flow/claude-tap` is a read-only upstream
   reference checkout. Token Flow must never import from it or require it at
   runtime. Copy only behavior that has been deliberately selected and adapted.
+
+## Naming and data compatibility
+
+- Product name: **Token Flow**. Distribution and CLI: `token-flow`.
+- Prefer `TOKEN_FLOW_DB`, `TOKEN_FLOW_DASHBOARD_PORT`, and `~/.token-flow`
+  for new configuration and state.
+- Keep read compatibility for existing `PACKLITE_*`, `.packlite`, and
+  `claude-tap` data. The resolver must prefer Token Flow state when it exists,
+  then PackLite, then Claude Tap, so historical conversations never disappear.
+- Keep the Python namespace `claude_tap` and the sibling `claude-tap` checkout
+  name. They are implementation/compatibility boundaries, not product copy.
 
 ## Product boundaries
 
@@ -59,3 +98,12 @@ npm run sync
 For material UI changes, verify the real path with captured data: dashboard →
 search/filter → conversation → turn/lens selection → structured/tree/raw
 request evidence → back to dashboard. Check both wide and narrow viewports.
+
+
+## Before ending a session
+
+- Summarize the changed product behavior and validation results clearly.
+- Leave the worktree in a known state; do not silently discard unrelated work.
+- Commit, push, publish, or rename external resources only when the user has
+  explicitly asked. Record any important new invariant in this file so the
+  next session does not have to rediscover it.

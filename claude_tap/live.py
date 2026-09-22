@@ -7,8 +7,11 @@ import ipaddress
 import json
 import re
 import secrets
+import signal
+import subprocess
+import sys
 import tempfile
-from datetime import date
+from datetime import date, datetime, timezone
 from pathlib import Path
 from urllib.parse import quote, urlsplit
 
@@ -213,6 +216,12 @@ class LiveViewerServer:
         self._dashboard_watch_task: asyncio.Task | None = None
         self._dashboard_snapshot: dict[str, tuple[int, str]] = {}
         self._dashboard_quit_token = secrets.token_urlsafe(32)
+        self._capture_process: asyncio.subprocess.Process | None = None
+        self._capture_watch_task: asyncio.Task | None = None
+        self._capture_state = "idle"
+        self._capture_started_at: str | None = None
+        self._capture_exit_code: int | None = None
+        self._capture_error: str | None = None
 
     async def start(self) -> int:
         """Start the viewer server and return the actual port."""
@@ -231,6 +240,9 @@ class LiveViewerServer:
         app.router.add_get("/dashboard/health", self._handle_dashboard_health)
         app.router.add_get("/dashboard/events", self._handle_dashboard_sse)
         app.router.add_post("/dashboard/quit", self._handle_dashboard_quit)
+        app.router.add_get("/dashboard/captures", self._handle_capture_status)
+        app.router.add_post("/dashboard/captures", self._handle_start_capture)
+        app.router.add_delete("/dashboard/captures", self._handle_stop_capture)
         app.router.add_get("/events", self._handle_sse)
         app.router.add_get("/records", self._handle_records)
         app.router.add_get("/api/dates", self._handle_dates)
@@ -270,6 +282,7 @@ class LiveViewerServer:
                 return
 
             self._shutdown_event.set()
+            await self._stop_managed_capture(broadcast=False)
             if self._dashboard_watch_task:
                 self._dashboard_watch_task.cancel()
                 try:
@@ -409,6 +422,140 @@ class LiveViewerServer:
 
         asyncio.create_task(stop_soon())
         return web.json_response({"ok": True})
+
+    def _capture_status_payload(self) -> dict:
+        process = self._capture_process
+        return {
+            "available": self.dashboard_mode and sys.platform == "darwin",
+            "client": "codexapp",
+            "state": self._capture_state,
+            "pid": process.pid if process is not None and process.returncode is None else None,
+            "started_at": self._capture_started_at,
+            "exit_code": self._capture_exit_code,
+            "error": self._capture_error,
+        }
+
+    def _capture_mutation_error(self, request: web.Request) -> web.Response | None:
+        if not self.dashboard_mode:
+            return web.json_response(
+                {"error": "Capture controls are only available in dashboard mode"},
+                status=403,
+            )
+        if not _is_trusted_dashboard_token_request(request):
+            return web.json_response(
+                {"error": "Capture controls require a trusted localhost Host and Origin"},
+                status=403,
+            )
+        if request.headers.get(_DASHBOARD_QUIT_TOKEN_HEADER) != self._dashboard_quit_token:
+            return web.json_response(
+                {"error": "Capture controls require a same-origin token"},
+                status=403,
+            )
+        return None
+
+    async def _handle_capture_status(self, _request: web.Request) -> web.Response:
+        return web.json_response(self._capture_status_payload())
+
+    async def _handle_start_capture(self, request: web.Request) -> web.Response:
+        if error := self._capture_mutation_error(request):
+            return error
+        if sys.platform != "darwin":
+            return web.json_response(
+                {"error": "Codex App capture from the dashboard is currently available on macOS only"},
+                status=501,
+            )
+        if self._capture_process is not None and self._capture_process.returncode is None:
+            return web.json_response(self._capture_status_payload(), status=409)
+
+        self._capture_state = "starting"
+        self._capture_started_at = datetime.now(timezone.utc).isoformat()
+        self._capture_exit_code = None
+        self._capture_error = None
+        command = [
+            sys.executable,
+            "-m",
+            "claude_tap",
+            "--tap-client",
+            "codexapp",
+            "--tap-no-open",
+            "--tap-no-live",
+        ]
+        try:
+            self._capture_process = await asyncio.create_subprocess_exec(
+                *command,
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+        except OSError as exc:
+            self._capture_state = "error"
+            self._capture_error = f"Unable to start Codex App capture: {exc}"
+            return web.json_response(self._capture_status_payload(), status=500)
+
+        self._capture_state = "capturing"
+        self._capture_watch_task = asyncio.create_task(self._watch_managed_capture(self._capture_process))
+        await self._broadcast_dashboard_event({"type": "capture"})
+        return web.json_response(self._capture_status_payload(), status=202)
+
+    async def _handle_stop_capture(self, request: web.Request) -> web.Response:
+        if error := self._capture_mutation_error(request):
+            return error
+        await self._stop_managed_capture()
+        return web.json_response(self._capture_status_payload())
+
+    async def _watch_managed_capture(self, process: asyncio.subprocess.Process) -> None:
+        try:
+            code = await process.wait()
+        except asyncio.CancelledError:
+            return
+        if process is not self._capture_process:
+            return
+        self._capture_exit_code = code
+        self._capture_process = None
+        if self._capture_state == "stopping" or code == 0:
+            self._capture_state = "idle"
+            self._capture_error = None
+        else:
+            self._capture_state = "error"
+            self._capture_error = f"Codex App capture exited with code {code}"
+        self._capture_watch_task = None
+        await self._broadcast_dashboard_event({"type": "capture"})
+
+    async def _stop_managed_capture(self, *, broadcast: bool = True) -> None:
+        process = self._capture_process
+        if process is None or process.returncode is not None:
+            self._capture_process = None
+            if self._capture_state != "error":
+                self._capture_state = "idle"
+            return
+
+        self._capture_state = "stopping"
+        if broadcast:
+            await self._broadcast_dashboard_event({"type": "capture"})
+        try:
+            if sys.platform == "win32":
+                process.terminate()
+            else:
+                process.send_signal(signal.SIGINT)
+            await asyncio.wait_for(process.wait(), timeout=12)
+        except asyncio.TimeoutError:
+            process.terminate()
+            try:
+                await asyncio.wait_for(process.wait(), timeout=3)
+            except asyncio.TimeoutError:
+                process.kill()
+                await process.wait()
+        finally:
+            self._capture_exit_code = process.returncode
+            self._capture_process = None
+            self._capture_state = "idle"
+            self._capture_error = None
+            watch_task = self._capture_watch_task
+            self._capture_watch_task = None
+            if watch_task is not None and watch_task is not asyncio.current_task():
+                watch_task.cancel()
+            if broadcast:
+                await self._broadcast_dashboard_event({"type": "capture"})
 
     async def _handle_index(self, request: web.Request) -> web.Response:
         """Serve the viewer HTML with live mode enabled."""
@@ -689,15 +836,31 @@ class LiveViewerServer:
             payload = await request.json()
         except (json.JSONDecodeError, web.HTTPBadRequest):
             return web.json_response({"error": "Invalid JSON body"}, status=400)
+        clear_all = isinstance(payload, dict) and payload.get("clear_all") is True
         raw_ids = payload.get("session_ids") if isinstance(payload, dict) else None
-        if not isinstance(raw_ids, list):
+        if not clear_all and not isinstance(raw_ids, list):
             return web.json_response({"error": "session_ids must be a list"}, status=400)
-        session_ids = [item for item in raw_ids if isinstance(item, str) and item]
-        if not session_ids:
-            return web.json_response({"error": "No sessions selected"}, status=400)
 
         self._finalize_stale_active_sessions()
         store = ensure_trace_store()
+        session_ids = (
+            [row["id"] for row in store.list_session_rows()]
+            if clear_all
+            else [item for item in raw_ids if isinstance(item, str) and item]
+        )
+        if not session_ids:
+            if clear_all:
+                return web.json_response(
+                    {
+                        "deleted_sessions": 0,
+                        "deleted_records": 0,
+                        "deleted_logs": 0,
+                        "missing_sessions": [],
+                        "skipped_active_sessions": [],
+                    }
+                )
+            return web.json_response({"error": "No sessions selected"}, status=400)
+
         deletable_ids = []
         skipped_active = []
         missing_ids = []
@@ -712,17 +875,16 @@ class LiveViewerServer:
             deletable_ids.append(session_id)
 
         if not deletable_ids:
-            return web.json_response(
-                {
-                    "error": "No selected sessions can be deleted",
-                    "deleted_sessions": 0,
-                    "deleted_records": 0,
-                    "deleted_logs": 0,
-                    "missing_sessions": missing_ids,
-                    "skipped_active_sessions": skipped_active,
-                },
-                status=409,
-            )
+            result = {
+                "deleted_sessions": 0,
+                "deleted_records": 0,
+                "deleted_logs": 0,
+                "missing_sessions": missing_ids,
+                "skipped_active_sessions": skipped_active,
+            }
+            if clear_all:
+                return web.json_response(result)
+            return web.json_response({"error": "No selected sessions can be deleted", **result}, status=409)
 
         result = store.delete_sessions(deletable_ids)
         result["missing_sessions"] = [*missing_ids, *result.get("missing_sessions", [])]

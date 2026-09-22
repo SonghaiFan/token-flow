@@ -1,12 +1,13 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { fetchSessionRecords } from "@/lib/api";
+import { deleteSession, fetchSessionRecords } from "@/lib/api";
 import { formatCompact, formatNumber } from "@/lib/format";
 import { buildTurns } from "@/lib/token-model";
 import type { SessionRecordsPayload, TokenSelection, WorkspaceLens } from "@/lib/types";
 import { AppShell } from "../app-shell";
-import { DownloadIcon } from "../icons";
+import { DeleteDialog } from "../delete-dialog";
+import { DownloadIcon, TrashIcon } from "../icons";
 import { SankeyChart } from "../charts/sankey-chart";
 import { TreemapChart } from "../charts/treemap-chart";
 import { MetricStrip } from "../workspace/metric-strip";
@@ -20,6 +21,9 @@ export function WorkspaceView({ sessionId, onBack }: { sessionId: string; onBack
   const [tokenSelection, setTokenSelection] = useState<TokenSelection | null>(null);
   const [requestJump, setRequestJump] = useState<(TokenSelection & { nonce: number }) | null>(null);
   const [error, setError] = useState("");
+  const [deleteOpen, setDeleteOpen] = useState(false);
+  const [deleteError, setDeleteError] = useState("");
+  const [deleting, setDeleting] = useState(false);
   const [liveState, setLiveState] = useState<"connecting" | "watching" | "reconnecting" | "stale">("connecting");
 
   useEffect(() => {
@@ -97,12 +101,29 @@ export function WorkspaceView({ sessionId, onBack }: { sessionId: string; onBack
     setRequestJump({ ...selection, nonce: Date.now() });
     setLens("request");
   }, []);
+  const closeDeleteDialog = useCallback(() => {
+    if (deleting) return;
+    setDeleteOpen(false);
+    setDeleteError("");
+  }, [deleting]);
+  const confirmDelete = useCallback(async () => {
+    setDeleting(true);
+    setDeleteError("");
+    try {
+      await deleteSession(sessionId);
+      onBack();
+    } catch (reason) {
+      setDeleteError((reason as Error).message || "Unable to delete conversation");
+      setDeleting(false);
+    }
+  }, [onBack, sessionId]);
 
   if (error) return <AppShell onBack={onBack} title="Conversation"><main className="mx-auto max-w-3xl p-6"><div className="rounded-2xl border border-red-200 bg-red-50 p-5 text-red-700">{error}</div></main></AppShell>;
   if (!data || !turn) return <AppShell onBack={onBack} title="Conversation"><main className="grid min-h-[70dvh] place-items-center text-sm text-muted">Loading conversation…</main></AppShell>;
 
   const liveLabel = liveState === "watching" ? "Watching" : liveState === "stale" ? "Updates paused" : liveState === "reconnecting" ? "Reconnecting" : "Connecting";
-  const meta = <><span>{turns.length} turns</span><span>{formatCompact(data.session.total_tokens || turns.reduce((sum, item) => sum + item.input + item.output, 0))} tokens</span><span className={liveState === "watching" ? "text-success" : "text-warning"}>● {liveLabel}</span><a className="inline-flex min-h-9 items-center gap-1.5 rounded-lg border border-line px-3 text-ink hover:bg-canvas" href={`/api/sessions/${encodeURIComponent(sessionId)}/export/compact`}><DownloadIcon className="size-4"/> Export</a></>;
+  const active = data.session.live || data.session.status === "active";
+  const meta = <><span>{turns.length} turns</span><span>{formatCompact(data.session.total_tokens || turns.reduce((sum, item) => sum + item.input + item.output, 0))} tokens</span><span className={liveState === "watching" ? "text-success" : "text-warning"}>● {liveLabel}</span><a className="inline-flex min-h-9 items-center gap-1.5 rounded-lg border border-line px-3 text-ink hover:bg-canvas" href={`/api/sessions/${encodeURIComponent(sessionId)}/export/compact`}><DownloadIcon className="size-4"/> Export</a><button className="inline-flex min-h-9 items-center gap-1.5 rounded-lg border border-red-200 px-3 text-red-700 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-40 dark:border-red-900 dark:text-red-300 dark:hover:bg-red-950" disabled={active} onClick={() => setDeleteOpen(true)} title={active ? "Active conversations cannot be deleted" : "Delete conversation"} type="button"><TrashIcon className="size-4"/> Delete</button></>;
 
   return <AppShell meta={meta} onBack={onBack} title={title}>
     <nav aria-label="Analysis view" className="sticky top-14 z-40 border-b border-line bg-panel/95 px-3 py-1.5 backdrop-blur sm:px-5">
@@ -121,5 +142,6 @@ export function WorkspaceView({ sessionId, onBack }: { sessionId: string; onBack
         <div className="flex flex-wrap items-center justify-between gap-3 px-1 pb-5 text-[11px] text-muted"><span>{data.session.agent || "Unknown agent"} · {turn.model}</span><span>{formatNumber(turn.input)} input · {formatNumber(turn.output)} output</span></div>
       </div>
     </main>
+    <DeleteDialog busy={deleting} description={`This permanently deletes “${title}” and its captured records.`} error={deleteError} onCancel={closeDeleteDialog} onConfirm={() => void confirmDelete()} open={deleteOpen} title="Delete this conversation?"/>
   </AppShell>;
 }

@@ -31,3 +31,7 @@ export function SearchIcon(props: IconProps) {
 export function ChevronRightIcon(props: IconProps) {
   return <svg {...defaults} {...props}><path d="m9 18 6-6-6-6"/></svg>;
 }
+
+export function TrashIcon(props: IconProps) {
+  return <svg {...defaults} {...props}><path d="M4 7h16M9 7V4h6v3m3 0-1 13H7L6 7m4 4v5m4-5v5"/></svg>;
+}

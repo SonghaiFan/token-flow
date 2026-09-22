@@ -1,6 +1,7 @@
 "use client";
 
 import type { ReactNode } from "react";
+import { CaptureControl } from "./capture-control";
 import { ArrowLeftIcon, ClockIcon, MoonIcon } from "./icons";
 
 interface AppShellProps {
@@ -30,7 +31,7 @@ export function AppShell({ children, onBack, title, meta }: AppShellProps) {
           <button className="flex min-h-11 items-center gap-2 rounded-xl px-1" onClick={onBack} type="button">
             <ClockIcon className="size-6" />
             <span className="text-[15px] font-semibold tracking-[-0.02em]">Token Flow</span>
-            <span className="rounded-md border border-line bg-canvas px-1.5 py-0.5 font-mono text-[10px] text-muted">v0.2</span>
+            <span className="hidden rounded-md border border-line bg-canvas px-1.5 py-0.5 font-mono text-[10px] text-muted sm:inline">v0.2</span>
           </button>
           {title ? (
             <>
@@ -40,6 +41,7 @@ export function AppShell({ children, onBack, title, meta }: AppShellProps) {
           ) : null}
           <div className="ml-auto flex min-w-0 items-center gap-2">
             {meta ? <div className="hidden min-w-0 items-center gap-4 text-xs text-muted lg:flex">{meta}</div> : null}
+            <CaptureControl />
             <button aria-label="Toggle appearance" className="grid size-11 place-items-center rounded-xl border border-line bg-panel hover:bg-canvas" onClick={toggleTheme} type="button">
               <MoonIcon className="size-[18px]" />
             </button>

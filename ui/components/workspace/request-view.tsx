@@ -68,6 +68,14 @@ function previewText(value: unknown): string {
   return nested === undefined || nested === value ? "" : previewText(nested);
 }
 
+function capturedText(value: unknown): string {
+  if (typeof value === "string") return value;
+  if (Array.isArray(value)) return value.map(capturedText).filter(Boolean).join("");
+  const record = asRecord(value);
+  const nested = record.text ?? record.content ?? record.output ?? record.input_text ?? record.output_text;
+  return nested === undefined || nested === value ? "" : capturedText(nested);
+}
+
 function Pill({ children, tone = "neutral" }: { children: ReactNode; tone?: "neutral" | "system" | "user" | "assistant" | "danger" }) {
   const tones = {
     neutral: "border-line bg-canvas text-muted",
@@ -76,7 +84,7 @@ function Pill({ children, tone = "neutral" }: { children: ReactNode; tone?: "neu
     assistant: "border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-900 dark:bg-emerald-950 dark:text-emerald-300",
     danger: "border-red-200 bg-red-50 text-danger dark:border-red-900 dark:bg-red-950",
   };
-  return <span className={`inline-flex max-w-full items-center rounded-full border px-2 py-0.5 font-mono text-[9px] font-medium ${tones[tone]}`}>{children}</span>;
+  return <span className={`inline-flex max-w-full items-center whitespace-nowrap rounded-full border px-2 py-0.5 font-mono text-[9px] font-medium ${tones[tone]}`}>{children}</span>;
 }
 
 function roleTone(role: string): "neutral" | "system" | "user" | "assistant" {
@@ -123,6 +131,8 @@ function JsonBlock({ value }: { value: unknown }) {
 
 interface ParsedStructuredText {
   prefix: string;
+  recovered: boolean;
+  suffix: string;
   value: unknown;
 }
 
@@ -130,6 +140,17 @@ interface ToolResultDefinition {
   description: string;
   name: string;
   [key: string]: unknown;
+}
+
+interface ParsedToolResult {
+  elapsed: string;
+  output: string;
+  status: string;
+}
+
+interface ParsedWrappedToolCall {
+  input: UnknownRecord;
+  name: string;
 }
 
 function decodeCapturedEscapes(value: string): string {
@@ -163,6 +184,71 @@ function recoverToolDefinitionArray(value: string): ToolResultDefinition[] | nul
   return tools.length ? tools : null;
 }
 
+function jsonValueEnd(value: string): number {
+  const closing: Record<string, string> = { "{": "}", "[": "]" };
+  const first = value[0];
+  if (!closing[first]) return -1;
+  const stack = [closing[first]];
+  let quoted = false;
+  let escaped = false;
+  for (let index = 1; index < value.length; index += 1) {
+    const character = value[index];
+    if (quoted) {
+      if (escaped) escaped = false;
+      else if (character === "\\") escaped = true;
+      else if (character === '"') quoted = false;
+      continue;
+    }
+    if (character === '"') {
+      quoted = true;
+      continue;
+    }
+    if (closing[character]) stack.push(closing[character]);
+    else if (character === stack.at(-1)) {
+      stack.pop();
+      if (!stack.length) return index + 1;
+    }
+  }
+  return -1;
+}
+
+function recoverJsonArrayItems(value: string): unknown[] {
+  if (!value.startsWith("[")) return [];
+  const items: unknown[] = [];
+  let itemStart = -1;
+  let depth = 0;
+  let quoted = false;
+  let escaped = false;
+  for (let index = 1; index < value.length; index += 1) {
+    const character = value[index];
+    if (quoted) {
+      if (escaped) escaped = false;
+      else if (character === "\\") escaped = true;
+      else if (character === '"') quoted = false;
+      continue;
+    }
+    if (character === '"') {
+      quoted = true;
+      continue;
+    }
+    if (character === "{" || character === "[") {
+      if (depth === 0) itemStart = index;
+      depth += 1;
+      continue;
+    }
+    if (character === "}" || character === "]") {
+      if (depth === 0) break;
+      depth -= 1;
+      if (depth === 0 && itemStart >= 0) {
+        const item = parseJsonValue(value.slice(itemStart, index + 1));
+        if (item !== undefined) items.push(item);
+        itemStart = -1;
+      }
+    }
+  }
+  return items;
+}
+
 function parseStructuredText(value: string): ParsedStructuredText | null {
   const trimmed = value.trim();
   if (!trimmed) return null;
@@ -177,14 +263,121 @@ function parseStructuredText(value: string): ParsedStructuredText | null {
   for (const offset of [...candidateOffsets].filter((item) => item >= 0).sort((a, b) => a - b)) {
     const candidate = value.slice(offset).trim();
     if (!candidate.startsWith("{") && !candidate.startsWith("[")) continue;
-    try {
-      return { prefix: value.slice(0, offset).trim(), value: JSON.parse(candidate) };
-    } catch {
-      const tools = recoverToolDefinitionArray(candidate);
-      if (tools) return { prefix: value.slice(0, offset).trim(), value: tools };
+    const end = jsonValueEnd(candidate);
+    if (end >= 0) {
+      const parsed = parseJsonValue(candidate.slice(0, end));
+      if (parsed !== undefined) {
+        return { prefix: value.slice(0, offset).trim(), recovered: false, suffix: candidate.slice(end).trim(), value: parsed };
+      }
     }
+    const tools = recoverToolDefinitionArray(candidate);
+    if (tools) return { prefix: value.slice(0, offset).trim(), recovered: false, suffix: "", value: tools };
+    const recovered = recoverJsonArrayItems(candidate);
+    if (recovered.length) return { prefix: value.slice(0, offset).trim(), recovered: true, suffix: "", value: recovered };
   }
   return null;
+}
+
+function parseJsonValue(value: string): unknown | undefined {
+  try {
+    return JSON.parse(value);
+  } catch {
+    return undefined;
+  }
+}
+
+function matchingBrace(value: string, start: number): number {
+  let depth = 0;
+  let quote = "";
+  let escaped = false;
+  for (let index = start; index < value.length; index += 1) {
+    const character = value[index];
+    if (quote) {
+      if (escaped) escaped = false;
+      else if (character === "\\") escaped = true;
+      else if (character === quote) quote = "";
+      continue;
+    }
+    if (character === '"' || character === "'") {
+      quote = character;
+      continue;
+    }
+    if (character === "{") depth += 1;
+    if (character === "}") {
+      depth -= 1;
+      if (depth === 0) return index;
+    }
+  }
+  return -1;
+}
+
+function parseWrappedToolCall(value: string): ParsedWrappedToolCall | null {
+  const call = /tools\.([A-Za-z_$][\w$]*)\s*\(\s*\{/.exec(value);
+  if (!call || call.index === undefined) return null;
+  const start = value.indexOf("{", call.index + call[0].length - 1);
+  const end = matchingBrace(value, start);
+  if (start < 0 || end < 0) return null;
+  const objectLiteral = value.slice(start, end + 1)
+    .replace(/([{,]\s*)([A-Za-z_$][\w$]*)(\s*:)/g, '$1"$2"$3');
+  const parsed = parseJsonValue(objectLiteral);
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return null;
+  return { input: asRecord(parsed), name: call[1] };
+}
+
+function parseToolResult(value: string): ParsedToolResult {
+  const lines = value.replace(/\r\n/g, "\n").split("\n");
+  const outputIndex = lines.findIndex((line) => /^Output:\s*$/i.test(line.trim()));
+  const metadata = outputIndex >= 0 ? lines.slice(0, outputIndex) : [];
+  const status = metadata.find((line) => /(?:completed|failed|error|timed out)/i.test(line))?.trim() || "";
+  const elapsedMatch = metadata.join("\n").match(/Wall time\s+([\d.]+)\s*seconds?/i);
+  return {
+    elapsed: elapsedMatch ? `${elapsedMatch[1]} s` : "",
+    output: (outputIndex >= 0 ? lines.slice(outputIndex + 1) : lines).join("\n").trim(),
+    status,
+  };
+}
+
+function toolEventKind(message: UnknownRecord): "call" | "result" | null {
+  const type = textValue(message.type).toLowerCase();
+  if (type.endsWith("_call_output") || type === "tool_result" || type === "tool_output") return "result";
+  if (type.endsWith("_call") || type === "tool_use") return "call";
+  return null;
+}
+
+function humanizeField(value: string): string {
+  const labels: Record<string, string> = {
+    cmd: "Command",
+    command: "Command",
+    justification: "Approval question",
+    max_output_tokens: "Output limit",
+    sandbox_permissions: "Sandbox",
+    shell: "Shell",
+    tty: "Terminal",
+    workdir: "Working directory",
+    yield_time_ms: "Wait for output",
+  };
+  return labels[value] || value.replaceAll("_", " ").replace(/^./, (character) => character.toUpperCase());
+}
+
+function formatToolField(key: string, value: unknown): string {
+  if (key === "yield_time_ms" && typeof value === "number") return `${value / 1000} s`;
+  if (key === "max_output_tokens" && typeof value === "number") return `${value.toLocaleString()} tokens`;
+  return textValue(value);
+}
+
+function toolCallPresentation(message: UnknownRecord): { input: unknown; name: string; preview: string; wrapperName: string } {
+  const declaredName = textValue(message.name) || textValue(message.type).replace(/_call$/, "") || "Unknown tool";
+  const source = message.arguments ?? message.input;
+  if (typeof source === "string") {
+    const wrapped = parseWrappedToolCall(source);
+    if (wrapped) {
+      const command = textValue(wrapped.input.cmd ?? wrapped.input.command);
+      return { input: wrapped.input, name: declaredName, preview: command, wrapperName: wrapped.name };
+    }
+    const parsed = parseJsonValue(source);
+    return { input: parsed === undefined ? source : parsed, name: declaredName, preview: previewText(parsed ?? source), wrapperName: "" };
+  }
+  return { input: source ?? {}, name: declaredName, preview: previewText(source), wrapperName: "" };
 }
 
 function isToolResultDefinition(value: unknown): value is ToolResultDefinition {
@@ -250,7 +443,161 @@ function StructuredValue({ value }: { value: unknown }) {
 function StructuredText({ children }: { children: string }) {
   const parsed = useMemo(() => parseStructuredText(children), [children]);
   if (!parsed) return <RichText>{children}</RichText>;
-  return <div className="space-y-3">{parsed.prefix ? <ResultNotice value={parsed.prefix}/> : null}<StructuredValue value={parsed.value}/></div>;
+  return <StructuredOutput parsed={parsed}/>;
+}
+
+function StructuredOutput({ parsed }: { parsed: ParsedStructuredText }) {
+  return <div className="space-y-3">
+    {parsed.prefix ? <ResultNotice value={parsed.prefix}/> : null}
+    {parsed.recovered ? <div className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900 dark:border-amber-900 dark:bg-amber-950 dark:text-amber-200">Recovered {Array.isArray(parsed.value) ? parsed.value.length : 0} complete entries from truncated JSON. The incomplete final entry remains available in Raw.</div> : null}
+    <StructuredValue value={parsed.value}/>
+    {parsed.suffix ? <ResultNotice value={parsed.suffix}/> : null}
+  </div>;
+}
+
+function TechnicalDetails({ message }: { message: UnknownRecord }) {
+  const facts = [
+    ["Protocol type", message.type],
+    ["Status", message.status],
+    ["Call ID", message.call_id ?? message.tool_use_id],
+    ["Item ID", message.id],
+  ].filter(([, value]) => value !== undefined && value !== "");
+  if (!facts.length) return null;
+  return <Disclosure summary={<><strong className="text-xs">Technical details</strong><span className="text-[11px] text-muted">Captured identifiers and protocol fields</span></>}>
+    <dl className="grid gap-x-5 gap-y-3 text-xs sm:grid-cols-2">{facts.map(([label, value]) => <div key={String(label)}><dt className="text-muted">{String(label)}</dt><dd className="mt-1 break-all font-mono text-[10px] text-ink">{textValue(value)}</dd></div>)}</dl>
+  </Disclosure>;
+}
+
+function ToolInputView({ value }: { value: unknown }) {
+  if (typeof value === "string" && value.trim()) {
+    return <section>
+      <div className="mb-1.5 flex flex-wrap items-center justify-between gap-2">
+        <h4 className="text-[10px] font-semibold uppercase tracking-[0.1em] text-muted">Input</h4>
+        <Pill>{value.split("\n").length} {value.includes("\n") ? "lines" : "line"}</Pill>
+      </div>
+      <pre className="max-h-[28rem] overflow-auto whitespace-pre-wrap break-words rounded-lg bg-canvas px-3 py-2.5 font-mono text-[11px] leading-5 text-ink"><code>{value}</code></pre>
+    </section>;
+  }
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return <div className="rounded-lg border border-dashed border-line px-3 py-3 text-xs text-muted">No captured input is available for this tool call. Use Tree or Raw to inspect the surrounding evidence.</div>;
+  }
+  const entries = Object.entries(asRecord(value));
+  const commandEntry = entries.find(([key]) => key === "cmd" || key === "command");
+  const details = entries.filter(([key]) => key !== commandEntry?.[0]);
+  return <div className="space-y-3">
+    {commandEntry ? <section><h4 className="mb-1.5 text-[10px] font-semibold uppercase tracking-[0.1em] text-muted">Command</h4><div className="overflow-x-auto rounded-lg bg-canvas px-3 py-2.5 font-mono text-[11px] leading-5 text-ink"><code className="whitespace-pre-wrap break-words">{textValue(commandEntry[1])}</code></div></section> : null}
+    {details.length ? <dl className="grid gap-3 sm:grid-cols-2">{details.map(([key, item]) => <div className="min-w-0" key={key}><dt className="text-[10px] font-medium text-muted">{humanizeField(key)}</dt><dd className="mt-1 min-w-0 break-words text-xs text-ink">{item && typeof item === "object" ? <Disclosure summary={<span className="text-xs">{Array.isArray(item) ? `${item.length} items` : `${Object.keys(asRecord(item)).length} fields`}</span>}><StructuredValue value={item}/></Disclosure> : <span className="font-mono text-[10px]">{formatToolField(key, item) || (item === null ? "null" : "Unknown")}</span>}</dd></div>)}</dl> : null}
+  </div>;
+}
+
+function htmlText(value: string): string {
+  return value
+    .replace(/<script\b[\s\S]*?<\/script>/gi, " ")
+    .replace(/<style\b[\s\S]*?<\/style>/gi, " ")
+    .replace(/<[^>]+>/g, " ")
+    .replace(/&nbsp;/gi, " ")
+    .replace(/&lt;/gi, "<")
+    .replace(/&gt;/gi, ">")
+    .replace(/&amp;/gi, "&")
+    .replace(/&quot;/gi, '"')
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function HtmlOutput({ value }: { value: string }) {
+  const title = htmlText(/<title\b[^>]*>([\s\S]*?)<\/title>/i.exec(value)?.[1] || "");
+  const notice = htmlText(/<noscript\b[^>]*>([\s\S]*?)<\/noscript>/i.exec(value)?.[1] || "");
+  const robots = /<meta\b[^>]*name=["']robots["'][^>]*content=["']([^"']*)["']/i.exec(value)?.[1]
+    || /<meta\b[^>]*content=["']([^"']*)["'][^>]*name=["']robots["']/i.exec(value)?.[1]
+    || "";
+  const scriptCount = (value.match(/<script\b/gi) || []).length;
+  const endpoint = /fetch\(\s*["']([^"']+)["']/.exec(value)?.[1] || "";
+  const challenge = /SHA-256/i.test(value) && Boolean(endpoint);
+  const verification = /verify your browser/i.test(notice) || endpoint.includes("verify");
+  const facts = [
+    ["Document title", title],
+    ["Search indexing", robots],
+    ["Inline scripts", String(scriptCount)],
+    ["Request endpoint", endpoint],
+    ["Challenge", challenge ? "SHA-256 proof of work" : ""],
+    ["Next action", /location\.reload\(\)/.test(value) ? "Reload after verification" : ""],
+  ].filter(([, item]) => item);
+  return <section className="overflow-hidden rounded-xl border border-line">
+    <div className="border-b border-line bg-canvas/60 px-3 py-3 sm:px-4"><div className="flex flex-wrap items-center gap-2"><h4 className="text-sm font-semibold">{verification ? "Browser verification page" : "HTML document"}</h4><Pill>HTML</Pill></div><p className="mt-1 text-[11px] text-muted">{verification ? "The server returned a verification challenge instead of the requested data." : "The server returned a document instead of structured data."}</p></div>
+    <div className="space-y-4 px-3 py-3 sm:px-4">
+      {notice ? <div><div className="text-[10px] font-medium text-muted">Page notice</div><p className="mt-1 text-sm leading-5 text-ink">{notice}</p></div> : null}
+      {facts.length ? <dl className="grid gap-x-5 gap-y-3 sm:grid-cols-2">{facts.map(([label, item]) => <div key={label}><dt className="text-[10px] font-medium text-muted">{label}</dt><dd className="mt-1 break-words font-mono text-[10px] text-ink">{item}</dd></div>)}</dl> : null}
+    </div>
+  </section>;
+}
+
+function TextOutput({ value }: { value: string }) {
+  const lines = value.split("\n");
+  if (!value) return <div className="rounded-lg border border-dashed border-line px-3 py-4 text-xs text-muted">The tool completed without captured output.</div>;
+  if (/too many requests|rate limit/i.test(value)) return <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-3 dark:border-amber-900 dark:bg-amber-950"><strong className="text-xs text-amber-900 dark:text-amber-200">Rate limited</strong><p className="mt-1 text-xs text-amber-900 dark:text-amber-200">{value.trim()}</p></div>;
+  return <section><div className="mb-1.5 flex items-center justify-between gap-3"><h4 className="text-[10px] font-semibold uppercase tracking-[0.1em] text-muted">Output</h4><span className="font-mono text-[9px] text-muted">{lines.length} {lines.length === 1 ? "line" : "lines"}</span></div><ol className="max-h-[28rem] overflow-auto rounded-lg bg-canvas py-2 font-mono text-[10px] leading-5 text-ink">{lines.map((line, index) => <li className="grid grid-cols-[2.5rem_minmax(0,1fr)] px-3" key={index}><span className="select-none pr-3 text-right text-muted/70">{index + 1}</span><span className="whitespace-pre-wrap break-words">{line || " "}</span></li>)}</ol></section>;
+}
+
+function looksLikeMarkdown(value: string): boolean {
+  const headingCount = value.match(/^#{1,6}\s+\S/gm)?.length || 0;
+  if (headingCount >= 2 || /^\s*(?:```|~~~)/m.test(value)) return true;
+  const signals = [
+    /^\s*[-*+]\s+\S/m.test(value),
+    /^\s*\d+\.\s+\S/m.test(value),
+    /^\s*>\s+\S/m.test(value),
+    /\[[^\]\n]+\]\([^\s)]+(?:\s+["'][^"']*["'])?\)/.test(value),
+    /(?:^|[^*])\*\*[^*\n]+\*\*/m.test(value),
+    /^\s*\|.+\|\s*$/m.test(value) && /^\s*\|?\s*:?-{3,}/m.test(value),
+  ].filter(Boolean).length;
+  return headingCount + signals >= 2;
+}
+
+function MarkdownOutput({ value }: { value: string }) {
+  const lineCount = value.split("\n").length;
+  return <section><div className="mb-2 flex flex-wrap items-center justify-between gap-2"><div><h4 className="text-xs font-semibold">Rendered Markdown</h4><p className="mt-0.5 text-[10px] text-muted">Exact source remains available in Raw.</p></div><Pill>{lineCount} {lineCount === 1 ? "line" : "lines"}</Pill></div><div className="max-h-[40rem] overflow-auto rounded-xl border border-line bg-canvas/50 px-4 py-3 sm:px-5 sm:py-4"><RichText>{value}</RichText></div></section>;
+}
+
+type DetectedToolOutput =
+  | { kind: "html"; value: string }
+  | { kind: "markdown"; value: string }
+  | { kind: "structured"; value: ParsedStructuredText }
+  | { kind: "text"; value: string };
+
+function detectToolOutput(value: string): DetectedToolOutput {
+  const trimmed = value.trim();
+  if (/^<!doctype\s+html|^<html\b/i.test(trimmed)) return { kind: "html", value: trimmed };
+  const structured = parseStructuredText(trimmed);
+  if (structured) return { kind: "structured", value: structured };
+  if (looksLikeMarkdown(trimmed)) return { kind: "markdown", value: trimmed };
+  return { kind: "text", value: trimmed };
+}
+
+function ToolOutputView({ value }: { value: string }) {
+  const output = detectToolOutput(value);
+  if (output.kind === "html") return <HtmlOutput value={output.value}/>;
+  if (output.kind === "structured") return <StructuredOutput parsed={output.value}/>;
+  if (output.kind === "markdown") return <MarkdownOutput value={output.value}/>;
+  return <TextOutput value={output.value}/>;
+}
+
+function ToolEventContent({ message, pairedToolName }: { message: UnknownRecord; pairedToolName?: string }) {
+  const kind = toolEventKind(message);
+  if (kind === "call") {
+    const presentation = toolCallPresentation(message);
+    return <div className="space-y-3 border-l-2 border-ink pl-3 sm:pl-4">
+      <div><div className="flex flex-wrap items-center gap-2"><h4 className="text-sm font-semibold">{presentation.name}</h4>{presentation.wrapperName ? <><span className="text-xs text-muted">invokes</span><Pill>{presentation.wrapperName}</Pill></> : null}</div><p className="mt-1 text-[11px] text-muted">Captured tool invocation</p></div>
+      <ToolInputView value={presentation.input}/>
+      <TechnicalDetails message={message}/>
+    </div>;
+  }
+  const rawOutput = capturedText(message.output ?? message.content ?? message.text);
+  const result = parseToolResult(rawOutput);
+  const failed = /failed|error|timed out/i.test(result.status);
+  return <div className={`space-y-3 border-l-2 pl-3 sm:pl-4 ${failed ? "border-danger" : "border-success"}`}>
+    <div className="flex flex-wrap items-start justify-between gap-2"><div><div className="flex flex-wrap items-center gap-2"><h4 className="text-sm font-semibold">{pairedToolName ? `${pairedToolName} result` : "Tool result"}</h4><Pill tone={failed ? "danger" : "assistant"}>{result.status || "Captured"}</Pill></div><p className="mt-1 text-[11px] text-muted">{result.elapsed ? `Finished in ${result.elapsed}` : "Execution output"}</p></div>{result.output ? <Pill>{result.output.split("\n").length} {result.output.split("\n").length === 1 ? "line" : "lines"}</Pill> : null}</div>
+    <ToolOutputView value={result.output}/>
+    <TechnicalDetails message={message}/>
+  </div>;
 }
 
 function CategoryAnchor({ blockId, children, label, onSelectToken, selection, turnId }: { blockId?: string; children: ReactNode; label: string; onSelectToken: (selection: TokenSelection | null) => void; selection: TokenSelection | null; turnId: string }) {
@@ -258,6 +605,22 @@ function CategoryAnchor({ blockId, children, label, onSelectToken, selection, tu
   const active = Boolean(blockId && selection?.turnId === turnId && selectedIds.includes(blockId));
   return <div className={`scroll-m-32 rounded-xl transition ${active ? "ring-2 ring-ink ring-offset-2 ring-offset-panel" : ""}`} data-block-id={blockId} data-turn-id={turnId} tabIndex={active ? -1 : undefined}>
     <div className="mb-2 flex items-center gap-2">{blockId ? <button aria-pressed={active} className={`rounded-full border px-2 py-1 font-mono text-[9px] ${active ? "border-ink bg-ink text-panel" : "border-line bg-canvas text-muted"}`} onClick={() => onSelectToken(active ? null : { blockId, label, turnId })} type="button">{label}</button> : <span className="rounded-full border border-line bg-canvas px-2 py-1 font-mono text-[9px] text-muted">{label}</span>}{active ? <span className="text-[9px] font-semibold uppercase tracking-[0.12em] text-muted">Linked</span> : null}</div>
+    {children}
+  </div>;
+}
+
+function ToolEventAnchor({ children, itemId, message, onSelectToken, parts, selection, turnId }: { children: ReactNode; itemId: string; message: UnknownRecord; onSelectToken: (selection: TokenSelection | null) => void; parts: unknown[]; selection: TokenSelection | null; turnId: string }) {
+  const selectedIds = selection?.blockIds || (selection ? [selection.blockId] : []);
+  const blockIds = parts.map((_, index) => itemId ? `${itemId}:${index}` : "").filter(Boolean);
+  const active = selection?.turnId === turnId && blockIds.some((blockId) => selectedIds.includes(blockId));
+  return <div className={`relative scroll-m-32 rounded-xl transition ${active ? "ring-2 ring-ink ring-offset-2 ring-offset-panel" : ""}`}>
+    {blockIds.map((blockId) => <span className="absolute left-0 top-0 size-px opacity-0" data-block-id={blockId} data-turn-id={turnId} key={blockId} tabIndex={-1}/>) }
+    <div className="mb-2 flex flex-wrap items-center gap-2 text-[9px] text-muted"><span>Token category</span>{parts.map((part, index) => {
+      const blockId = blockIds[index];
+      const label = categoryLabelForInput(message, part);
+      const selected = Boolean(blockId && selection?.turnId === turnId && selectedIds.includes(blockId));
+      return blockId ? <button aria-pressed={selected} className={`rounded-full border px-2 py-1 font-mono text-[9px] ${selected ? "border-ink bg-ink text-panel" : "border-line bg-canvas text-muted"}`} key={blockId} onClick={() => onSelectToken(selected ? null : { blockId, label, turnId })} type="button">{parts.length > 1 ? `${label} ${index + 1}` : label}</button> : <span className="rounded-full border border-line bg-canvas px-2 py-1 font-mono text-[9px] text-muted" key={index}>{label}</span>;
+    })}{active ? <span className="text-[9px] font-semibold uppercase tracking-[0.12em] text-muted">Linked</span> : null}</div>
     {children}
   </div>;
 }
@@ -282,18 +645,22 @@ function ContentPart({ value }: { value: unknown }) {
   return <JsonBlock value={value}/>;
 }
 
-function MessageItem({ item, index, defaultOpen, onSelectToken, selection, turnId }: { item: unknown; index: number; defaultOpen: boolean; onSelectToken: (selection: TokenSelection | null) => void; selection: TokenSelection | null; turnId: string }) {
+function MessageItem({ item, index, defaultOpen, onSelectToken, pairedToolName, selection, turnId }: { item: unknown; index: number; defaultOpen: boolean; onSelectToken: (selection: TokenSelection | null) => void; pairedToolName?: string; selection: TokenSelection | null; turnId: string }) {
   const message = asRecord(item);
   const role = semanticRole(message);
   const type = textValue(message.type) || "message";
+  const eventKind = toolEventKind(message);
   const parts = inputItemParts(message);
   const content = parts.length === 1 ? parts[0] : parts;
   const itemId = textValue(message.id);
-  const preview = inputPreview(message, content, index);
+  const callPresentation = eventKind === "call" ? toolCallPresentation(message) : null;
+  const result = eventKind === "result" ? parseToolResult(capturedText(message.output ?? message.content ?? message.text)) : null;
+  const preview = callPresentation?.preview || (result ? [result.status, result.elapsed].filter(Boolean).join(" in ") : inputPreview(message, content, index));
   const selectedIds = selection?.blockIds || (selection ? [selection.blockId] : []);
   const selectedItem = selection?.turnId === turnId && Boolean(itemId) && selectedIds.some((id) => id === itemId || id.startsWith(`${itemId}:`));
-  return <Disclosure defaultOpen={defaultOpen || selectedItem} summary={<><Pill tone={roleTone(role)}>{role}</Pill><Pill>{type}</Pill><span className="min-w-0 truncate text-xs text-muted">{preview}</span></>}>
-    <div className="space-y-3">{parts.map((part, partIndex) => <CategoryAnchor blockId={itemId ? `${itemId}:${partIndex}` : undefined} key={partIndex} label={categoryLabelForInput(message, part)} onSelectToken={onSelectToken} selection={selection} turnId={turnId}><ContentPart value={part}/></CategoryAnchor>)}</div>
+  const eventName = callPresentation?.name || pairedToolName;
+  return <Disclosure defaultOpen={defaultOpen || selectedItem} summary={<><Pill tone={roleTone(role)}>{role}</Pill>{eventKind ? <strong className="text-xs text-ink">{eventName || (eventKind === "call" ? "Unknown tool" : "Tool result")}</strong> : <Pill>{type}</Pill>}{eventKind && message.status ? <Pill tone={textValue(message.status).toLowerCase() === "completed" ? "assistant" : "neutral"}>{textValue(message.status)}</Pill> : null}{result?.elapsed ? <Pill>{result.elapsed}</Pill> : null}<span className="min-w-0 truncate text-xs text-muted">{preview}</span></>}>
+    {eventKind ? <ToolEventAnchor itemId={itemId} message={message} onSelectToken={onSelectToken} parts={parts} selection={selection} turnId={turnId}><ToolEventContent message={message} pairedToolName={pairedToolName}/></ToolEventAnchor> : <div className="space-y-3">{parts.map((part, partIndex) => <CategoryAnchor blockId={itemId ? `${itemId}:${partIndex}` : undefined} key={partIndex} label={categoryLabelForInput(message, part)} onSelectToken={onSelectToken} selection={selection} turnId={turnId}><ContentPart value={part}/></CategoryAnchor>)}</div>}
   </Disclosure>;
 }
 
@@ -369,6 +736,18 @@ function collectInput(body: UnknownRecord): unknown[] {
   return items;
 }
 
+function toolNamesByCallId(items: unknown[]): Map<string, string> {
+  const names = new Map<string, string>();
+  for (const item of items) {
+    const message = asRecord(item);
+    if (toolEventKind(message) !== "call") continue;
+    const callId = textValue(message.call_id ?? message.id);
+    if (!callId) continue;
+    names.set(callId, toolCallPresentation(message).name);
+  }
+  return names;
+}
+
 function requestToolNames(body: UnknownRecord): string[] {
   const names: string[] = [];
   const addTools = (value: unknown) => {
@@ -434,6 +813,7 @@ function StructuredRequest({ onSelectToken, record, selection, turnId }: { onSel
   const input = collectInput(body);
   const embeddedToolItems = input.filter((item) => asRecord(item).type === "additional_tools");
   const messageItems = input.filter((item) => asRecord(item).type !== "additional_tools");
+  const pairedToolNames = toolNamesByCallId(messageItems);
   const topLevelTools = asArray(body.tools);
   const includes = asArray(body.include).map(textValue).filter(Boolean);
   const status = Number(record.response?.status || 0);
@@ -458,7 +838,7 @@ function StructuredRequest({ onSelectToken, record, selection, turnId }: { onSel
 
     <section>
       <div className="mb-2 flex items-baseline justify-between gap-3"><h3 className="text-sm font-semibold">Input</h3><span className="font-mono text-[10px] text-muted">{messageItems.length} {messageItems.length === 1 ? "item" : "items"}</span></div>
-      {messageItems.length ? <div className="space-y-2">{messageItems.map((item, index) => <MessageItem defaultOpen={index === lastUserIndex} index={index} item={item} key={textValue(asRecord(item).id) || index} onSelectToken={onSelectToken} selection={selection} turnId={turnId}/>)}</div> : <div className="rounded-xl border border-dashed border-line p-5 text-center text-xs text-muted">No message content was captured.</div>}
+      {messageItems.length ? <div className="space-y-2">{messageItems.map((item, index) => <MessageItem defaultOpen={index === lastUserIndex} index={index} item={item} key={textValue(asRecord(item).id) || index} onSelectToken={onSelectToken} pairedToolName={pairedToolNames.get(textValue(asRecord(item).call_id ?? asRecord(item).tool_use_id))} selection={selection} turnId={turnId}/>)}</div> : <div className="rounded-xl border border-dashed border-line p-5 text-center text-xs text-muted">No message content was captured.</div>}
     </section>
 
     {selection?.turnId === turnId && selection.label === "Unattributed input" ? <div className="rounded-xl border border-dashed border-line p-4 text-xs text-muted"><strong className="text-ink">No exact request section</strong><p className="mt-1">This remainder was not attributed to a captured input block, so Token Flow does not guess a destination.</p></div> : null}

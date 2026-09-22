@@ -35,6 +35,26 @@ export interface SessionsPayload {
   has_more: boolean;
 }
 
+export interface DeleteSessionsResult {
+  deleted_sessions: number;
+  deleted_records: number;
+  deleted_logs: number;
+  missing_sessions?: string[];
+  skipped_active_sessions?: string[];
+}
+
+export type CaptureState = "idle" | "starting" | "capturing" | "stopping" | "error";
+
+export interface CaptureStatus {
+  available: boolean;
+  client: "codexapp";
+  state: CaptureState;
+  pid?: number | null;
+  started_at?: string | null;
+  exit_code?: number | null;
+  error?: string | null;
+}
+
 export interface TraceRecord {
   request_id?: string;
   timestamp?: string;

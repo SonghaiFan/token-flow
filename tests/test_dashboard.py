@@ -1798,6 +1798,109 @@ async def test_dashboard_server_quit_route_stops_dashboard(trace_db) -> None:
 
 
 @pytest.mark.asyncio
+async def test_dashboard_can_start_and_stop_codex_app_capture(trace_db, monkeypatch) -> None:
+    import claude_tap.live as live_module
+
+    class FakeCaptureProcess:
+        def __init__(self) -> None:
+            self.pid = 4242
+            self.returncode = None
+            self.signal = None
+            self._done = asyncio.Event()
+
+        async def wait(self):
+            await self._done.wait()
+            return self.returncode
+
+        def send_signal(self, sent_signal):
+            self.signal = sent_signal
+            self.returncode = 0
+            self._done.set()
+
+        def terminate(self):
+            self.returncode = 0
+            self._done.set()
+
+        def kill(self):
+            self.returncode = -9
+            self._done.set()
+
+    process = FakeCaptureProcess()
+    launched = {}
+
+    async def fake_create_subprocess_exec(*command, **kwargs):
+        launched["command"] = command
+        launched["kwargs"] = kwargs
+        return process
+
+    monkeypatch.setattr(live_module.sys, "platform", "darwin")
+    monkeypatch.setattr(live_module.asyncio, "create_subprocess_exec", fake_create_subprocess_exec)
+
+    server = LiveViewerServer(port=0, dashboard_mode=True)
+    port = await server.start()
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.get(f"http://127.0.0.1:{port}/dashboard/health") as resp:
+                token = (await resp.json())["quit_token"]
+            headers = {"X-Claude-Tap-Dashboard-Token": token}
+
+            async with session.get(f"http://127.0.0.1:{port}/dashboard/captures") as resp:
+                assert resp.status == 200
+                assert (await resp.json())["state"] == "idle"
+
+            async with session.post(f"http://127.0.0.1:{port}/dashboard/captures", headers=headers) as resp:
+                assert resp.status == 202
+                payload = await resp.json()
+                assert payload["state"] == "capturing"
+                assert payload["pid"] == 4242
+
+            assert launched["command"][1:] == (
+                "-m",
+                "claude_tap",
+                "--tap-client",
+                "codexapp",
+                "--tap-no-open",
+                "--tap-no-live",
+            )
+            assert launched["kwargs"]["stdout"] is not None
+
+            async with session.delete(f"http://127.0.0.1:{port}/dashboard/captures", headers=headers) as resp:
+                assert resp.status == 200
+                payload = await resp.json()
+                assert payload["state"] == "idle"
+                assert payload["pid"] is None
+
+            assert process.signal == live_module.signal.SIGINT
+    finally:
+        await server.stop()
+
+
+@pytest.mark.asyncio
+async def test_dashboard_capture_mutations_require_same_origin_token(trace_db, monkeypatch) -> None:
+    import claude_tap.live as live_module
+
+    monkeypatch.setattr(live_module.sys, "platform", "darwin")
+    server = LiveViewerServer(port=0, dashboard_mode=True)
+    port = await server.start()
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.post(f"http://127.0.0.1:{port}/dashboard/captures") as resp:
+                assert resp.status == 403
+            async with session.get(f"http://127.0.0.1:{port}/dashboard/health") as resp:
+                token = (await resp.json())["quit_token"]
+            async with session.post(
+                f"http://127.0.0.1:{port}/dashboard/captures",
+                headers={
+                    "Origin": f"http://attacker.example:{port}",
+                    "X-Claude-Tap-Dashboard-Token": token,
+                },
+            ) as resp:
+                assert resp.status == 403
+    finally:
+        await server.stop()
+
+
+@pytest.mark.asyncio
 async def test_dashboard_quit_token_requires_trusted_host_and_origin(trace_db) -> None:
     from claude_tap.shared_dashboard import CLAUDE_TAP_VERSION, is_dashboard_healthy
 
@@ -2409,6 +2512,41 @@ async def test_dashboard_bulk_delete_skips_active_sessions(trace_db) -> None:
         assert store.load_session_row(first_id) is None
         assert store.load_session_row(second_id) is None
         assert store.load_session_row(stale_active_id) is None
+        assert store.load_session_row(active_id) is not None
+    finally:
+        await server.stop()
+
+
+@pytest.mark.asyncio
+async def test_dashboard_clear_all_deletes_every_non_active_session(trace_db) -> None:
+    store = get_trace_store()
+    complete_id = store.create_session(client="claude", proxy_mode="reverse")
+    store.append_record(complete_id, _anthropic_record())
+    store.finalize_session(complete_id, {"api_calls": 1})
+    active_id = store.create_session(client="codex", proxy_mode="reverse")
+    store.append_record(active_id, _anthropic_record(turn=2))
+    conn = store._connect()
+    conn.execute(
+        "UPDATE sessions SET updated_at = ? WHERE id = ?",
+        (datetime.now(timezone.utc).isoformat(), active_id),
+    )
+    conn.commit()
+
+    server = LiveViewerServer(port=0, dashboard_mode=True)
+    port = await server.start()
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.delete(
+                f"http://127.0.0.1:{port}/api/sessions",
+                json={"clear_all": True},
+            ) as resp:
+                assert resp.status == 200
+                payload = await resp.json()
+                assert payload["deleted_sessions"] == 1
+                assert payload["deleted_records"] == 1
+                assert payload["skipped_active_sessions"] == [active_id]
+
+        assert store.load_session_row(complete_id) is None
         assert store.load_session_row(active_id) is not None
     finally:
         await server.stop()
