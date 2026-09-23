@@ -289,6 +289,10 @@ Never present missing capture data as a successful zero.
 - Compact large measurements in overview contexts, but show exact measurements
   in inspection contexts. Do not format technical identifiers such as `5000`
   as `5,000`.
+- Keep the shared size scale consistent across conversations and the inspector:
+  14px body text, 12px metadata and formatted JSON/code, 44px standard controls,
+  12px control corners, and 16px panel corners. Keep smaller type and targets
+  only for chart annotations and dense in-place tree controls.
 - Shared layout tokens define toolbar height, control height, touch target,
   content width, turn-rail width, radii, spacing, and motion. New UI should use
   semantic tokens instead of introducing isolated literals.

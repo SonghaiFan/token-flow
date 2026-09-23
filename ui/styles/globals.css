@@ -13,6 +13,8 @@
   --color-success: var(--success);
   --color-warning: var(--warning);
   --color-danger: var(--danger);
+  --radius-control: var(--tf-radius-control);
+  --radius-panel: var(--tf-radius-panel);
 }
 
 :root {
@@ -28,6 +30,14 @@
   --warning: #f79009;
   --danger: #e5484d;
   --cached: #12a87a;
+  --tf-font-body: 14px;
+  --tf-font-meta: 12px;
+  --tf-font-code: 12px;
+  --tf-line-body: 1.5;
+  --tf-line-code: 1.6;
+  --tf-control-height: 44px;
+  --tf-radius-control: 12px;
+  --tf-radius-panel: 16px;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -58,6 +68,8 @@ body {
   background: var(--canvas);
   color: var(--ink);
   font-family: var(--font-token-flow-sans);
+  font-size: var(--tf-font-body);
+  line-height: var(--tf-line-body);
   -webkit-font-smoothing: antialiased;
 }
 button, input, select { font: inherit; }
@@ -68,6 +80,19 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
 }
 .scrollbar-none { scrollbar-width: none; }
 .scrollbar-none::-webkit-scrollbar { display: none; }
+
+.tf-code {
+  font-family: var(--font-token-flow-mono);
+  font-size: var(--tf-font-code);
+  line-height: var(--tf-line-code);
+}
+
+.tf-control { min-height: var(--tf-control-height); }
+.tf-icon-control {
+  width: var(--tf-control-height);
+  height: var(--tf-control-height);
+  flex: 0 0 var(--tf-control-height);
+}
 
 /* Keep the JSON viewer's hover-only copy action out of text flow. */
 .token-flow-json-tree .w-rjv-line > span,

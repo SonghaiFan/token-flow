@@ -511,7 +511,7 @@ def test_viewer_split_js_core_units_run_without_playwright() -> None:
         );
 
         const legacyCompactBundle = {
-          __token_tap_compact_trace__: { version: 1 },
+          __claude_tap_compact_trace__: { version: 1 },
           blobs: {
             hash_legacy_instructions: {
               kind: 'json',
@@ -526,7 +526,7 @@ def test_viewer_split_js_core_units_run_without_playwright() -> None:
             },
           },
           records: [{
-            __token_tap_compact_record__: {
+            __claude_tap_compact_record__: {
               version: 1,
               encoding: 'json-blob-ref',
             },
@@ -535,11 +535,11 @@ def test_viewer_split_js_core_units_run_without_playwright() -> None:
               request: {
                 body: {
                   instructions: {
-                    __token_tap_blob_ref__: { version: 1, kind: 'json', hash: 'hash_legacy_instructions' },
+                    __claude_tap_blob_ref__: { version: 1, kind: 'json', hash: 'hash_legacy_instructions' },
                   },
                   input: [
                     {
-                      __token_tap_blob_ref__: { version: 1, kind: 'json', hash: 'hash_legacy_input' },
+                      __claude_tap_blob_ref__: { version: 1, kind: 'json', hash: 'hash_legacy_input' },
                     },
                     {
                       role: 'user',

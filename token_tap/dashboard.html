@@ -101,7 +101,7 @@ button { cursor: pointer; }
   flex-shrink: 0; z-index: 10;
 }
 .header .logo { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
-.header .logo svg { width: 22px; height: 22px; }
+.header .logo img { width: 26px; height: 26px; padding: 2px; border-radius: 6px; background: #fff; object-fit: contain; }
 .header .logo span { font-size: 14px; font-weight: 600; color: var(--text); letter-spacing: -0.3px; }
 .header .logo .logo-version {
   display: none; align-items: center; height: 20px; padding: 0 6px;
@@ -981,7 +981,7 @@ pre {
 <body>
 <div class="header">
   <div class="logo">
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+    <img src="/assets/token-flow-logo.svg" alt="">
     <span>Token Flow</span>
     <span class="logo-version" id="logo-version"></span>
   </div>

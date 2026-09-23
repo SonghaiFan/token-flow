@@ -47,7 +47,7 @@ local_scheme = "no-local-version"
 
 [tool.setuptools.package-data]
 token_tap = ["dashboard.html", "viewer.html", "viewer_i18n.json", "model_prices.json", "py.typed", "static_ui/*", "static_ui/**/*"]
-"token_tap.viewer_assets" = ["*.css", "*.js", "*.LICENSE.txt"]
+"token_tap.viewer_assets" = ["*.css", "*.js", "*.svg", "*.LICENSE.txt"]
 
 [project.optional-dependencies]
 dev = [

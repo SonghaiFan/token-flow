@@ -103,7 +103,8 @@ body { font-family: var(--sans); background: var(--bg); color: var(--text); heig
   flex-wrap: wrap;
 }
 .header .logo { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
-.header .logo svg { width: 22px; height: 22px; }
+.header .logo .brand-mark { display: block; width: 26px; height: 26px; flex: 0 0 26px; padding: 2px; border-radius: 6px; background: #fff; }
+.header .logo .brand-mark svg { display: block; width: 100%; height: 100%; }
 .header .logo span { font-size: 14px; font-weight: 600; color: var(--text); letter-spacing: -0.3px; }
 .header .logo .logo-version {
   display: none; align-items: center;

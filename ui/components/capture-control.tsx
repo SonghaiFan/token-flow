@@ -53,7 +53,7 @@ export function CaptureControl() {
       <button
         aria-label={label}
         aria-pressed={active}
-        className={`inline-flex min-h-11 items-center gap-2 whitespace-nowrap rounded-xl border px-3 text-sm font-medium transition-colors active:translate-y-px disabled:cursor-wait disabled:opacity-60 ${active ? "border-emerald-300 bg-emerald-50 text-emerald-800 hover:bg-emerald-100 dark:border-emerald-800 dark:bg-emerald-950 dark:text-emerald-300" : "border-line bg-panel text-ink hover:bg-canvas"}`}
+        className={`tf-control inline-flex items-center gap-2 whitespace-nowrap rounded-control border px-3 text-sm font-medium transition-colors active:translate-y-px disabled:cursor-wait disabled:opacity-60 ${active ? "border-emerald-300 bg-emerald-50 text-emerald-800 hover:bg-emerald-100 dark:border-emerald-800 dark:bg-emerald-950 dark:text-emerald-300" : "border-line bg-panel text-ink hover:bg-canvas"}`}
         disabled={busy || status.state === "starting" || status.state === "stopping"}
         onClick={() => void toggle()}
         title={status.state === "capturing" ? "Stop recording Codex App conversations" : "Open Codex App and record new conversations"}
@@ -63,7 +63,7 @@ export function CaptureControl() {
         <span className="sm:hidden">{busy ? "Working" : compactLabel}</span>
         <span className="hidden sm:inline">{busy ? "Working" : label}</span>
       </button>
-      {error ? <div className="absolute right-0 top-[calc(100%+0.5rem)] z-[60] w-72 rounded-xl border border-red-200 bg-panel p-3 text-xs leading-5 text-red-700 shadow-lg dark:border-red-900 dark:text-red-300" role="alert">{error}</div> : null}
+      {error ? <div className="absolute right-0 top-[calc(100%+0.5rem)] z-[60] w-72 rounded-control border border-red-200 bg-panel p-3 text-xs leading-5 text-red-700 shadow-lg dark:border-red-900 dark:text-red-300" role="alert">{error}</div> : null}
     </div>
   );
 }

@@ -118,12 +118,12 @@ export function WorkspaceView({ sessionId, onBack }: { sessionId: string; onBack
     }
   }, [onBack, sessionId]);
 
-  if (error) return <AppShell onBack={onBack} title="Conversation"><main className="mx-auto max-w-3xl p-6"><div className="rounded-2xl border border-red-200 bg-red-50 p-5 text-red-700">{error}</div></main></AppShell>;
+  if (error) return <AppShell onBack={onBack} title="Conversation"><main className="mx-auto max-w-3xl p-6"><div className="rounded-panel border border-red-200 bg-red-50 p-5 text-red-700">{error}</div></main></AppShell>;
   if (!data) return <AppShell onBack={onBack} title="Conversation"><main className="grid min-h-[70dvh] place-items-center text-sm text-muted">Loading conversation…</main></AppShell>;
 
   const liveLabel = liveState === "watching" ? "Watching" : liveState === "stale" ? "Updates paused" : liveState === "reconnecting" ? "Reconnecting" : "Connecting";
   const active = data.session.live || data.session.status === "active";
-  const meta = <><span>{turns.length} turns</span><span>{formatCompact(data.session.total_tokens || turns.reduce((sum, item) => sum + item.input + item.output, 0))} tokens</span><span className={liveState === "watching" ? "text-success" : "text-warning"}>● {liveLabel}</span><a className="inline-flex min-h-9 items-center gap-1.5 rounded-lg border border-line px-3 text-ink hover:bg-canvas" href={`/api/sessions/${encodeURIComponent(sessionId)}/export/compact`}><DownloadIcon className="size-4"/> Export</a><button className="inline-flex min-h-9 items-center gap-1.5 rounded-lg border border-red-200 px-3 text-red-700 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-40 dark:border-red-900 dark:text-red-300 dark:hover:bg-red-950" disabled={active} onClick={() => setDeleteOpen(true)} title={active ? "Active conversations cannot be deleted" : "Delete conversation"} type="button"><TrashIcon className="size-4"/> Delete</button></>;
+  const meta = <><span>{turns.length} turns</span><span>{formatCompact(data.session.total_tokens || turns.reduce((sum, item) => sum + item.input + item.output, 0))} tokens</span><span className={liveState === "watching" ? "text-success" : "text-warning"}>● {liveLabel}</span><a className="tf-control inline-flex items-center gap-1.5 rounded-control border border-line px-3 text-sm text-ink hover:bg-canvas" href={`/api/sessions/${encodeURIComponent(sessionId)}/export/compact`}><DownloadIcon className="size-4"/> Export</a><button className="tf-control inline-flex items-center gap-1.5 rounded-control border border-red-200 px-3 text-sm text-red-700 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-40 dark:border-red-900 dark:text-red-300 dark:hover:bg-red-950" disabled={active} onClick={() => setDeleteOpen(true)} title={active ? "Active conversations cannot be deleted" : "Delete conversation"} type="button"><TrashIcon className="size-4"/> Delete</button></>;
 
   return <AppShell meta={meta} onBack={onBack} title={title}>
     <main className="mx-auto grid min-w-0 w-full max-w-[1600px] gap-3 py-3 lg:grid-cols-[minmax(24rem,32rem)_minmax(0,1fr)] lg:px-4">
@@ -134,7 +134,7 @@ export function WorkspaceView({ sessionId, onBack }: { sessionId: string; onBack
       <div className={`t-page-enter ${turn ? "fixed inset-0 z-50 overflow-y-auto bg-canvas p-2 lg:static lg:z-auto lg:overflow-visible lg:bg-transparent lg:p-0" : "min-w-0 px-3 pb-5 lg:px-0"}`} data-overlay={turn ? "true" : undefined} key={turn ? "turn" : "overview"} style={{ "--t-page-dir": turn ? 1 : -1 } as React.CSSProperties}>
         {turn
           ? <RequestView jumpToBlock={requestJump?.turnId === turn.id ? requestJump : null} onNavigate={selectTurn} onSelectToken={setTokenSelection} selection={tokenSelection} turn={turn} turns={turns}/>
-          : <section className="rounded-2xl border border-line bg-panel shadow-sm"><ConversationOverview focus={focusCategory} onFocus={setFocusCategory} onSelectNode={selectNode} onSelectTurn={selectTurn} session={data.session} turns={turns}/></section>}
+          : <section className="rounded-panel border border-line bg-panel shadow-sm"><ConversationOverview focus={focusCategory} onFocus={setFocusCategory} onSelectNode={selectNode} onSelectTurn={selectTurn} session={data.session} turns={turns}/></section>}
       </div>
     </main>
     <DeleteDialog busy={deleting} description={`This permanently deletes “${title}” and its captured records.`} error={deleteError} onCancel={closeDeleteDialog} onConfirm={() => void confirmDelete()} open={deleteOpen} title="Delete this conversation?"/>

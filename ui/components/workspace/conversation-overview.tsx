@@ -8,11 +8,11 @@ function share(part: number, whole: number): string {
 }
 
 function Metric({ label, value }: { label: string; value: string }) {
-  return <div className="rounded-xl border border-line px-3 py-2.5"><div className="font-mono text-xl font-semibold tracking-[-0.04em]">{value}</div><div className="mt-0.5 text-[11px] text-muted">{label}</div></div>;
+  return <div className="rounded-control border border-line px-3 py-2.5"><div className="font-mono text-xl font-semibold tracking-[-0.04em]">{value}</div><div className="mt-0.5 text-xs text-muted">{label}</div></div>;
 }
 
 function Section({ children, note, title }: { children: React.ReactNode; note?: string; title: string }) {
-  return <section className="overflow-hidden rounded-xl border border-line">
+  return <section className="overflow-hidden rounded-control border border-line">
     <header className="flex items-baseline gap-2 bg-canvas/60 px-4 py-2.5"><h3 className="text-sm font-semibold">{title}</h3>{note ? <span className="text-xs text-muted">{note}</span> : null}</header>
     <div className="divide-y divide-line border-t border-line">{children}</div>
   </section>;
@@ -86,7 +86,7 @@ export function ConversationOverview({ focus, onFocus, onSelectNode, onSelectTur
       {focus && focusTotal ? <div className="flex flex-wrap items-center gap-x-3 gap-y-2 px-4 py-2.5 text-xs">
         <span className="flex items-center gap-2"><i className="size-2.5 rounded-[3px]" style={{ background: categoryColor(focus.label, focus.layer) }}/><strong className="font-semibold">{focus.label}</strong></span>
         <span className="font-mono text-muted">{formatNumber(focusTotal.tokens)} · {focusTurns.length} {focusTurns.length === 1 ? "turn" : "turns"} · {share(focusTotal.cached, focusTotal.tokens)} cached</span>
-        <span className="flex flex-wrap items-center gap-1.5"><span className="text-muted">{constant ? `${formatCompact(focusTurns[0].tokens)} in each turn, from` : "Largest in"}</span>{focusPeaks.map(({ blockIds, index, tokens, turn }) => <button className="rounded-full border border-line px-2 py-0.5 font-mono text-[11px] hover:border-muted hover:bg-canvas" key={turn.id} onClick={() => onSelectNode(index, { blockId: blockIds[0], blockIds, label: focus.label, turnId: turn.id })} type="button">Turn {turn.label} · {formatCompact(tokens)}</button>)}</span>
+        <span className="flex flex-wrap items-center gap-1.5"><span className="text-muted">{constant ? `${formatCompact(focusTurns[0].tokens)} in each turn, from` : "Largest in"}</span>{focusPeaks.map(({ blockIds, index, tokens, turn }) => <button className="rounded-full border border-line px-2 py-0.5 font-mono text-xs hover:border-muted hover:bg-canvas" key={turn.id} onClick={() => onSelectNode(index, { blockId: blockIds[0], blockIds, label: focus.label, turnId: turn.id })} type="button">Turn {turn.label} · {formatCompact(tokens)}</button>)}</span>
         <button aria-label="Clear category focus" className="ml-auto rounded-full px-2 py-0.5 text-muted hover:bg-canvas hover:text-ink" onClick={() => onFocus(null)} type="button">Clear ×</button>
       </div> : <p className="px-4 py-2.5 text-xs text-muted">Click a square or a category to follow it through the token flow.</p>}
     </Section>
@@ -95,7 +95,7 @@ export function ConversationOverview({ focus, onFocus, onSelectNode, onSelectTur
       {[...failed, ...heaviest.filter(({ index }) => !failed.some((item) => item.index === index))].map(({ index, turn }) => <button className="flex w-full items-center gap-2.5 px-4 py-2 text-left text-sm hover:bg-canvas/70" key={turn.id} onClick={() => onSelectTurn(index)} type="button">
         <span className="shrink-0 font-medium">Turn {turn.label}</span>
         <span className="min-w-0 flex-1 truncate text-xs text-muted">{turn.step}</span>
-        {turn.status >= 400 ? <span className="font-mono text-[11px] text-danger">HTTP {turn.status}</span> : <span className="font-mono text-xs text-ink">{formatNumber(turn.fresh)} new</span>}
+        {turn.status >= 400 ? <span className="font-mono text-xs text-danger">HTTP {turn.status}</span> : <span className="font-mono text-xs text-ink">{formatNumber(turn.fresh)} new</span>}
       </button>)}
     </Section> : null}
 

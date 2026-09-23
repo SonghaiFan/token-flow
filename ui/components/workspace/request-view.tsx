@@ -27,7 +27,7 @@ const markdownComponents: Components = {
   blockquote: ({ children }) => <blockquote className="my-3 border-l-2 border-line pl-4 text-muted">{children}</blockquote>,
   a: ({ children, href }) => <a className="font-medium underline decoration-line underline-offset-4 hover:decoration-ink" href={href} rel="noreferrer" target="_blank">{children}</a>,
   code: ({ children }) => <code className="rounded bg-canvas px-1 py-0.5 font-mono text-[0.9em]">{children}</code>,
-  pre: ({ children }) => <pre className="my-3 max-h-[32rem] overflow-auto rounded-lg border border-line bg-canvas p-3 font-mono text-[11px] leading-5">{children}</pre>,
+  pre: ({ children }) => <pre className="tf-code my-3 max-h-[32rem] overflow-auto rounded-lg border border-line bg-canvas p-3">{children}</pre>,
   // Captured markdown tables are evidence to read, so render a plain table without
   // Streamdown's copy, download, and fullscreen chrome. Only wide tables scroll.
   table: ({ children }) => <div className="my-3 overflow-x-auto"><table className="w-full border-collapse text-left text-[12px] leading-5">{children}</table></div>,
@@ -92,7 +92,7 @@ function Pill({ children, tone = "neutral" }: { children: ReactNode; tone?: "neu
     assistant: "border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-900 dark:bg-emerald-950 dark:text-emerald-300",
     danger: "border-red-200 bg-red-50 text-danger dark:border-red-900 dark:bg-red-950",
   };
-  return <span className={`inline-flex max-w-full items-center whitespace-nowrap rounded-full border px-2 py-0.5 font-mono text-[9px] font-medium ${tones[tone]}`}>{children}</span>;
+  return <span className={`inline-flex max-w-full items-center whitespace-nowrap rounded-full border px-2 py-0.5 font-mono text-xs font-medium ${tones[tone]}`}>{children}</span>;
 }
 
 function inputPreview(message: UnknownRecord, content: unknown, index: number): string {
@@ -113,11 +113,11 @@ function inputItemParts(message: UnknownRecord): unknown[] {
 }
 
 function RichText({ children }: { children: string }) {
-  return <Streamdown animated={false} className="min-w-0 break-words text-[13px] text-ink" components={markdownComponents} dir="auto" mode="static">{escapeCapturedTags(children)}</Streamdown>;
+  return <Streamdown animated={false} className="min-w-0 break-words text-sm text-ink" components={markdownComponents} dir="auto" mode="static">{escapeCapturedTags(children)}</Streamdown>;
 }
 
 function JsonBlock({ value }: { value: unknown }) {
-  return <pre className="max-h-[28rem] overflow-auto rounded-lg border border-line bg-canvas p-3 font-mono text-[10px] leading-5 text-ink">{JSON.stringify(value, null, 2)}</pre>;
+  return <pre className="tf-code max-h-[28rem] overflow-auto rounded-lg border border-line bg-canvas p-3 text-ink">{JSON.stringify(value, null, 2)}</pre>;
 }
 
 interface ParsedStructuredText {
@@ -392,7 +392,7 @@ function ResultNotice({ value }: { value: string }) {
     .replace(/\s*\(?original token count:\s*[\d,]+\)?/i, "")
     .replace(/\s*total output lines:\s*[\d,]+/i, "")
     .trim();
-  return <div className="flex flex-wrap items-center gap-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-amber-900 dark:border-amber-900 dark:bg-amber-950 dark:text-amber-200">
+  return <div className="flex flex-wrap items-center gap-2 rounded-control border border-amber-200 bg-amber-50 px-3 py-2 text-amber-900 dark:border-amber-900 dark:bg-amber-950 dark:text-amber-200">
     <span className="text-xs font-medium">{warning || "Captured output metadata"}</span>
     {tokenCount ? <Pill tone="system">Original {Number(tokenCount.replaceAll(",", "")).toLocaleString()} tokens</Pill> : null}
     {lineCount ? <Pill tone="system">{Number(lineCount.replaceAll(",", "")).toLocaleString()} output {Number(lineCount.replaceAll(",", "")) === 1 ? "line" : "lines"}</Pill> : null}
@@ -400,19 +400,19 @@ function ResultNotice({ value }: { value: string }) {
 }
 
 function ToolResultCatalog({ tools }: { tools: ToolResultDefinition[] }) {
-  return <section className="overflow-hidden rounded-xl border border-line bg-canvas/40">
+  return <section className="overflow-hidden rounded-control border border-line bg-canvas/40">
     <div className="flex flex-wrap items-center gap-2 border-b border-line px-3 py-3 sm:px-4">
-      <div className="min-w-0"><h4 className="text-sm font-semibold">Returned tool catalog</h4><p className="mt-0.5 text-[11px] text-muted">Tool definitions returned by this call, rendered as readable entries.</p></div>
+      <div className="min-w-0"><h4 className="text-sm font-semibold">Returned tool catalog</h4><p className="mt-0.5 text-xs text-muted">Tool definitions returned by this call, rendered as readable entries.</p></div>
       <Pill>{tools.length} tools</Pill>
     </div>
     <div className="space-y-2 p-2 sm:p-3">{tools.map((tool, index) => {
       const { declaration, summary } = splitToolDescription(tool.description);
       const metadata = Object.fromEntries(Object.entries(tool).filter(([key]) => key !== "name" && key !== "description"));
       return <div key={`${tool.name}-${index}`} style={{ containIntrinsicSize: "0 64px", contentVisibility: "auto" }}>
-        <Disclosure summary={<div className="min-w-0"><div className="flex flex-wrap items-center gap-2"><strong className="break-all font-mono text-[11px] text-ink">{tool.name}</strong><Pill>{textValue(tool.type) || "tool"}</Pill></div>{summary ? <p className="mt-1 line-clamp-2 text-[11px] leading-4 text-muted">{summary}</p> : null}</div>}>
+        <Disclosure summary={<div className="min-w-0"><div className="flex flex-wrap items-center gap-2"><strong className="break-all font-mono text-xs text-ink">{tool.name}</strong><Pill>{textValue(tool.type) || "tool"}</Pill></div>{summary ? <p className="mt-1 line-clamp-2 text-xs leading-4 text-muted">{summary}</p> : null}</div>}>
           <div className="space-y-3">
             {summary ? <RichText>{summary}</RichText> : null}
-            {declaration ? <Disclosure summary={<><strong className="text-xs">Declaration</strong><span className="text-[11px] text-muted">Parameters and return type</span></>}><pre className="max-h-[32rem] overflow-auto whitespace-pre-wrap rounded-lg bg-canvas p-3 font-mono text-[10px] leading-5 text-ink">{declaration}</pre></Disclosure> : null}
+            {declaration ? <Disclosure summary={<><strong className="text-xs">Declaration</strong><span className="text-xs text-muted">Parameters and return type</span></>}><pre className="max-h-[32rem] overflow-auto whitespace-pre-wrap rounded-lg bg-canvas p-3 font-mono text-xs leading-5 text-ink">{declaration}</pre></Disclosure> : null}
             {Object.keys(metadata).length ? <Disclosure summary={<><strong className="text-xs">Additional fields</strong><Pill>{Object.keys(metadata).length}</Pill></>}><JsonBlock value={metadata}/></Disclosure> : null}
           </div>
         </Disclosure>
@@ -423,10 +423,10 @@ function ToolResultCatalog({ tools }: { tools: ToolResultDefinition[] }) {
 
 function StructuredValue({ value }: { value: unknown }) {
   if (Array.isArray(value) && value.length && value.every(isToolResultDefinition)) return <ToolResultCatalog tools={value}/>;
-  if (Array.isArray(value)) return <section className="space-y-2"><div className="flex items-center gap-2"><strong className="text-xs">Structured list</strong><Pill>{value.length} items</Pill></div>{value.map((item, index) => <Disclosure key={index} summary={<><strong className="text-xs">Item {index + 1}</strong><span className="min-w-0 truncate text-[11px] text-muted">{previewText(item)}</span></>}><StructuredValue value={item}/></Disclosure>)}</section>;
+  if (Array.isArray(value)) return <section className="space-y-2"><div className="flex items-center gap-2"><strong className="text-xs">Structured list</strong><Pill>{value.length} items</Pill></div>{value.map((item, index) => <Disclosure key={index} summary={<><strong className="text-xs">Item {index + 1}</strong><span className="min-w-0 truncate text-xs text-muted">{previewText(item)}</span></>}><StructuredValue value={item}/></Disclosure>)}</section>;
   if (value && typeof value === "object") {
     const entries = Object.entries(asRecord(value));
-    return <dl className="divide-y divide-line overflow-hidden rounded-xl border border-line">{entries.map(([key, item]) => <div className="grid gap-1 px-3 py-3 text-xs sm:grid-cols-[10rem_minmax(0,1fr)]" key={key}><dt className="break-all font-mono text-[10px] font-medium text-muted">{key}</dt><dd className="min-w-0 break-words text-ink">{item && typeof item === "object" ? <Disclosure summary={<><span className="text-xs">{Array.isArray(item) ? `${item.length} items` : `${Object.keys(asRecord(item)).length} fields`}</span><span className="min-w-0 truncate text-[11px] text-muted">{previewText(item)}</span></>}><StructuredValue value={item}/></Disclosure> : <span className="whitespace-pre-wrap">{textValue(item) || (item === null ? "null" : "")}</span>}</dd></div>)}</dl>;
+    return <dl className="divide-y divide-line overflow-hidden rounded-control border border-line">{entries.map(([key, item]) => <div className="grid gap-1 px-3 py-3 text-xs sm:grid-cols-[10rem_minmax(0,1fr)]" key={key}><dt className="break-all font-mono text-xs font-medium text-muted">{key}</dt><dd className="min-w-0 break-words text-ink">{item && typeof item === "object" ? <Disclosure summary={<><span className="text-xs">{Array.isArray(item) ? `${item.length} items` : `${Object.keys(asRecord(item)).length} fields`}</span><span className="min-w-0 truncate text-xs text-muted">{previewText(item)}</span></>}><StructuredValue value={item}/></Disclosure> : <span className="whitespace-pre-wrap">{textValue(item) || (item === null ? "null" : "")}</span>}</dd></div>)}</dl>;
   }
   return <span className="whitespace-pre-wrap text-xs text-ink">{textValue(value) || (value === null ? "null" : "")}</span>;
 }
@@ -440,7 +440,7 @@ function StructuredText({ children }: { children: string }) {
 function StructuredOutput({ parsed }: { parsed: ParsedStructuredText }) {
   return <div className="space-y-3">
     {parsed.prefix ? <ResultNotice value={parsed.prefix}/> : null}
-    {parsed.recovered ? <div className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900 dark:border-amber-900 dark:bg-amber-950 dark:text-amber-200">Recovered {Array.isArray(parsed.value) ? parsed.value.length : 0} complete entries from truncated JSON. The incomplete final entry remains available in Raw.</div> : null}
+    {parsed.recovered ? <div className="rounded-control border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900 dark:border-amber-900 dark:bg-amber-950 dark:text-amber-200">Recovered {Array.isArray(parsed.value) ? parsed.value.length : 0} complete entries from truncated JSON. The incomplete final entry remains available in Raw.</div> : null}
     <StructuredValue value={parsed.value}/>
     {parsed.suffix ? <ResultNotice value={parsed.suffix}/> : null}
   </div>;
@@ -478,11 +478,11 @@ function HtmlOutput({ value }: { value: string }) {
     ["Challenge", challenge ? "SHA-256 proof of work" : ""],
     ["Next action", /location\.reload\(\)/.test(value) ? "Reload after verification" : ""],
   ].filter(([, item]) => item);
-  return <section className="overflow-hidden rounded-xl border border-line">
-    <div className="border-b border-line bg-canvas/60 px-3 py-3 sm:px-4"><div className="flex flex-wrap items-center gap-2"><h4 className="text-sm font-semibold">{verification ? "Browser verification page" : "HTML document"}</h4><Pill>HTML</Pill></div><p className="mt-1 text-[11px] text-muted">{verification ? "The server returned a verification challenge instead of the requested data." : "The server returned a document instead of structured data."}</p></div>
+  return <section className="overflow-hidden rounded-control border border-line">
+    <div className="border-b border-line bg-canvas/60 px-3 py-3 sm:px-4"><div className="flex flex-wrap items-center gap-2"><h4 className="text-sm font-semibold">{verification ? "Browser verification page" : "HTML document"}</h4><Pill>HTML</Pill></div><p className="mt-1 text-xs text-muted">{verification ? "The server returned a verification challenge instead of the requested data." : "The server returned a document instead of structured data."}</p></div>
     <div className="space-y-4 px-3 py-3 sm:px-4">
-      {notice ? <div><div className="text-[10px] font-medium text-muted">Page notice</div><p className="mt-1 text-sm leading-5 text-ink">{notice}</p></div> : null}
-      {facts.length ? <dl className="grid gap-x-5 gap-y-3 sm:grid-cols-2">{facts.map(([label, item]) => <div key={label}><dt className="text-[10px] font-medium text-muted">{label}</dt><dd className="mt-1 break-words font-mono text-[10px] text-ink">{item}</dd></div>)}</dl> : null}
+      {notice ? <div><div className="text-xs font-medium text-muted">Page notice</div><p className="mt-1 text-sm leading-5 text-ink">{notice}</p></div> : null}
+      {facts.length ? <dl className="grid gap-x-5 gap-y-3 sm:grid-cols-2">{facts.map(([label, item]) => <div key={label}><dt className="text-xs font-medium text-muted">{label}</dt><dd className="mt-1 break-words font-mono text-xs text-ink">{item}</dd></div>)}</dl> : null}
     </div>
   </section>;
 }
@@ -491,7 +491,7 @@ function TextOutput({ value }: { value: string }) {
   const lines = value.split("\n");
   if (!value) return <div className="rounded-lg border border-dashed border-line px-3 py-4 text-xs text-muted">The tool completed without captured output.</div>;
   if (/too many requests|rate limit/i.test(value)) return <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-3 dark:border-amber-900 dark:bg-amber-950"><strong className="text-xs text-amber-900 dark:text-amber-200">Rate limited</strong><p className="mt-1 text-xs text-amber-900 dark:text-amber-200">{value.trim()}</p></div>;
-  return <section><div className="mb-1.5 flex items-center justify-between gap-3"><h4 className="text-[10px] font-semibold uppercase tracking-[0.1em] text-muted">Output</h4><span className="font-mono text-[9px] text-muted">{lines.length} {lines.length === 1 ? "line" : "lines"}</span></div><ol className="max-h-[28rem] overflow-auto rounded-lg bg-canvas py-2 font-mono text-[10px] leading-5 text-ink">{lines.map((line, index) => <li className="grid grid-cols-[2.5rem_minmax(0,1fr)] px-3" key={index}><span className="select-none pr-3 text-right text-muted/70">{index + 1}</span><span className="whitespace-pre-wrap break-words">{line || " "}</span></li>)}</ol></section>;
+  return <section><div className="mb-1.5 flex items-center justify-between gap-3"><h4 className="text-xs font-semibold uppercase tracking-[0.1em] text-muted">Output</h4><span className="font-mono text-xs text-muted">{lines.length} {lines.length === 1 ? "line" : "lines"}</span></div><ol className="max-h-[28rem] overflow-auto rounded-lg bg-canvas py-2 font-mono text-xs leading-5 text-ink">{lines.map((line, index) => <li className="grid grid-cols-[2.5rem_minmax(0,1fr)] px-3" key={index}><span className="select-none pr-3 text-right text-muted/70">{index + 1}</span><span className="whitespace-pre-wrap break-words">{line || " "}</span></li>)}</ol></section>;
 }
 
 function looksLikeMarkdown(value: string): boolean {
@@ -510,7 +510,7 @@ function looksLikeMarkdown(value: string): boolean {
 
 function MarkdownOutput({ value }: { value: string }) {
   const lineCount = value.split("\n").length;
-  return <section><div className="mb-2 flex flex-wrap items-center justify-between gap-2"><div><h4 className="text-xs font-semibold">Rendered Markdown</h4><p className="mt-0.5 text-[10px] text-muted">Exact source remains available in Raw.</p></div><Pill>{lineCount} {lineCount === 1 ? "line" : "lines"}</Pill></div><div className="max-h-[40rem] overflow-auto rounded-xl border border-line bg-canvas/50 px-4 py-3 sm:px-5 sm:py-4"><RichText>{value}</RichText></div></section>;
+  return <section><div className="mb-2 flex flex-wrap items-center justify-between gap-2"><div><h4 className="text-xs font-semibold">Rendered Markdown</h4><p className="mt-0.5 text-xs text-muted">Exact source remains available in Raw.</p></div><Pill>{lineCount} {lineCount === 1 ? "line" : "lines"}</Pill></div><div className="max-h-[40rem] overflow-auto rounded-control border border-line bg-canvas/50 px-4 py-3 sm:px-5 sm:py-4"><RichText>{value}</RichText></div></section>;
 }
 
 type DetectedToolOutput =
@@ -539,8 +539,8 @@ function ToolOutputView({ value }: { value: string }) {
 function Disclosure({ children, defaultOpen = false, summary }: { children: ReactNode; defaultOpen?: boolean; summary: ReactNode }) {
   // A later selection inside a closed disclosure opens it at once so the block can be scrolled to.
   const { mounted, open, toggle } = useAccordion(defaultOpen);
-  return <div className="t-acc rounded-xl border border-line bg-panel" data-open={open ? "true" : "false"}>
-    <div aria-expanded={open} className="t-acc-head flex min-h-11 cursor-pointer items-center gap-2 rounded-xl px-3 py-2 outline-none hover:bg-canvas/70 focus-visible:ring-2 focus-visible:ring-ink/30" onClick={toggle} onKeyDown={(event) => activateOnKey(event, toggle)} role="button" tabIndex={0}>{summary}<span aria-hidden="true" className="t-acc-chevron ml-auto text-xs text-muted">›</span></div>
+  return <div className="t-acc rounded-control border border-line bg-panel" data-open={open ? "true" : "false"}>
+    <div aria-expanded={open} className="t-acc-head flex min-h-11 cursor-pointer items-center gap-2 rounded-control px-3 py-2 outline-none hover:bg-canvas/70 focus-visible:ring-2 focus-visible:ring-ink/30" onClick={toggle} onKeyDown={(event) => activateOnKey(event, toggle)} role="button" tabIndex={0}>{summary}<span aria-hidden="true" className="t-acc-chevron ml-auto text-xs text-muted">›</span></div>
     {mounted ? <div className="t-acc-panel"><div className="t-acc-panel-inner"><div className="border-t border-line px-3 py-3 sm:px-4">{children}</div></div></div> : null}
   </div>;
 }
@@ -706,10 +706,10 @@ function LayerDiffSection({ diff }: { diff: LayerDiff }) {
     {count("added") ? <Pill>+{count("added")} added</Pill> : null}
     {count("changed") ? <Pill tone="system">{count("changed")} changed</Pill> : null}
     {count("removed") ? <Pill>{count("removed")} removed</Pill> : null}
-    {!diff.rows.length ? <span className="text-[11px] text-muted">{diff.uncompared ? "No matched changes" : "Unchanged"}</span> : null}
-    <span className="ml-auto shrink-0 font-mono text-[10px] text-muted">{tokenText(diff.before)} → <span className="text-ink">{tokenText(diff.after)}</span>{delta ? ` (${delta > 0 ? "+" : ""}${delta.toLocaleString()})` : ""}</span>
+    {!diff.rows.length ? <span className="text-xs text-muted">{diff.uncompared ? "No matched changes" : "Unchanged"}</span> : null}
+    <span className="ml-auto shrink-0 font-mono text-xs text-muted">{tokenText(diff.before)} → <span className="text-ink">{tokenText(diff.after)}</span>{delta ? ` (${delta > 0 ? "+" : ""}${delta.toLocaleString()})` : ""}</span>
   </>;
-  if (!diff.rows.length && !diff.uncompared) return <div className="flex min-h-11 items-center gap-2 rounded-xl border border-line px-3 py-2">{summary}</div>;
+  if (!diff.rows.length && !diff.uncompared) return <div className="flex min-h-11 items-center gap-2 rounded-control border border-line px-3 py-2">{summary}</div>;
   return <Disclosure summary={summary}>
     <ul className="divide-y divide-line text-xs">
       {diff.rows.map(({ change, entry }) => <li className="flex items-center gap-2 py-2" key={`${change}-${entry.key}`}>
@@ -717,7 +717,7 @@ function LayerDiffSection({ diff }: { diff: LayerDiff }) {
         <span className="shrink-0 font-medium">{entry.inputClass.label}</span>
         <Pill tone={change === "changed" ? "system" : "neutral"}>{change}</Pill>
         <span className="min-w-0 flex-1 truncate text-muted">{entryPreview(entry)}</span>
-        {entry.tokens ? <span className="shrink-0 font-mono text-[10px] text-muted">{entry.tokens.tokens.toLocaleString()}</span> : null}
+        {entry.tokens ? <span className="shrink-0 font-mono text-xs text-muted">{entry.tokens.tokens.toLocaleString()}</span> : null}
       </li>)}
       {diff.uncompared ? <li className="py-2 text-muted">{diff.uncompared} {diff.uncompared === 1 ? "block has" : "blocks have"} no captured id, so {diff.uncompared === 1 ? "it is" : "they are"} not compared.</li> : null}
     </ul>
@@ -745,9 +745,9 @@ function RequestChanges({ previous, current }: { previous: TurnModel | undefined
 
   return <div className="space-y-4 p-3 sm:p-4">
     <div className="flex flex-wrap items-center justify-between gap-2"><div><h3 className="text-sm font-semibold">Turn {previous.label} → Turn {current.label}</h3><p className="mt-1 text-xs text-muted">Only captured request differences are shown.</p></div><Pill>{changedFields.length} changed fields</Pill></div>
-    {facts.length ? <dl className="divide-y divide-line overflow-hidden rounded-xl border border-line">{facts.map(([label, before, after]) => <div className="grid gap-1 px-3 py-3 text-xs sm:grid-cols-[8rem_minmax(0,1fr)_auto_minmax(0,1fr)] sm:items-start" key={label}>
-      <dt className="font-medium text-muted">{label}</dt><dd className="min-w-0 break-words font-mono text-[10px] text-muted">{before}</dd><span aria-hidden="true" className="hidden text-muted sm:block">→</span><dd className="min-w-0 break-words font-mono text-[10px] text-ink">{after}</dd>
-    </div>)}</dl> : <div className="rounded-xl border border-dashed border-line p-6 text-center text-xs text-muted">No high-level request changes detected.</div>}
+    {facts.length ? <dl className="divide-y divide-line overflow-hidden rounded-control border border-line">{facts.map(([label, before, after]) => <div className="grid gap-1 px-3 py-3 text-xs sm:grid-cols-[8rem_minmax(0,1fr)_auto_minmax(0,1fr)] sm:items-start" key={label}>
+      <dt className="font-medium text-muted">{label}</dt><dd className="min-w-0 break-words font-mono text-xs text-muted">{before}</dd><span aria-hidden="true" className="hidden text-muted sm:block">→</span><dd className="min-w-0 break-words font-mono text-xs text-ink">{after}</dd>
+    </div>)}</dl> : <div className="rounded-control border border-dashed border-line p-6 text-center text-xs text-muted">No high-level request changes detected.</div>}
     <section className="space-y-2"><h4 className="text-xs font-semibold">Input by layer</h4>{diffs.map((diff) => <LayerDiffSection diff={diff} key={diff.layer}/>)}</section>
     {changedFields.length ? <Disclosure summary={<><strong className="text-xs">Changed request fields</strong><span className="text-xs text-muted">Exact top-level evidence</span></>}><div className="flex flex-wrap gap-1.5">{changedFields.map((field) => <Pill key={field}>{field}</Pill>)}</div></Disclosure> : null}
   </div>;
@@ -819,14 +819,14 @@ function EnvironmentView({ previous, value }: { previous?: string; value: string
     <dl className="grid grid-cols-[7.5rem_minmax(0,1fr)] gap-x-4 gap-y-1.5 text-xs">
       {facts.fields.map(([key, item]) => {
         const old = before.get(key);
-        return <div className="contents" key={key}><dt className="text-muted">{ENVIRONMENT_FIELDS[key] || humanizeField(key)}</dt><dd className="min-w-0 break-all font-mono text-[11px] text-ink">{old !== undefined && old !== item ? <s className="mr-2 text-muted">{old}</s> : null}{item || "Empty"}</dd></div>;
+        return <div className="contents" key={key}><dt className="text-muted">{ENVIRONMENT_FIELDS[key] || humanizeField(key)}</dt><dd className="min-w-0 break-all font-mono text-xs text-ink">{old !== undefined && old !== item ? <s className="mr-2 text-muted">{old}</s> : null}{item || "Empty"}</dd></div>;
       })}
-      {facts.roots.length ? <><dt className="text-muted">Workspace roots</dt><dd className="min-w-0 space-y-0.5 break-all font-mono text-[11px] text-ink">{facts.roots.map((root) => <div key={root}>{root}</div>)}</dd></> : null}
-      {facts.entries.length ? <><dt className="text-muted">File system</dt><dd className="min-w-0 font-mono text-[11px] text-ink">{[facts.profile && `${facts.profile} profile`, facts.fileSystem, accessCounts(facts)].filter(Boolean).join(" · ")}</dd></> : null}
+      {facts.roots.length ? <><dt className="text-muted">Workspace roots</dt><dd className="min-w-0 space-y-0.5 break-all font-mono text-xs text-ink">{facts.roots.map((root) => <div key={root}>{root}</div>)}</dd></> : null}
+      {facts.entries.length ? <><dt className="text-muted">File system</dt><dd className="min-w-0 font-mono text-xs text-ink">{[facts.profile && `${facts.profile} profile`, facts.fileSystem, accessCounts(facts)].filter(Boolean).join(" · ")}</dd></> : null}
     </dl>
     {facts.entries.length ? <details className="text-xs">
-      <summary className="cursor-pointer text-[11px] text-muted hover:text-ink">{facts.entries.length} access rules</summary>
-      <div className="mt-2 overflow-hidden rounded-lg border border-line"><table className="w-full table-fixed text-left text-[11px]"><tbody className="divide-y divide-line">{facts.entries.map((entry, index) => <tr key={`${entry.target}-${index}`}><td className="w-20 px-3 py-1.5 align-top"><Pill tone={entry.access === "deny" ? "danger" : "neutral"}>{entry.access}</Pill></td><td className="break-all px-3 py-1.5 font-mono text-ink">{entry.target}{entry.special ? <span className="ml-2 font-sans text-[10px] text-muted">special</span> : null}{entry.escalatable === "false" ? <span className="ml-2 font-sans text-[10px] text-muted">not escalatable</span> : null}</td></tr>)}</tbody></table></div>
+      <summary className="cursor-pointer text-xs text-muted hover:text-ink">{facts.entries.length} access rules</summary>
+      <div className="mt-2 overflow-hidden rounded-lg border border-line"><table className="w-full table-fixed text-left text-xs"><tbody className="divide-y divide-line">{facts.entries.map((entry, index) => <tr key={`${entry.target}-${index}`}><td className="w-20 px-3 py-1.5 align-top"><Pill tone={entry.access === "deny" ? "danger" : "neutral"}>{entry.access}</Pill></td><td className="break-all px-3 py-1.5 font-mono text-ink">{entry.target}{entry.special ? <span className="ml-2 font-sans text-xs text-muted">special</span> : null}{entry.escalatable === "false" ? <span className="ml-2 font-sans text-xs text-muted">not escalatable</span> : null}</td></tr>)}</tbody></table></div>
     </details> : null}
   </div>;
 }
@@ -1007,7 +1007,7 @@ function Badge({ children, tone = "neutral" }: { children: ReactNode; tone?: Bad
     neutral: "bg-canvas text-muted",
     new: "bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300",
   };
-  return <span className={`whitespace-nowrap rounded-md px-2 py-0.5 font-mono text-[11px] ${tones[tone]}`}>{children}</span>;
+  return <span className={`whitespace-nowrap rounded-md px-2 py-0.5 font-mono text-xs ${tones[tone]}`}>{children}</span>;
 }
 
 function StateBadge({ state }: { state?: ItemState }) {
@@ -1060,7 +1060,7 @@ function Row({ accent, children, defaultOpen = false, dimmed = false, hint, summ
 }
 
 function Meta({ children, mono = false }: { children: ReactNode; mono?: boolean }) {
-  return <span className={`min-w-0 flex-1 truncate text-xs text-muted ${mono ? "font-mono text-[11px]" : ""}`}>{children}</span>;
+  return <span className={`min-w-0 flex-1 truncate text-xs text-muted ${mono ? "font-mono text-xs" : ""}`}>{children}</span>;
 }
 
 function StateSummary({ entries }: { entries: InputEntry[] }) {
@@ -1082,10 +1082,10 @@ function LayerSection({ badge, children, entries, layer, selection, turnId }: { 
   const dimmed = selection?.turnId === turnId && Boolean(selection.layer) && !picked;
   // A selected layer takes its own color; the other layers step back while it is selected.
   const ring = picked ? { borderColor: meta.color, boxShadow: `0 0 0 3px color-mix(in srgb, ${meta.color} 18%, transparent)` } : undefined;
-  return <section aria-label={meta.title} className={`scroll-m-24 overflow-hidden rounded-xl border bg-panel transition ${picked ? "" : "border-line"} ${dimmed ? "opacity-50 hover:opacity-100" : ""}`} data-layer={layer} data-turn-id={turnId} style={ring} tabIndex={-1}>
+  return <section aria-label={meta.title} className={`scroll-m-24 overflow-hidden rounded-control border bg-panel transition ${picked ? "" : "border-line"} ${dimmed ? "opacity-50 hover:opacity-100" : ""}`} data-layer={layer} data-turn-id={turnId} style={ring} tabIndex={-1}>
     <header className="flex min-h-12 items-center gap-2.5 bg-canvas/60 px-3 py-2 sm:px-4">
       <Icon color={meta.color} name={LAYER_ICONS[layer]}/>
-      <h3 className="shrink-0 text-[15px] font-semibold">{meta.title}</h3>
+      <h3 className="shrink-0 text-base font-semibold">{meta.title}</h3>
       <Meta>{meta.description}</Meta>
       <RowEnd badge={badge ?? <StateSummary entries={entries}/>} tokens={sumTokens(entries)}/>
     </header>
@@ -1119,12 +1119,12 @@ function ToolDefinitionRow({ entry, onSelectToken, selection, tools, turnId }: R
   const marks = rowMarks([entry], "Tool definitions", "capabilities", selection, turnId);
   return <Row accent={marks.accent} defaultOpen={marks.open} dimmed={marks.dimmed} summary={<>
     <LinkSwatch blockIds={blockIds} label="Tool definitions" layer="capabilities" onSelectToken={onSelectToken} selection={selection} turnId={turnId}/>
-    <span className="min-w-0 flex-1 truncate">{groups.map((group, index) => <span key={group.name}>{index ? <span className="text-muted"> · </span> : null}<span className="font-mono text-[13px] text-ink">{group.name}</span> <span className="text-xs text-muted">{group.tools.length}</span></span>)}</span>
+    <span className="min-w-0 flex-1 truncate">{groups.map((group, index) => <span key={group.name}>{index ? <span className="text-muted"> · </span> : null}<span className="font-mono text-sm text-ink">{group.name}</span> <span className="text-xs text-muted">{group.tools.length}</span></span>)}</span>
     <RowEnd badge={<StateBadge state={entry?.rowState}/>} tokens={entry?.tokens}/>
   </>}>
     <BlockAnchor blockIds={blockIds} turnId={turnId}>
       <div className="space-y-3">{groups.map((group) => <section key={group.name}>
-        {groups.length > 1 ? <h4 className="mb-1 font-mono text-[10px] text-muted">{group.name}</h4> : null}
+        {groups.length > 1 ? <h4 className="mb-1 font-mono text-xs text-muted">{group.name}</h4> : null}
         <ul>{group.tools.map((tool, index) => {
           const name = textValue(tool.name) || `Tool ${index + 1}`;
           const description = textValue(tool.description);
@@ -1133,7 +1133,7 @@ function ToolDefinitionRow({ entry, onSelectToken, selection, tools, turnId }: R
             <summary className="grid cursor-pointer list-none grid-cols-[minmax(6rem,12rem)_minmax(0,1fr)] gap-3 rounded px-1 py-1 font-mono text-xs hover:bg-canvas/70 [&::-webkit-details-marker]:hidden"><span className="truncate text-ink">{name}</span><span className="truncate text-muted">{toolSignature(tool)}</span></summary>
             <div className="mb-2 ml-1 mt-1 space-y-2 border-l-2 border-line pl-3">
               {description ? <p className="whitespace-pre-wrap text-xs leading-5 text-muted">{description}</p> : null}
-              {schema ? <details><summary className="cursor-pointer text-[10px] font-medium text-muted hover:text-ink">Schema</summary><div className="mt-2"><JsonBlock value={schema}/></div></details> : null}
+              {schema ? <details><summary className="cursor-pointer text-xs font-medium text-muted hover:text-ink">Schema</summary><div className="mt-2"><JsonBlock value={schema}/></div></details> : null}
             </div>
           </details></li>;
         })}</ul>
@@ -1206,14 +1206,14 @@ function ReasoningRow({ entry, onSelectToken, selection, turnId }: RowProps & { 
 const CALL_SOURCE_KEYS = ["code", "cmd", "command", "source", "script", "query", "input"];
 
 function CallInput({ value }: { value: unknown }) {
-  if (typeof value === "string") return <pre className="max-h-80 overflow-auto whitespace-pre-wrap break-words rounded-lg bg-canvas px-3 py-2 font-mono text-[11px] leading-5 text-ink">{value}</pre>;
+  if (typeof value === "string") return <pre className="max-h-80 overflow-auto whitespace-pre-wrap break-words rounded-lg bg-canvas px-3 py-2 font-mono text-xs leading-5 text-ink">{value}</pre>;
   const record = asRecord(value);
   const sourceKey = CALL_SOURCE_KEYS.find((key) => typeof record[key] === "string");
   const rest = Object.entries(record).filter(([key]) => key !== sourceKey);
   if (!sourceKey && !rest.length) return <p className="text-xs text-muted">No captured input.</p>;
   return <div className="space-y-2">
-    {sourceKey ? <pre className="max-h-80 overflow-auto whitespace-pre-wrap break-words rounded-lg bg-canvas px-3 py-2 font-mono text-[11px] leading-5 text-ink">{textValue(record[sourceKey])}</pre> : null}
-    {rest.length ? <dl className="grid grid-cols-[7.5rem_minmax(0,1fr)] gap-x-4 gap-y-1 text-xs">{rest.map(([key, item]) => <div className="contents" key={key}><dt className="text-muted">{humanizeField(key)}</dt><dd className="min-w-0 break-words font-mono text-[11px] text-ink">{item && typeof item === "object" ? <StructuredValue value={item}/> : formatToolField(key, item) || (item === null ? "null" : "Unknown")}</dd></div>)}</dl> : null}
+    {sourceKey ? <pre className="max-h-80 overflow-auto whitespace-pre-wrap break-words rounded-lg bg-canvas px-3 py-2 font-mono text-xs leading-5 text-ink">{textValue(record[sourceKey])}</pre> : null}
+    {rest.length ? <dl className="grid grid-cols-[7.5rem_minmax(0,1fr)] gap-x-4 gap-y-1 text-xs">{rest.map(([key, item]) => <div className="contents" key={key}><dt className="text-muted">{humanizeField(key)}</dt><dd className="min-w-0 break-words font-mono text-xs text-ink">{item && typeof item === "object" ? <StructuredValue value={item}/> : formatToolField(key, item) || (item === null ? "null" : "Unknown")}</dd></div>)}</dl> : null}
   </div>;
 }
 
@@ -1242,7 +1242,7 @@ function ToolExchangeRow({ call, onSelectToken, result, selection, turnId }: Row
   const marks = rowMarks([call, result], result && selectionHits([result], selection, turnId) ? "Tool results" : "Tool calls", "conversation", selection, turnId);
   return <Row accent={marks.accent} defaultOpen={marks.open} dimmed={marks.dimmed} summary={<>
     <LinkSwatch blockIds={blockIds} icon="terminal" label={call ? "Tool calls" : "Tool results"} layer="conversation" onSelectToken={onSelectToken} selection={selection} turnId={turnId}/>
-    <span className="shrink-0 font-mono text-[13px] text-ink">{namespace ? <span className="text-muted">{namespace}.</span> : null}{presentation?.name || "Tool result"}</span>
+    <span className="shrink-0 font-mono text-sm text-ink">{namespace ? <span className="text-muted">{namespace}.</span> : null}{presentation?.name || "Tool result"}</span>
     <Meta>{title}</Meta>
     <RowEnd badge={failed ? <Badge tone="danger">failed</Badge> : <StateBadge state={state}/>} tokens={tokens}/>
   </>}>
@@ -1418,16 +1418,16 @@ function RequestSettings({ body, record }: { body: UnknownRecord; record: TraceR
   ];
   const visible = groups.map(([title, facts]) => [title, facts.filter(([, value]) => value !== undefined && value !== null && value !== "")] as const).filter(([, facts]) => facts.length);
   if (!visible.length) return null;
-  return <section aria-label="Request settings" className="overflow-hidden rounded-xl border border-line bg-panel">
+  return <section aria-label="Request settings" className="overflow-hidden rounded-control border border-line bg-panel">
     <header className="flex min-h-12 items-center gap-2.5 bg-canvas/60 px-3 py-2 sm:px-4">
       <Icon name="sliders"/>
-      <h3 className="shrink-0 text-[15px] font-semibold">Request settings</h3>
+      <h3 className="shrink-0 text-base font-semibold">Request settings</h3>
       <Meta>No input tokens</Meta>
     </header>
     <div className="divide-y divide-line border-t border-line">
       {chips.length ? <div className="flex flex-wrap gap-1.5 px-3 py-2.5 sm:px-4">{chips.map((chip) => <Badge key={chip}>{chip}</Badge>)}</div> : null}
       <Row summary={<span className="text-muted">All settings</span>}>
-        <div className="space-y-4">{visible.map(([title, facts]) => <section key={title}><h4 className="mb-1.5 text-[10px] font-medium text-muted">{title}</h4><dl className="grid grid-cols-[9rem_minmax(0,1fr)] gap-x-4 gap-y-1 text-xs">{facts.map(([label, value]) => <div className="contents" key={label}><dt className="text-muted">{label}</dt><dd className="min-w-0 break-all font-mono text-[11px] text-ink">{typeof value === "boolean" ? (value ? "on" : "off") : textValue(value) || "configured"}</dd></div>)}</dl></section>)}</div>
+        <div className="space-y-4">{visible.map(([title, facts]) => <section key={title}><h4 className="mb-1.5 text-xs font-medium text-muted">{title}</h4><dl className="grid grid-cols-[9rem_minmax(0,1fr)] gap-x-4 gap-y-1 text-xs">{facts.map(([label, value]) => <div className="contents" key={label}><dt className="text-muted">{label}</dt><dd className="min-w-0 break-all font-mono text-xs text-ink">{typeof value === "boolean" ? (value ? "on" : "off") : textValue(value) || "configured"}</dd></div>)}</dl></section>)}</div>
       </Row>
     </div>
   </section>;
@@ -1497,9 +1497,9 @@ function StructuredRequest({ earlierTurns, onSelectToken, selection, turn }: { e
       </LayerSection>;
     })}
 
-    {!hasContent ? <div className="rounded-xl border border-dashed border-line p-5 text-center text-xs text-muted">No message content was captured.</div> : null}
+    {!hasContent ? <div className="rounded-control border border-dashed border-line p-5 text-center text-xs text-muted">No message content was captured.</div> : null}
 
-    {selection?.turnId === turnId && selection.label === "Unattributed input" ? <div className="rounded-xl border border-dashed border-line p-4 text-xs text-muted"><strong className="text-ink">No exact request section</strong><p className="mt-1">This remainder was not attributed to a captured input block, so Token Flow does not guess a destination.</p></div> : null}
+    {selection?.turnId === turnId && selection.label === "Unattributed input" ? <div className="rounded-control border border-dashed border-line p-4 text-xs text-muted"><strong className="text-ink">No exact request section</strong><p className="mt-1">This remainder was not attributed to a captured input block, so Token Flow does not guess a destination.</p></div> : null}
 
     <RequestSettings body={body} record={record}/>
   </div>;
@@ -1510,7 +1510,7 @@ function RequestBody({ earlierTurns, focusPath, mode, onSelectToken, selection, 
   const turnId = turn.id;
   const selectedPath = useMemo(() => focusPath || selectedJsonPath(record, selection, turnId), [focusPath, record, selection, turnId]);
   if (mode === "structured") return <StructuredRequest earlierTurns={earlierTurns} onSelectToken={onSelectToken} selection={selection} turn={turn}/>;
-  return <div className="p-3 sm:p-4"><div className="overflow-hidden rounded-xl border border-line"><RawJsonTree selectedBlockId={selection?.turnId === turnId ? selection.blockId : undefined} selectedPath={selectedPath} turnId={turnId} value={record}/></div></div>;
+  return <div className="p-3 sm:p-4"><div className="overflow-hidden rounded-control border border-line"><RawJsonTree selectedBlockId={selection?.turnId === turnId ? selection.blockId : undefined} selectedPath={selectedPath} turnId={turnId} value={record}/></div></div>;
 }
 
 
@@ -1530,30 +1530,30 @@ function SelectionChip({ onJump, onSelectToken, selection }: { onJump: (selectio
     onSelectToken(next);
     onJump(next);
   };
-  return <span className="inline-flex min-h-8 max-w-full items-center gap-1.5 rounded-full border border-line bg-canvas pl-2.5 pr-1 text-[11px]">
+  return <span className="tf-control inline-flex max-w-full items-center gap-1.5 rounded-full border border-line bg-canvas pl-2.5 pr-1 text-xs">
     <CategorySwatch label={selection.label} layer={selection.layer}/>
     <span className="max-w-40 truncate font-medium text-ink">{selection.label}{selection.layer ? " layer" : ""}</span>
-    {ids.length > 1 ? <span className="flex items-center font-mono text-[10px] text-muted">
-      <button aria-label="Previous matching block" className="grid size-6 place-items-center rounded-full hover:bg-panel hover:text-ink" onClick={() => move(-1)} type="button">‹</button>
+    {ids.length > 1 ? <span className="flex items-center font-mono text-xs text-muted">
+      <button aria-label="Previous matching block" className="grid size-11 place-items-center rounded-full hover:bg-panel hover:text-ink" onClick={() => move(-1)} type="button">‹</button>
       {position + 1}/{ids.length}
-      <button aria-label="Next matching block" className="grid size-6 place-items-center rounded-full hover:bg-panel hover:text-ink" onClick={() => move(1)} type="button">›</button>
+      <button aria-label="Next matching block" className="grid size-11 place-items-center rounded-full hover:bg-panel hover:text-ink" onClick={() => move(1)} type="button">›</button>
     </span> : null}
-    <button aria-label="Clear selection" className="grid size-6 place-items-center rounded-full text-muted hover:bg-panel hover:text-ink" onClick={() => onSelectToken(null)} type="button">×</button>
+    <button aria-label="Clear selection" className="grid size-11 place-items-center rounded-full text-muted hover:bg-panel hover:text-ink" onClick={() => onSelectToken(null)} type="button">×</button>
   </span>;
 }
 
 function SearchResults({ current, hits, onPick, query }: { current: number; hits: SearchHit[]; onPick: (index: number) => void; query: string }) {
   return <div className="t-dropdown-enter border-t border-line">
-    <div className="flex items-center justify-between gap-3 px-3 py-1.5 text-[11px] text-muted sm:px-4">
+    <div className="flex items-center justify-between gap-3 px-3 py-1.5 text-xs text-muted sm:px-4">
       <span>{hits.length >= SEARCH_HIT_LIMIT ? `${SEARCH_HIT_LIMIT}+` : hits.length} {hits.length === 1 ? "match" : "matches"}{current >= 0 ? ` · ${current + 1} of ${hits.length}` : ""}</span>
       <span className="hidden sm:inline">Enter next · Shift+Enter previous · Esc clears</span>
     </div>
     {hits.length ? <ol className="max-h-64 overflow-y-auto border-t border-line">{hits.map((hit, index) => <li key={hit.key}>
       <button aria-current={index === current ? "true" : undefined} className={`grid w-full gap-0.5 px-3 py-2 text-left hover:bg-canvas/70 sm:px-4 ${index === current ? "bg-canvas" : ""}`} onClick={() => onPick(index)} type="button">
-        <span className="flex min-w-0 items-center gap-2 text-[11px]">
+        <span className="flex min-w-0 items-center gap-2 text-xs">
           <i className="size-2.5 shrink-0 rounded-[3px]" style={{ background: hit.color || "var(--line)" }}/>
           <span className="truncate font-medium text-ink">{hit.location}</span>
-          <code className="ml-auto hidden max-w-[45%] truncate font-mono text-[10px] text-muted sm:block">{hit.pathText.replace(/^trace\.?/, "")}</code>
+          <code className="ml-auto hidden max-w-[45%] truncate font-mono text-xs text-muted sm:block">{hit.pathText.replace(/^trace\.?/, "")}</code>
         </span>
         <span className="truncate pl-[18px] text-xs text-muted">{hit.before}<mark className="rounded-sm bg-warning/40 px-0.5 text-ink">{hit.match}</mark>{hit.after}</span>
       </button>
@@ -1664,14 +1664,14 @@ export function RequestView({ jumpToBlock, onNavigate, onSelectToken, selection,
     }
   };
 
-  return <section aria-label={`Turn ${turn.label}`} className="rounded-2xl border border-line bg-panel shadow-sm">
+  return <section aria-label={`Turn ${turn.label}`} className="rounded-panel border border-line bg-panel shadow-sm">
     <div className="sticky top-0 z-20 rounded-t-2xl border-b border-line bg-panel lg:top-14" data-search-ignore="">
       <div className="flex flex-wrap items-center gap-2 px-3 py-2.5 sm:px-4">
-        <button className="inline-flex min-h-9 items-center gap-1.5 rounded-lg px-2 text-xs font-medium text-muted hover:bg-canvas hover:text-ink" onClick={() => onNavigate(null)} type="button">← Overview</button>
+        <button className="tf-control inline-flex items-center gap-1.5 rounded-control px-2 text-sm font-medium text-muted hover:bg-canvas hover:text-ink" onClick={() => onNavigate(null)} type="button">← Overview</button>
         <div className="flex items-center gap-1">
-          <button aria-label="Previous turn" className="grid size-9 place-items-center rounded-lg text-muted hover:bg-canvas hover:text-ink disabled:opacity-30" disabled={selectedIndex <= 0} onClick={() => step(-1)} type="button">‹</button>
-          <span className="font-mono text-[11px] text-muted">{selectedIndex + 1} / {turns.length}</span>
-          <button aria-label="Next turn" className="grid size-9 place-items-center rounded-lg text-muted hover:bg-canvas hover:text-ink disabled:opacity-30" disabled={selectedIndex >= turns.length - 1} onClick={() => step(1)} type="button">›</button>
+          <button aria-label="Previous turn" className="tf-icon-control grid place-items-center rounded-control text-muted hover:bg-canvas hover:text-ink disabled:opacity-30" disabled={selectedIndex <= 0} onClick={() => step(-1)} type="button">‹</button>
+          <span className="font-mono text-xs text-muted">{selectedIndex + 1} / {turns.length}</span>
+          <button aria-label="Next turn" className="tf-icon-control grid place-items-center rounded-control text-muted hover:bg-canvas hover:text-ink disabled:opacity-30" disabled={selectedIndex >= turns.length - 1} onClick={() => step(1)} type="button">›</button>
         </div>
         {selection?.turnId === turn.id ? <SelectionChip onJump={(next) => setLocalJump({ ...next, nonce: Date.now() })} onSelectToken={onSelectToken} selection={selection}/> : null}
         <div className="ml-auto flex flex-wrap items-center gap-2">
@@ -1683,10 +1683,10 @@ export function RequestView({ jumpToBlock, onNavigate, onSelectToken, selection,
         <label className="relative block min-w-0 flex-1">
           <span className="sr-only">Search this turn</span>
           <SearchIcon className="pointer-events-none absolute left-2.5 top-2.5 size-4 text-muted"/>
-          <input className="h-9 w-full rounded-lg border border-line bg-canvas pl-8 pr-8 text-xs outline-none placeholder:text-muted focus:border-muted" onChange={(event) => { setQuery(event.target.value); setListOpen(true); }} onKeyDown={onSearchKey} placeholder="Search this turn's request and response" type="search" value={query}/>
-          {query ? <button aria-label="Clear search" className="absolute right-0.5 top-0 grid size-9 place-items-center text-sm text-muted hover:text-ink" onClick={() => setQuery("")} type="button">×</button> : null}
+          <input className="tf-control w-full rounded-control border border-line bg-canvas pl-8 pr-8 text-sm outline-none placeholder:text-muted focus:border-muted" onChange={(event) => { setQuery(event.target.value); setListOpen(true); }} onKeyDown={onSearchKey} placeholder="Search this turn's request and response" type="search" value={query}/>
+          {query ? <button aria-label="Clear search" className="absolute right-0.5 top-0 grid size-11 place-items-center text-sm text-muted hover:text-ink" onClick={() => setQuery("")} type="button">×</button> : null}
         </label>
-        {searching && hits.length ? <button aria-expanded={listOpen} className="min-h-9 shrink-0 rounded-lg px-2 text-[11px] font-medium text-muted hover:bg-canvas hover:text-ink" onClick={() => setListOpen(!listOpen)} type="button">{listOpen ? "Hide list" : `Show ${hits.length}`}</button> : null}
+        {searching && hits.length ? <button aria-expanded={listOpen} className="tf-control shrink-0 rounded-control px-2 text-sm font-medium text-muted hover:bg-canvas hover:text-ink" onClick={() => setListOpen(!listOpen)} type="button">{listOpen ? "Hide list" : `Show ${hits.length}`}</button> : null}
       </div> : null}
       {searching && listOpen ? <SearchResults current={current} hits={hits} onPick={goTo} query={query}/> : null}
     </div>

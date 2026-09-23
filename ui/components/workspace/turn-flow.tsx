@@ -248,22 +248,22 @@ export function TurnFlow({ focus = null, onSelectNode, onSelectTurn, selected, s
     onSelectNode(row.index, { blockId: node.blockIds[0] || "", blockIds: node.blockIds, label: node.label, layer: layerNode ? node.layer : undefined, turnId: turn.id });
   };
 
-  return <aside aria-label="Token flow" className="min-w-0 border-b border-line bg-panel [--text-w:8.5rem] sm:[--text-w:10rem] lg:sticky lg:top-[68px] lg:flex lg:h-[calc(100dvh-80px)] lg:flex-col lg:rounded-2xl lg:border lg:shadow-sm">
+  return <aside aria-label="Token flow" className="min-w-0 border-b border-line bg-panel [--text-w:8.5rem] sm:[--text-w:10rem] lg:sticky lg:top-[68px] lg:flex lg:h-[calc(100dvh-80px)] lg:flex-col lg:rounded-panel lg:border lg:shadow-sm">
     <div className="space-y-2 border-b border-line p-3">
       <div className="flex items-center justify-between gap-3">
         <h2 className="text-sm font-semibold">Token flow</h2>
         <Segmented compact label="Flow nodes" onChange={setGranularity} options={[["layers", "Layers"], ["categories", "Categories"]]} value={granularity}/>
       </div>
-      <button aria-current={selected === null ? "page" : undefined} className={`flex min-h-10 w-full items-center justify-between gap-2 rounded-lg px-2.5 text-left text-[13px] transition ${selected === null ? "bg-canvas font-medium text-ink shadow-[inset_0_0_0_1px_var(--line)]" : "text-muted hover:bg-canvas/70 hover:text-ink"}`} onClick={() => onSelectTurn(null)} type="button">
-        <span>Conversation overview</span><span className="font-mono text-[10px] text-muted">{turns.length} turns · {formatCompact(totalInput)}</span>
+      <button aria-current={selected === null ? "page" : undefined} className={`tf-control flex w-full items-center justify-between gap-2 rounded-control px-2.5 text-left text-sm transition ${selected === null ? "bg-canvas font-medium text-ink shadow-[inset_0_0_0_1px_var(--line)]" : "text-muted hover:bg-canvas/70 hover:text-ink"}`} onClick={() => onSelectTurn(null)} type="button">
+        <span>Conversation overview</span><span className="font-mono text-xs text-muted">{turns.length} turns · {formatCompact(totalInput)}</span>
       </button>
       {turns.length >= SEARCH_THRESHOLD ? <label className="relative block">
         <span className="sr-only">Search turns</span>
         <SearchIcon className="pointer-events-none absolute left-2.5 top-2.5 size-4 text-muted"/>
-        <input className="h-9 w-full rounded-lg border border-line bg-canvas pl-8 pr-8 text-xs outline-none placeholder:text-muted" onChange={(event) => setQuery(event.target.value)} placeholder="Search turns  /" ref={searchRef} type="search" value={query}/>
-        {query ? <button aria-label="Clear turn search" className="absolute right-1 top-0 grid size-9 place-items-center text-sm text-muted hover:text-ink" onClick={() => setQuery("")} type="button">×</button> : null}
+        <input className="tf-control w-full rounded-control border border-line bg-canvas pl-8 pr-8 text-sm outline-none placeholder:text-muted" onChange={(event) => setQuery(event.target.value)} placeholder="Search turns  /" ref={searchRef} type="search" value={query}/>
+        {query ? <button aria-label="Clear turn search" className="absolute right-1 top-0 grid size-11 place-items-center text-sm text-muted hover:text-ink" onClick={() => setQuery("")} type="button">×</button> : null}
       </label> : null}
-      <div aria-label="Legend" className="flex flex-wrap gap-x-3 gap-y-1 text-[10px] text-muted" role="list">
+      <div aria-label="Legend" className="flex flex-wrap gap-x-3 gap-y-1 text-xs text-muted" role="list">
         {LAYER_ORDER.filter((layer) => layer !== "unknown").map((layer) => <span className="inline-flex items-center gap-1.5" key={layer} role="listitem"><i className="size-2.5 rounded-[3px]" style={{ background: LAYER_META[layer].color }}/>{LAYER_META[layer].title}</span>)}
         <span className="inline-flex items-center gap-1.5" role="listitem"><i className="size-2.5 rounded-[3px] border border-line bg-[repeating-linear-gradient(135deg,transparent_0,transparent_2px,var(--ink)_2px,var(--ink)_3px)] opacity-60"/>cached</span>
         <span className="inline-flex items-center gap-1.5" role="listitem"><i className="h-2.5 w-3 rounded-[3px] bg-ink/30"/>dark ribbon = new tokens</span>
@@ -275,7 +275,7 @@ export function TurnFlow({ focus = null, onSelectNode, onSelectTurn, selected, s
       <div className="relative" style={{ height: layout.height }}>
         <ol>
           {layout.items.map((item) => {
-            if (item.kind === "query") return <li className="absolute inset-x-0 flex items-end truncate px-3 pb-1 text-[11px] font-medium text-muted" key={item.key} style={{ height: HEADER, top: item.top }} title={item.label}>{item.label}</li>;
+            if (item.kind === "query") return <li className="absolute inset-x-0 flex items-end truncate px-3 pb-1 text-xs font-medium text-muted" key={item.key} style={{ height: HEADER, top: item.top }} title={item.label}>{item.label}</li>;
             const turn = turns[item.index];
             const active = item.index === selected;
             const failed = turn.status >= 400;
@@ -293,13 +293,13 @@ export function TurnFlow({ focus = null, onSelectNode, onSelectTurn, selected, s
                 {/* All row text stays in the left column; the right column belongs to the Sankey. */}
                 <span className="min-w-0 pt-2">
                   <span className="flex items-center gap-1.5">
-                    <strong className="text-[13px]">Turn {turn.label}</strong>
-                    {auxiliary ? <span className="rounded-full border border-line px-1.5 font-mono text-[8px] uppercase tracking-wide text-muted" title="Auxiliary request in its own thread, outside the flow">Meta</span> : null}
-                    {failed ? <span className="font-mono text-[9px] font-semibold text-danger">HTTP {turn.status}</span> : null}
-                    <b className="ml-auto font-mono text-[11px] font-semibold">{formatCompact(turn.input)}</b>
+                    <strong className="text-sm">Turn {turn.label}</strong>
+                    {auxiliary ? <span className="rounded-full border border-line px-1.5 font-mono text-xs uppercase tracking-wide text-muted" title="Auxiliary request in its own thread, outside the flow">Meta</span> : null}
+                    {failed ? <span className="font-mono text-xs font-semibold text-danger">HTTP {turn.status}</span> : null}
+                    <b className="ml-auto font-mono text-xs font-semibold">{formatCompact(turn.input)}</b>
                   </span>
-                  <span className="mt-0.5 block truncate text-[11px] text-muted">{turn.step}</span>
-                  <span className="mt-0.5 block truncate font-mono text-[10px] text-muted">{cacheShare(turn)} · {formatDuration(turn.durationMs)}<span className="hidden sm:inline"> · {formatTime(turn.timestamp)}</span></span>
+                  <span className="mt-0.5 block truncate text-xs text-muted">{turn.step}</span>
+                  <span className="mt-0.5 block truncate font-mono text-xs text-muted">{cacheShare(turn)} · {formatDuration(turn.durationMs)}<span className="hidden sm:inline"> · {formatTime(turn.timestamp)}</span></span>
                 </span>
                 <span aria-hidden="true"/>
               </button>

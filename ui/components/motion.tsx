@@ -92,8 +92,8 @@ export function Segmented<T extends string>({ compact = false, label, onChange, 
     return () => observer.disconnect();
   }, []);
 
-  return <div aria-label={label} className={`t-tabs flex rounded-lg bg-canvas font-semibold ${compact ? "p-0.5 text-[10px] [--tabs-inset:2px]" : "p-1 text-[11px] [--tabs-inset:4px]"}`} ref={barRef} role="group">
+  return <div aria-label={label} className="t-tabs tf-control flex items-center rounded-control bg-canvas font-semibold text-sm [--tabs-inset:2px]" ref={barRef} role="group">
     <span aria-hidden="true" className="t-tabs-pill rounded-md bg-panel shadow-sm" ref={pillRef}/>
-    {options.map(([item, text]) => <button aria-pressed={value === item} className={`t-tab rounded-md ${compact ? "min-h-7 px-2.5" : "min-h-8 px-3"} ${value === item ? "text-ink" : "text-muted hover:text-ink"}`} key={item} onClick={() => onChange(item)} type="button">{text}</button>)}
+    {options.map(([item, text]) => <button aria-pressed={value === item} className={`t-tab min-h-11 rounded-md ${compact ? "px-2.5" : "px-3"} ${value === item ? "text-ink" : "text-muted hover:text-ink"}`} key={item} onClick={() => onChange(item)} type="button">{text}</button>)}
   </div>;
 }

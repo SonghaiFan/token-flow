@@ -124,7 +124,7 @@ def test_export_defaults_to_compact_trace(tmp_path, capsys) -> None:
     assert export_main([str(trace_path), "-o", str(compact_path)]) == 0
 
     compact_text = compact_path.read_text(encoding="utf-8")
-    assert "__token_tap_compact_trace__" in compact_text
+    assert "__claude_tap_compact_trace__" in compact_text
     assert load_compact_trace(compact_text)[0]["request"]["body"]["messages"][0]["content"] == "hello from trace"
     assert f"Exported 1 turns to {compact_path}" in capsys.readouterr().out
 
@@ -137,7 +137,7 @@ def test_export_stdout_defaults_to_compact_trace(tmp_path, capsys) -> None:
     assert export_main([str(trace_path)]) == 0
 
     output = capsys.readouterr().out
-    assert "__token_tap_compact_trace__" in output
+    assert "__claude_tap_compact_trace__" in output
     assert load_compact_trace(output)[0]["request"]["body"]["messages"][0]["content"] == "hello from trace"
 
 
@@ -179,8 +179,8 @@ def test_export_compact_trace_is_standalone_and_html_renderable(tmp_path, capsys
     assert export_main([str(trace_path), "--format", "compact", "-o", str(compact_path)]) == 0
 
     compact_text = compact_path.read_text(encoding="utf-8")
-    assert "__token_tap_compact_trace__" in compact_text
-    assert "__token_tap_blob_ref__" in compact_text
+    assert "__claude_tap_compact_trace__" in compact_text
+    assert "__claude_tap_blob_ref__" in compact_text
     assert "shared compact input payload" in compact_text
     assert compact_text.count('"role":"user","content":[{"type":"input_text","text":"shared compact') == 1
     assert len(compact_text.encode("utf-8")) < len(raw_jsonl.encode("utf-8")) * 0.5

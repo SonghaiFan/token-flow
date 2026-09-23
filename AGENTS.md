@@ -59,6 +59,10 @@ composition without requiring users to understand provider protocols.
 - Keep read compatibility for existing `PACKLITE_*`, `.packlite`, and
   `claude-tap` data. The resolver must prefer Token Flow state when it exists,
   then PackLite, then Claude Tap, so historical conversations never disappear.
+- Compact trace marker strings are a persisted data format. Keep writing the
+  established `__claude_tap_*` markers and continue reading both those markers
+  and the temporary `__token_tap_*` spellings introduced during the package
+  rename.
 - Keep the Python namespace `token_tap` and the sibling `claude-tap` checkout
   name. They are implementation/compatibility boundaries, not product copy.
 

@@ -7,6 +7,7 @@ from __future__ import annotations
 import json
 from importlib.metadata import version as _pkg_version
 from pathlib import Path
+from urllib.parse import quote
 
 from token_tap.analysis import costs as _cost_analysis
 from token_tap.analysis import records as _record_analysis
@@ -28,6 +29,7 @@ LAZY_THRESHOLD = 50
 VIEWER_TEMPLATE_PATH = Path(__file__).parents[1] / "viewer.html"
 VIEWER_ASSETS_DIR = Path(__file__).parents[1] / "viewer_assets"
 VIEWER_CSS_PATH = VIEWER_ASSETS_DIR / "viewer.css"
+VIEWER_LOGO_PATH = VIEWER_ASSETS_DIR / "token-flow-logo.svg"
 VIEWER_JS_PATHS = (
     VIEWER_ASSETS_DIR / "token_flow_d3_layouts.min.js",
     VIEWER_ASSETS_DIR / "state.js",
@@ -93,9 +95,13 @@ def _read_viewer_template() -> str:
     if VIEWER_SCRIPT_TEMPLATE_ANCHOR not in html:
         raise ValueError("viewer.html is missing the script asset anchor.")
     css = VIEWER_CSS_PATH.read_text(encoding="utf-8").rstrip()
+    logo_svg = VIEWER_LOGO_PATH.read_text(encoding="utf-8").strip()
+    logo_data_uri = "data:image/svg+xml," + quote(logo_svg, safe="")
     vendor_js = VIEWER_JS_PATHS[0].read_text(encoding="utf-8").rstrip()
     js = "".join(path.read_text(encoding="utf-8") for path in VIEWER_JS_PATHS[1:]).rstrip()
     html = html.replace(VIEWER_STYLE_TEMPLATE_ANCHOR, f"<style>\n{css}\n</style>", 1)
+    html = html.replace("__TOKEN_FLOW_LOGO_SVG__", logo_svg, 1)
+    html = html.replace("__TOKEN_FLOW_LOGO_DATA_URI__", logo_data_uri, 1)
     html = html.replace(
         VIEWER_SCRIPT_TEMPLATE_ANCHOR,
         f"<script>\n{_viewer_i18n_script()}</script>\n<script>\n{vendor_js}\n</script>\n<script>\n{js}\n</script>",

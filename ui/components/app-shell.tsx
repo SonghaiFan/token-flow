@@ -2,7 +2,7 @@
 
 import type { ReactNode } from "react";
 import { CaptureControl } from "./capture-control";
-import { ArrowLeftIcon, ClockIcon, MoonIcon } from "./icons";
+import { ArrowLeftIcon, MoonIcon } from "./icons";
 
 interface AppShellProps {
   children: ReactNode;
@@ -24,14 +24,16 @@ export function AppShell({ children, onBack, title, meta }: AppShellProps) {
       <header className="sticky top-0 z-50 border-b border-line bg-panel/95 backdrop-blur">
         <div className="mx-auto flex min-h-14 max-w-[1600px] items-center gap-2 px-3 sm:px-5">
           {onBack ? (
-            <button aria-label="Back to conversations" className="grid size-11 place-items-center rounded-xl hover:bg-canvas lg:hidden" onClick={onBack}>
+            <button aria-label="Back to conversations" className="tf-icon-control grid place-items-center rounded-control hover:bg-canvas lg:hidden" onClick={onBack}>
               <ArrowLeftIcon />
             </button>
           ) : null}
-          <button className="flex min-h-11 items-center gap-2 rounded-xl px-1" onClick={onBack} type="button">
-            <ClockIcon className="size-6" />
-            <span className="text-[15px] font-semibold tracking-[-0.02em]">Token Flow</span>
-            <span className="hidden rounded-md border border-line bg-canvas px-1.5 py-0.5 font-mono text-[10px] text-muted sm:inline">v0.2</span>
+          <button className="tf-control flex items-center gap-2 rounded-control px-1" onClick={onBack} type="button">
+            <span aria-hidden="true" className="grid size-7 shrink-0 place-items-center rounded-lg bg-white p-0.5">
+              <img alt="" className="size-full object-contain" src="/assets/token-flow-logo.svg" />
+            </span>
+            <span className="text-base font-semibold tracking-[-0.02em]">Token Flow</span>
+            <span className="hidden rounded-md border border-line bg-canvas px-1.5 py-0.5 font-mono text-xs text-muted sm:inline">v0.2</span>
           </button>
           {title ? (
             <>
@@ -42,7 +44,7 @@ export function AppShell({ children, onBack, title, meta }: AppShellProps) {
           <div className="ml-auto flex min-w-0 items-center gap-2">
             {meta ? <div className="hidden min-w-0 items-center gap-4 text-xs text-muted lg:flex">{meta}</div> : null}
             <CaptureControl />
-            <button aria-label="Toggle appearance" className="grid size-11 place-items-center rounded-xl border border-line bg-panel hover:bg-canvas" onClick={toggleTheme} type="button">
+            <button aria-label="Toggle appearance" className="tf-icon-control grid place-items-center rounded-control border border-line bg-panel hover:bg-canvas" onClick={toggleTheme} type="button">
               <MoonIcon className="size-[18px]" />
             </button>
           </div>

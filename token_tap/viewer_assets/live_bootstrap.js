@@ -181,18 +181,19 @@ async function deleteSelectedTraceDate() {
 }
 
 function isCompactBlobRef(value) {
+  const ref = value && (value.__claude_tap_blob_ref__ || value.__token_tap_blob_ref__);
   return value &&
     typeof value === 'object' &&
     !Array.isArray(value) &&
     Object.keys(value).length === 1 &&
-    value.__token_tap_blob_ref__ &&
-    value.__token_tap_blob_ref__.version === 1 &&
-    value.__token_tap_blob_ref__.kind === 'json' &&
-    typeof value.__token_tap_blob_ref__.hash === 'string';
+    ref &&
+    ref.version === 1 &&
+    ref.kind === 'json' &&
+    typeof ref.hash === 'string';
 }
 
 function loadCompactBlobRef(value, blobs, cache) {
-  const ref = value.__token_tap_blob_ref__;
+  const ref = value.__claude_tap_blob_ref__ || value.__token_tap_blob_ref__;
   if (!cache.has(ref.hash)) {
     const blob = blobs[ref.hash];
     if (!blob || blob.kind !== (ref.kind || 'json')) throw new Error(`Missing compact trace blob: ${ref.hash}`);
@@ -267,7 +268,7 @@ function legacyCompactRefPaths(record) {
 
 function materializeCompactRecord(payload, blobs, cache) {
   if (!payload || typeof payload !== 'object' || Array.isArray(payload)) return null;
-  const marker = payload.__token_tap_compact_record__;
+  const marker = payload.__claude_tap_compact_record__ || payload.__token_tap_compact_record__;
   if (!marker) return payload;
   if (marker.version !== 1) throw new Error(`Unsupported compact trace record version: ${marker.version}`);
   let record = payload.record;
@@ -284,7 +285,9 @@ function materializeCompactRecord(payload, blobs, cache) {
 }
 
 function materializeCompactTraceBundle(bundle) {
-  const marker = bundle && typeof bundle === 'object' ? bundle.__token_tap_compact_trace__ : null;
+  const marker = bundle && typeof bundle === 'object'
+    ? bundle.__claude_tap_compact_trace__ || bundle.__token_tap_compact_trace__
+    : null;
   if (!marker) return null;
   if (marker.version !== 1) throw new Error(`Unsupported compact trace bundle version: ${marker.version}`);
   const records = Array.isArray(bundle.records) ? bundle.records : [];

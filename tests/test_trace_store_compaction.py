@@ -6,6 +6,7 @@ import json
 import sqlite3
 from copy import deepcopy
 
+from token_tap.analysis.sessions import select_trace_turn_records
 from token_tap.core.compact_trace import (
     BLOB_KIND_JSON,
     BLOB_REF_MARKER,
@@ -288,8 +289,42 @@ def test_trace_store_reads_legacy_compact_rows_without_refs(trace_db) -> None:
     conn.commit()
 
     assert store.load_records(session_id) == [legacy_record]
+    assert select_trace_turn_records(store.load_records(session_id)) == [legacy_record]
     assert [json.loads(line) for line in store.export_jsonl(session_id).splitlines()] == [legacy_record]
     assert load_compact_trace(store.export_compact(session_id)) == [legacy_record]
+
+
+def test_compact_trace_reads_markers_written_during_package_rename() -> None:
+    renamed_bundle = {
+        "__token_tap_compact_trace__": {"version": 1},
+        "blobs": {"hash": {"kind": "json", "payload": "expanded prompt"}},
+        "records": [
+            {
+                "__token_tap_compact_record__": {
+                    "version": 1,
+                    "refs": [{"path": "/request/body/instructions", "hash": "hash", "bytes": 15}],
+                },
+                "record": {
+                    "turn": 1,
+                    "request": {
+                        "body": {
+                            "instructions": {
+                                "__token_tap_blob_ref__": {
+                                    "version": 1,
+                                    "kind": "json",
+                                    "hash": "hash",
+                                }
+                            }
+                        }
+                    },
+                },
+            }
+        ],
+    }
+
+    assert load_compact_trace(json.dumps(renamed_bundle)) == [
+        {"turn": 1, "request": {"body": {"instructions": "expanded prompt"}}}
+    ]
 
 
 def test_trace_store_migrates_v3_database_and_keeps_full_rows_readable(tmp_path) -> None:

@@ -80,10 +80,10 @@ export function RawJsonTree({ selectedBlockId, selectedPath, turnId, value }: { 
 
   return <div className="border-t border-line">
     <div className="flex flex-wrap items-center justify-between gap-2 border-b border-line bg-panel px-3 py-2 sm:px-4">
-      <p className="text-[10px] text-muted">Exact captured JSON · expanded by default · fold nodes in place</p>
-      <button className="min-h-9 rounded-lg border border-line bg-canvas px-3 text-[10px] font-medium text-muted hover:border-muted hover:text-ink" onClick={() => void copyRaw()} type="button">{copied ? "Copied" : "Copy raw JSON"}</button>
+      <p className="text-xs text-muted">Exact captured JSON · expanded by default · fold nodes in place</p>
+      <button className="tf-control rounded-control border border-line bg-canvas px-3 text-sm font-medium text-muted hover:border-muted hover:text-ink" onClick={() => void copyRaw()} type="button">{copied ? "Copied" : "Copy raw JSON"}</button>
     </div>
-    <div aria-label="Raw captured JSON tree" className="token-flow-raw-json max-h-[68dvh] overflow-auto bg-canvas p-3 font-mono text-[11px] leading-5 text-ink sm:p-4" role="region">
+    <div aria-label="Raw captured JSON tree" className="token-flow-raw-json tf-code max-h-[68dvh] overflow-auto bg-canvas p-3 text-ink sm:p-4" role="region">
       <RawJsonNode blockId={selectedBlockId} path={["trace"]} selectedPath={selectedPath} turnId={turnId} value={value}/>
     </div>
   </div>;

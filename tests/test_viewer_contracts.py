@@ -14,13 +14,13 @@ from typing import Any
 
 import pytest
 
+from tests.conftest import playwright_skip_reason
 from token_tap.core.compact_trace import build_compact_trace_bundle
 from token_tap.server.viewer import (
     _generate_html_viewer,
     _generate_html_viewer_from_compact_bundle,
     _read_viewer_template,
 )
-from tests.conftest import playwright_skip_reason
 
 try:
     from playwright.sync_api import Page, sync_playwright  # noqa: F401
@@ -2424,7 +2424,7 @@ def test_viewer_renders_embedded_and_dropped_compact_trace_bundle(tmp_path: Path
         embedded_state = page.evaluate(
             """() => ({
               entryCount: entries.length,
-              hasBlobRef: JSON.stringify(EMBEDDED_TRACE_COMPACT_DATA).includes('__token_tap_blob_ref__'),
+              hasBlobRef: JSON.stringify(EMBEDDED_TRACE_COMPACT_DATA).includes('__claude_tap_blob_ref__'),
               detailText: document.querySelector('#detail')?.innerText || '',
             })"""
         )

@@ -7,9 +7,15 @@ from collections.abc import Callable
 from hashlib import sha256
 from typing import Any
 
-COMPACT_TRACE_MARKER = "__token_tap_compact_trace__"
-COMPACT_RECORD_MARKER = "__token_tap_compact_record__"
-BLOB_REF_MARKER = "__token_tap_blob_ref__"
+# These markers are part of the persisted trace format. Keep the original
+# spelling for writes and accept both spellings when reading data created
+# during the package rename.
+COMPACT_TRACE_MARKER = "__claude_tap_compact_trace__"
+COMPACT_RECORD_MARKER = "__claude_tap_compact_record__"
+BLOB_REF_MARKER = "__claude_tap_blob_ref__"
+_RENAMED_COMPACT_TRACE_MARKER = "__token_tap_compact_trace__"
+_RENAMED_COMPACT_RECORD_MARKER = "__token_tap_compact_record__"
+_RENAMED_BLOB_REF_MARKER = "__token_tap_blob_ref__"
 BLOB_KIND_JSON = "json"
 COMPACT_RECORD_VERSION = 1
 COMPACT_TRACE_VERSION = 1
@@ -61,7 +67,7 @@ def load_compact_trace(text: str) -> list[dict[str, Any]] | None:
 def is_compact_trace_bundle(value: Any) -> bool:
     if not isinstance(value, dict):
         return False
-    marker = value.get(COMPACT_TRACE_MARKER)
+    marker = value.get(COMPACT_TRACE_MARKER, value.get(_RENAMED_COMPACT_TRACE_MARKER))
     return isinstance(marker, dict) and marker.get("version") == COMPACT_TRACE_VERSION
 
 
@@ -87,7 +93,7 @@ def decode_compact_record_payload(payload: Any, load_blob: Any) -> dict[str, Any
     """Decode one compact record payload using the supplied blob loader."""
     if not isinstance(payload, dict):
         return None
-    marker = payload.get(COMPACT_RECORD_MARKER)
+    marker = payload.get(COMPACT_RECORD_MARKER, payload.get(_RENAMED_COMPACT_RECORD_MARKER))
     if not isinstance(marker, dict):
         return payload
     if marker.get("version") != COMPACT_RECORD_VERSION:
@@ -239,7 +245,7 @@ def _materialize_blob_ref_path(root: dict[str, Any], path: tuple[str, ...], load
 def _replace_blob_ref_at_path(value: Any, path: tuple[str, ...], load_blob: Any) -> tuple[Any, bool]:
     if not path:
         if is_blob_ref(value):
-            return load_blob(value[BLOB_REF_MARKER]), True
+            return load_blob(_blob_ref_payload(value)), True
         return value, False
 
     key = path[0]
@@ -298,12 +304,20 @@ def _replace_path(root: dict[str, Any], path: tuple[str, ...], replacement: Any)
 
 
 def is_blob_ref(value: Any) -> bool:
-    if not isinstance(value, dict) or set(value) != {BLOB_REF_MARKER}:
+    if (
+        not isinstance(value, dict)
+        or len(value) != 1
+        or not any(marker in value for marker in (BLOB_REF_MARKER, _RENAMED_BLOB_REF_MARKER))
+    ):
         return False
-    ref = value[BLOB_REF_MARKER]
+    ref = _blob_ref_payload(value)
     return (
         isinstance(ref, dict)
         and ref.get("version") == COMPACT_RECORD_VERSION
         and ref.get("kind") == BLOB_KIND_JSON
         and isinstance(ref.get("hash"), str)
     )
+
+
+def _blob_ref_payload(value: dict[str, Any]) -> dict[str, Any]:
+    return value.get(BLOB_REF_MARKER) or value.get(_RENAMED_BLOB_REF_MARKER) or {}
