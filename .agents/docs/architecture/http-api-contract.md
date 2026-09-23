@@ -1,7 +1,7 @@
 # Token Flow local HTTP and SSE contract
 
 This is the observed contract implemented by the FastAPI route table in
-`claude_tap/server/app.py` and handlers in `claude_tap/server/api.py` on
+`token_tap/server/app.py` and handlers in `token_tap/server/api.py` on
 2026-09-23. Route names and payloads are not yet frozen against compatibility
 tests. Do not remove or change a route based only on the current Next.js client:
 legacy viewer and CLI callers also exist.
@@ -38,7 +38,7 @@ only needs the session list.
 | `POST /dashboard/quit` | No body. Requires trusted localhost same-origin and `X-Claude-Tap-Dashboard-Token`. | `{ok:true}` | `403` if not dashboard mode or access checks fail. Stops the server asynchronously. No current Next.js UI caller was found. |
 
 The dashboard client obtains the token via health, then sends it on capture
-mutations. `claude_tap/capture/manager.py` owns the child process and status;
+mutations. `token_tap/capture/manager.py` owns the child process and status;
 the API validates requests and translates manager results to HTTP responses.
 The UI polls status. The quit token header is currently named
 `X-Claude-Tap-Dashboard-Token`.
@@ -71,8 +71,8 @@ identified and intentionally migrated.
 | `GET /` | In dashboard mode, serves generated dashboard UI; otherwise serves the legacy live viewer. |
 | `GET /dashboard` | Serves generated dashboard UI. |
 | `GET /dashboard/session/{session_id}` | Serves the generated dashboard shell when available; fallback renders the legacy per-session HTML viewer. |
-| `GET /assets/{asset_path}` | Serves a compiled Vite asset from `claude_tap/static_ui/`; rejects missing paths and traversal. |
-| `GET /_next/{asset_path}` | Serves generated UI assets under `claude_tap/web_ui/_next/`; rejects missing paths and traversal. |
+| `GET /assets/{asset_path}` | Serves a compiled Vite asset from `token_tap/static_ui/`; rejects missing paths and traversal. |
+| `GET /_next/{asset_path}` | Serves generated UI assets under `token_tap/web_ui/_next/`; rejects missing paths and traversal. |
 | `GET /viewer` | Legacy live viewer HTML. |
 | `GET /records` | Current in-memory live records as a JSON array, with backend-attached cost data. |
 | `GET /events` | Legacy live-trace SSE: sends each current in-memory record as a default unnamed `data` event, then streams new records and keepalives. |

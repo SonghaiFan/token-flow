@@ -9,9 +9,9 @@ import aiohttp
 import pytest
 from aiohttp.test_utils import make_mocked_request
 
-from claude_tap.server.api import _record_limit_from_request
-from claude_tap.server.app import LiveViewerServer
-from claude_tap.server.dashboard import (
+from token_tap.server.api import _record_limit_from_request
+from token_tap.server.app import LiveViewerServer
+from token_tap.server.dashboard import (
     DASHBOARD_SUMMARY_VERSION,
     _clean_user_prompt_text,
     _content_text,
@@ -35,10 +35,10 @@ from claude_tap.server.dashboard import (
     read_dashboard_template,
     select_trace_turn_records,
 )
-from claude_tap.storage.history import migrate_legacy_traces
-from claude_tap.storage.trace import TraceWriter
-from claude_tap.storage.trace_log_handler import SQLiteLogHandler
-from claude_tap.storage.trace_store import get_trace_store
+from token_tap.storage.history import migrate_legacy_traces
+from token_tap.storage.trace import TraceWriter
+from token_tap.storage.trace_log_handler import SQLiteLogHandler
+from token_tap.storage.trace_store import get_trace_store
 from tests.conftest import playwright_skip_reason
 
 # The browser tests below launch chromium, which installs separately from the
@@ -1012,7 +1012,7 @@ def test_dashboard_template_exposes_quit_control() -> None:
     template = read_dashboard_template()
 
     assert 'id="logo-version"' in template
-    assert 'const CLAUDE_TAP_VERSION = "";' in template
+    assert 'const token_tap_VERSION = "";' in template
     assert "function applyVersionBadge()" in template
     assert 'id="dashboard-quit"' in template
     assert "quit_dashboard_confirm" in template
@@ -1445,7 +1445,7 @@ async def test_dashboard_server_serves_session_api_and_exports(trace_db, tmp_pat
                 assert resp.status == 200
                 assert resp.content_type == "application/json"
                 body = await resp.text()
-                assert "__claude_tap_compact_trace__" in body
+                assert "__token_tap_compact_trace__" in body
                 assert "req_claude" in body
 
             async with session.get(f"http://127.0.0.1:{port}/api/sessions/{session_id}/export/log") as resp:
@@ -1834,7 +1834,7 @@ async def test_dashboard_server_sse_events(trace_db) -> None:
 
 @pytest.mark.asyncio
 async def test_dashboard_server_quit_route_stops_dashboard(trace_db) -> None:
-    from claude_tap.server.shared_dashboard import CLAUDE_TAP_VERSION, is_dashboard_healthy, wait_for_dashboard_stopped
+    from token_tap.server.shared_dashboard import token_tap_VERSION, is_dashboard_healthy, wait_for_dashboard_stopped
 
     server = LiveViewerServer(port=0, dashboard_mode=True)
     port = await server.start()
@@ -1855,7 +1855,7 @@ async def test_dashboard_server_quit_route_stops_dashboard(trace_db) -> None:
             async with session.get(f"http://127.0.0.1:{port}/dashboard/health") as resp:
                 assert resp.status == 200
                 health = await resp.json()
-                assert health["version"] == CLAUDE_TAP_VERSION
+                assert health["version"] == token_tap_VERSION
                 assert health["quit_token"] == server._dashboard_quit_token
 
             async with session.post(
@@ -1873,7 +1873,7 @@ async def test_dashboard_server_quit_route_stops_dashboard(trace_db) -> None:
 
 @pytest.mark.asyncio
 async def test_dashboard_can_start_and_stop_codex_app_capture(trace_db, monkeypatch) -> None:
-    import claude_tap.capture.manager as capture_manager_module
+    import token_tap.capture.manager as capture_manager_module
 
     class FakeCaptureProcess:
         def __init__(self) -> None:
@@ -1930,7 +1930,7 @@ async def test_dashboard_can_start_and_stop_codex_app_capture(trace_db, monkeypa
 
             assert launched["command"][1:] == (
                 "-m",
-                "claude_tap",
+                "token_tap",
                 "--tap-client",
                 "codexapp",
                 "--tap-no-open",
@@ -1951,7 +1951,7 @@ async def test_dashboard_can_start_and_stop_codex_app_capture(trace_db, monkeypa
 
 @pytest.mark.asyncio
 async def test_dashboard_capture_mutations_require_same_origin_token(trace_db, monkeypatch) -> None:
-    import claude_tap.capture.manager as capture_manager_module
+    import token_tap.capture.manager as capture_manager_module
 
     monkeypatch.setattr(capture_manager_module.sys, "platform", "darwin")
     server = LiveViewerServer(port=0, dashboard_mode=True)
@@ -1976,7 +1976,7 @@ async def test_dashboard_capture_mutations_require_same_origin_token(trace_db, m
 
 @pytest.mark.asyncio
 async def test_dashboard_quit_token_requires_trusted_host_and_origin(trace_db) -> None:
-    from claude_tap.server.shared_dashboard import CLAUDE_TAP_VERSION, is_dashboard_healthy
+    from token_tap.server.shared_dashboard import token_tap_VERSION, is_dashboard_healthy
 
     server = LiveViewerServer(port=0, dashboard_mode=True)
     port = await server.start()
@@ -2000,7 +2000,7 @@ async def test_dashboard_quit_token_requires_trusted_host_and_origin(trace_db) -
                 payload = await resp.json()
                 assert payload["ok"] is True
                 assert payload["dashboard_mode"] is True
-                assert payload["version"] == CLAUDE_TAP_VERSION
+                assert payload["version"] == token_tap_VERSION
                 assert "quit_token" not in payload
 
             async with session.get(f"http://127.0.0.1:{port}/dashboard/health") as resp:
@@ -2411,7 +2411,7 @@ async def test_dashboard_bulk_delete_allows_stale_empty_active_sessions(trace_db
 
 
 def test_finalize_stale_active_sessions_uses_shorter_window_for_empty_sessions(trace_db) -> None:
-    from claude_tap.storage.trace_store import STALE_EMPTY_ACTIVE_SESSION_AFTER
+    from token_tap.storage.trace_store import STALE_EMPTY_ACTIVE_SESSION_AFTER
 
     store = get_trace_store()
     stale_empty_id = store.create_session(client="claude", proxy_mode="reverse")
@@ -2688,7 +2688,7 @@ async def test_trace_writer_persists_records_to_sqlite(trace_db) -> None:
 
 
 def test_get_session_aggregates(trace_db) -> None:
-    from claude_tap.storage.trace_store import SessionQuery
+    from token_tap.storage.trace_store import SessionQuery
 
     store = get_trace_store()
     conn = store._connect()
@@ -2744,7 +2744,7 @@ def test_get_session_aggregates(trace_db) -> None:
 
 
 def test_agent_filter_values_resolves_custom_agents(trace_db) -> None:
-    from claude_tap.server.dashboard import _agent_filter_values
+    from token_tap.server.dashboard import _agent_filter_values
 
     store = get_trace_store()
     conn = store._connect()
@@ -2767,7 +2767,7 @@ def test_agent_filter_values_resolves_custom_agents(trace_db) -> None:
 
 @pytest.mark.asyncio
 async def test_search_uncached_records_fallback(trace_db) -> None:
-    from claude_tap.storage.trace_store import SessionQuery
+    from token_tap.storage.trace_store import SessionQuery
 
     store = get_trace_store()
     conn = store._connect()
@@ -2797,7 +2797,7 @@ async def test_search_uncached_records_fallback(trace_db) -> None:
 
 
 def test_search_matches_compacted_record_blobs(trace_db) -> None:
-    from claude_tap.storage.trace_store import SessionQuery
+    from token_tap.storage.trace_store import SessionQuery
 
     store = get_trace_store()
     session_id = store.create_session(client="claude", proxy_mode="reverse")

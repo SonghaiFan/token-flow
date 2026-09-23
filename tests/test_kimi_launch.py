@@ -4,8 +4,8 @@ import asyncio
 
 import pytest
 
-from claude_tap import parse_args
-from claude_tap.commands.cli import CLIENT_CONFIGS, _reverse_proxy_trace_options, run_client
+from token_tap import parse_args
+from token_tap.commands.cli import CLIENT_CONFIGS, _reverse_proxy_trace_options, run_client
 
 
 class _DummyProc:
@@ -60,7 +60,7 @@ async def test_run_client_kimi_reverse_sets_kimi_base_url(monkeypatch) -> None:
         captured["env"] = kwargs["env"]
         return _DummyProc()
 
-    monkeypatch.setattr("claude_tap.commands.cli.shutil.which", lambda _: "/tmp/kimi")
+    monkeypatch.setattr("token_tap.commands.cli.shutil.which", lambda _: "/tmp/kimi")
     monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_create_subprocess_exec)
     monkeypatch.setattr("sys.stdin.isatty", lambda: False)
 
@@ -83,7 +83,7 @@ async def test_run_client_kimi_capture_only_reverse_sets_multi_provider_urls(mon
         captured["env"] = kwargs["env"]
         return _DummyProc()
 
-    monkeypatch.setattr("claude_tap.commands.cli.shutil.which", lambda _: "/tmp/kimi")
+    monkeypatch.setattr("token_tap.commands.cli.shutil.which", lambda _: "/tmp/kimi")
     monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_create_subprocess_exec)
     monkeypatch.setattr("sys.stdin.isatty", lambda: False)
 

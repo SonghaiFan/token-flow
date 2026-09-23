@@ -3,7 +3,7 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-from claude_tap.server.viewer import VIEWER_JS_PATHS, _generate_html_viewer, _load_viewer_i18n, _read_viewer_template
+from token_tap.server.viewer import VIEWER_JS_PATHS, _generate_html_viewer, _load_viewer_i18n, _read_viewer_template
 
 EXPECTED_LANGUAGES = ["en", "zh-CN", "ja", "ko", "fr", "ar", "de", "ru"]
 CRITICAL_KEYS = [
@@ -37,7 +37,7 @@ def test_viewer_i18n_translates_every_provenance_kind_the_classifier_emits() -> 
     Read from the JS source rather than a hand-written list so adding a pattern
     without its translation fails here instead of shipping a half-English badge.
     """
-    sidebar = (Path(__file__).resolve().parents[1] / "claude_tap/viewer_assets/sidebar.js").read_text(encoding="utf-8")
+    sidebar = (Path(__file__).resolve().parents[1] / "token_tap/viewer_assets/sidebar.js").read_text(encoding="utf-8")
     kinds = {kind for kind in re.findall(r"kind:\s*'([a-z]+)'", sidebar) if kind}
     assert {"recap", "websearch", "compaction", "reminder", "context"} <= kinds
 
@@ -63,13 +63,13 @@ def test_viewer_session_sort_label_uses_conversation_language() -> None:
 def test_read_viewer_template_embeds_i18n_before_main_script() -> None:
     html = _read_viewer_template()
 
-    assert "const __CLAUDE_TAP_I18N__ =" in html
-    assert "const I18N = typeof __CLAUDE_TAP_I18N__" in html
+    assert "const __token_tap_I18N__ =" in html
+    assert "const I18N = typeof __token_tap_I18N__" in html
     assert '"section_system":"System Prompt"' in html
     assert '"section_tools":"工具"' in html
-    assert html.index("const __CLAUDE_TAP_I18N__ =") < html.index("const $ = s =>")
-    assert "CLAUDE_TAP_VIEWER_STYLE" not in html
-    assert "CLAUDE_TAP_VIEWER_SCRIPT" not in html
+    assert html.index("const __token_tap_I18N__ =") < html.index("const $ = s =>")
+    assert "token_tap_VIEWER_STYLE" not in html
+    assert "token_tap_VIEWER_SCRIPT" not in html
     assert "viewer_assets" not in html
 
 
@@ -122,7 +122,7 @@ def test_generate_html_viewer_remains_self_contained_after_i18n_split(tmp_path: 
     _generate_html_viewer(trace_path, html_path)
 
     html = html_path.read_text(encoding="utf-8")
-    assert "const __CLAUDE_TAP_I18N__ =" in html
+    assert "const __token_tap_I18N__ =" in html
     assert "viewer_i18n.json" not in html
     assert "No API calls captured" in html
     assert "EMBEDDED_TRACE_COMPACT_DATA" in html

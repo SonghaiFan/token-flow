@@ -5,8 +5,8 @@ from pathlib import Path
 
 import pytest
 
-from claude_tap import parse_args
-from claude_tap.commands.cli import CLIENT_CONFIGS, _reverse_proxy_trace_options, run_client
+from token_tap import parse_args
+from token_tap.commands.cli import CLIENT_CONFIGS, _reverse_proxy_trace_options, run_client
 
 
 class _DummyProc:
@@ -63,7 +63,7 @@ async def test_run_client_gemini_forward_sets_proxy_ca_and_skips_base_url_envs(m
 
     monkeypatch.delenv("GOOGLE_GEMINI_BASE_URL", raising=False)
     monkeypatch.delenv("GOOGLE_VERTEX_BASE_URL", raising=False)
-    monkeypatch.setattr("claude_tap.commands.cli.shutil.which", lambda _: "/tmp/gemini")
+    monkeypatch.setattr("token_tap.commands.cli.shutil.which", lambda _: "/tmp/gemini")
     monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_create_subprocess_exec)
     monkeypatch.setattr("sys.stdin.isatty", lambda: False)
 
@@ -88,7 +88,7 @@ async def test_run_client_gemini_reverse_sets_both_base_url_envs(monkeypatch) ->
         captured["env"] = kwargs["env"]
         return _DummyProc()
 
-    monkeypatch.setattr("claude_tap.commands.cli.shutil.which", lambda _: "/tmp/gemini")
+    monkeypatch.setattr("token_tap.commands.cli.shutil.which", lambda _: "/tmp/gemini")
     monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_create_subprocess_exec)
     monkeypatch.setattr("sys.stdin.isatty", lambda: False)
 

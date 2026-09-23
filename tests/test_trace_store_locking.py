@@ -15,9 +15,9 @@ from pathlib import Path
 
 import pytest
 
-from claude_tap.commands.cli import _create_trace_writer
-from claude_tap.storage.trace import TraceWriter
-from claude_tap.storage.trace_store import TraceStore
+from token_tap.commands.cli import _create_trace_writer
+from token_tap.storage.trace import TraceWriter
+from token_tap.storage.trace_store import TraceStore
 from tests.conftest import e2e_env, trace_db_path
 from tests.test_e2e import PROJECT_ROOT, run_fake_upstream_in_thread
 
@@ -113,7 +113,7 @@ def _run_locked_proxy_smoke(
         [
             sys.executable,
             "-m",
-            "claude_tap",
+            "token_tap",
             "--tap-output-dir",
             str(trace_dir),
             "--tap-no-live",
@@ -215,7 +215,7 @@ def test_cross_process_writes_share_one_serialized_record_sequence(tmp_path: Pat
 
 
 def test_file_lock_failure_becomes_bounded_sqlite_error(tmp_path: Path, monkeypatch) -> None:
-    from claude_tap.storage import trace_store
+    from token_tap.storage import trace_store
 
     store = TraceStore(tmp_path / "file-lock.sqlite3")
     session_id = store.create_session(client="codex", proxy_mode="reverse")

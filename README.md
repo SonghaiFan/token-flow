@@ -84,14 +84,14 @@ npm run build
 npm run sync
 ```
 
-Vite output is synced to `claude_tap/static_ui/`; do not edit it directly.
+Vite output is synced to `token_tap/static_ui/`; do not edit it directly.
 
 ## Architecture
 
 ```text
 agent client
     ↓ local proxy or transcript watcher
-Python capture backend (`claude_tap/`, compatibility namespace)
+Python capture backend (`token_tap/`, compatibility namespace)
     ↓ SQLite + local HTTP / SSE API
 Compiled static UI, served by the Python process
 ```

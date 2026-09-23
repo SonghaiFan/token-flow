@@ -5,8 +5,8 @@ import json
 
 import pytest
 
-from claude_tap import parse_args
-from claude_tap.commands.cli import (
+from token_tap import parse_args
+from token_tap.commands.cli import (
     CLIENT_CONFIGS,
     _detect_codebuddy_target,
     _reverse_proxy_trace_options,
@@ -65,7 +65,7 @@ async def test_run_client_codebuddy_reverse_sets_base_url_and_settings(monkeypat
         captured["env"] = kwargs["env"]
         return _DummyProc()
 
-    monkeypatch.setattr("claude_tap.commands.cli.shutil.which", lambda _: "/tmp/codebuddy")
+    monkeypatch.setattr("token_tap.commands.cli.shutil.which", lambda _: "/tmp/codebuddy")
     monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_create_subprocess_exec)
     monkeypatch.setattr("sys.stdin.isatty", lambda: False)
 
@@ -95,7 +95,7 @@ async def test_run_client_codebuddy_reverse_does_not_inject_settings_when_alread
         captured["env"] = kwargs["env"]
         return _DummyProc()
 
-    monkeypatch.setattr("claude_tap.commands.cli.shutil.which", lambda _: "/tmp/codebuddy")
+    monkeypatch.setattr("token_tap.commands.cli.shutil.which", lambda _: "/tmp/codebuddy")
     monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_create_subprocess_exec)
     monkeypatch.setattr("sys.stdin.isatty", lambda: False)
 
@@ -123,7 +123,7 @@ async def test_run_client_codebuddy_forward_sets_proxy_env(monkeypatch: pytest.M
         return _DummyProc()
 
     monkeypatch.delenv("CODEBUDDY_BASE_URL", raising=False)
-    monkeypatch.setattr("claude_tap.commands.cli.shutil.which", lambda _: "/tmp/codebuddy")
+    monkeypatch.setattr("token_tap.commands.cli.shutil.which", lambda _: "/tmp/codebuddy")
     monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_create_subprocess_exec)
     monkeypatch.setattr("sys.stdin.isatty", lambda: False)
 
@@ -154,8 +154,8 @@ def test_detect_codebuddy_target_reads_env(monkeypatch: pytest.MonkeyPatch) -> N
 def test_detect_codebuddy_target_falls_back_to_default(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
     monkeypatch.delenv("CODEBUDDY_BASE_URL", raising=False)
     # Ensure no settings files and no endpoint cache are found.
-    monkeypatch.setattr("claude_tap.commands.cli.Path.cwd", lambda: tmp_path)
-    monkeypatch.setattr("claude_tap.commands.cli.Path.home", lambda: tmp_path)
+    monkeypatch.setattr("token_tap.commands.cli.Path.cwd", lambda: tmp_path)
+    monkeypatch.setattr("token_tap.commands.cli.Path.home", lambda: tmp_path)
     assert _detect_codebuddy_target() == "https://copilot.tencent.com/v2"
 
 
@@ -164,8 +164,8 @@ def test_detect_codebuddy_target_reads_login_endpoint_cache(monkeypatch: pytest.
     after login. We honor it so internal/iOA/external users all work without
     setting any env var."""
     monkeypatch.delenv("CODEBUDDY_BASE_URL", raising=False)
-    monkeypatch.setattr("claude_tap.commands.cli.Path.cwd", lambda: tmp_path)
-    monkeypatch.setattr("claude_tap.commands.cli.Path.home", lambda: tmp_path)
+    monkeypatch.setattr("token_tap.commands.cli.Path.cwd", lambda: tmp_path)
+    monkeypatch.setattr("token_tap.commands.cli.Path.home", lambda: tmp_path)
 
     cache_dir = tmp_path / ".codebuddy" / "local_storage"
     cache_dir.mkdir(parents=True)
@@ -180,8 +180,8 @@ def test_detect_codebuddy_target_reads_settings_from_config_dir(monkeypatch: pyt
     the settings lookup must follow the override instead of only reading
     ``~/.codebuddy/settings.json``."""
     monkeypatch.delenv("CODEBUDDY_BASE_URL", raising=False)
-    monkeypatch.setattr("claude_tap.commands.cli.Path.cwd", lambda: tmp_path / "cwd")
-    monkeypatch.setattr("claude_tap.commands.cli.Path.home", lambda: tmp_path / "home")
+    monkeypatch.setattr("token_tap.commands.cli.Path.cwd", lambda: tmp_path / "cwd")
+    monkeypatch.setattr("token_tap.commands.cli.Path.home", lambda: tmp_path / "home")
 
     config_dir = tmp_path / "custom-codebuddy"
     config_dir.mkdir()

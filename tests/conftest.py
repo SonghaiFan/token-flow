@@ -7,8 +7,8 @@ from pathlib import Path
 
 import pytest
 
-from claude_tap.commands.cli_clients import _extend_no_proxy
-from claude_tap.storage.trace_store import get_trace_store, reset_trace_store
+from token_tap.commands.cli_clients import _extend_no_proxy
+from token_tap.storage.trace_store import get_trace_store, reset_trace_store
 
 
 def playwright_skip_reason() -> str | None:
@@ -105,7 +105,7 @@ def temp_trace_dir():
 @pytest.fixture
 def temp_bin_dir():
     """Create a temporary directory for fake binaries."""
-    bin_dir = tempfile.mkdtemp(prefix="claude_tap_bin_")
+    bin_dir = tempfile.mkdtemp(prefix="token_tap_bin_")
     yield bin_dir
     shutil.rmtree(bin_dir, ignore_errors=True)
 

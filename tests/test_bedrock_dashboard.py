@@ -5,7 +5,7 @@ from __future__ import annotations
 import base64
 import json
 
-from claude_tap.server.dashboard import (
+from token_tap.server.dashboard import (
     _bedrock_events,
     _record_model,
     _record_response_text,

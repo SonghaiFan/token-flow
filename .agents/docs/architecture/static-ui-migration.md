@@ -23,8 +23,8 @@ does not require a Node.js server at runtime. Node.js and the frontend toolchain
 remain development-time build dependencies.
 
 `ui/` is the Vite + React frontend source. Its build output is packaged under
-`claude_tap/static_ui/` and served by Python. Generated files in that directory
-must not be edited by hand. The `claude_tap` namespace remains an implementation
+`token_tap/static_ui/` and served by Python. Generated files in that directory
+must not be edited by hand. The `token_tap` namespace remains an implementation
 and compatibility boundary; this migration does not rename it.
 
 ## Ownership
@@ -94,16 +94,16 @@ than duplicate it.
   established before any route is removed.
 
 The dashboard session query, summary, redaction, and display-turn logic now
-lives in `claude_tap/analysis/sessions.py`. Dashboard HTML template loading is
-in `claude_tap/server/dashboard.py`. HTTP handlers call the analysis module
+lives in `token_tap/analysis/sessions.py`. Dashboard HTML template loading is
+in `token_tap/server/dashboard.py`. HTTP handlers call the analysis module
 directly.
 
 FastAPI now owns the public HTTP route table and SSE streaming responses.
-Endpoint handlers live in `claude_tap/server/api.py`, SSE connections and
-notifications live in `claude_tap/server/events.py`, server lifecycle plus
-record broadcast state live in `claude_tap/server/app.py`, and managed capture
-processes are owned by `claude_tap/capture/manager.py`. `LiveViewerServer` is
-exported from `claude_tap.server.app` and the package root. A small
+Endpoint handlers live in `token_tap/server/api.py`, SSE connections and
+notifications live in `token_tap/server/events.py`, server lifecycle plus
+record broadcast state live in `token_tap/server/app.py`, and managed capture
+processes are owned by `token_tap/capture/manager.py`. `LiveViewerServer` is
+exported from `token_tap.server.app` and the package root. A small
 request/response adapter preserves legacy handler response behavior. There is
 one externally bound server and no internal HTTP listener.
 
@@ -112,12 +112,12 @@ Cursor trace records remain readable so removing the importer does not make
 stored conversations disappear.
 
 Provider record parsing, metadata extraction, user-text analysis, cost-index
-attachment, and export normalization live in `claude_tap/analysis/records.py`.
-Model pricing lives in `claude_tap/analysis/pricing.py`, while subscription-cost
-decisions live in `claude_tap/analysis/costs.py`. Bedrock EventStream decoding
-is shared through `claude_tap/core/trace_encoding.py`, so the capture proxies
+attachment, and export normalization live in `token_tap/analysis/records.py`.
+Model pricing lives in `token_tap/analysis/pricing.py`, while subscription-cost
+decisions live in `token_tap/analysis/costs.py`. Bedrock EventStream decoding
+is shared through `token_tap/core/trace_encoding.py`, so the capture proxies
 and session analysis no longer import private parser code from the viewer.
-`claude_tap/server/viewer.py` owns template/assets, pricing metadata
+`token_tap/server/viewer.py` owns template/assets, pricing metadata
 serialization, and legacy HTML generation; it re-exports record-analysis
 helpers for compatibility with existing imports.
 

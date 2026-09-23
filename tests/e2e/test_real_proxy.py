@@ -30,7 +30,7 @@ def _run_packlite(
     cmd = [
         sys.executable,
         "-m",
-        "claude_tap",
+        "token_tap",
         "--tap-output-dir",
         trace_dir,
         "--tap-proxy-mode",
@@ -54,7 +54,7 @@ def _run_packlite(
 
 def _read_trace_records(trace_dir: str) -> list[dict]:
     """Read all trace records from the SQLite database."""
-    from claude_tap.storage.trace_store import get_trace_store
+    from token_tap.storage.trace_store import get_trace_store
 
     store = get_trace_store()
     records = []
@@ -168,7 +168,7 @@ class TestRealProxy:
         assert result.returncode == 0
 
         # Query database to get session ID
-        from claude_tap.storage.trace_store import get_trace_store
+        from token_tap.storage.trace_store import get_trace_store
 
         store = get_trace_store()
         session_rows = store.list_session_rows()
@@ -179,7 +179,7 @@ class TestRealProxy:
         cmd = [
             sys.executable,
             "-m",
-            "claude_tap",
+            "token_tap",
             "export",
             "--session-id",
             session_id,

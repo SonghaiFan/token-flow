@@ -8,8 +8,8 @@ from pathlib import Path
 
 import pytest
 
-from claude_tap import parse_args
-from claude_tap.commands.cli_clients import (
+from token_tap import parse_args
+from token_tap.commands.cli_clients import (
     _KIMI_CODE_SKIP_MIGRATION_MARKER,
     CLIENT_CONFIGS,
     _detect_kimi_code_target,
@@ -300,10 +300,10 @@ api_key = "sk-test"
         captured["env"] = kwargs["env"]
         return _DummyProc()
 
-    monkeypatch.setattr("claude_tap.commands.cli.shutil.which", lambda _: "/tmp/kimi")
+    monkeypatch.setattr("token_tap.commands.cli.shutil.which", lambda _: "/tmp/kimi")
     monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_create_subprocess_exec)
     monkeypatch.setattr("sys.stdin.isatty", lambda: False)
-    monkeypatch.setattr("claude_tap.commands.cli_clients.shutil.rmtree", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr("token_tap.commands.cli_clients.shutil.rmtree", lambda *_args, **_kwargs: None)
 
     code = await run_client(43123, ["--thinking"], client="kimi-code", proxy_mode="reverse")
 
@@ -343,10 +343,10 @@ api_key = "sk-test"
         captured["env"] = kwargs["env"]
         return _DummyProc()
 
-    monkeypatch.setattr("claude_tap.commands.cli.shutil.which", lambda _: "/tmp/kimi")
+    monkeypatch.setattr("token_tap.commands.cli.shutil.which", lambda _: "/tmp/kimi")
     monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_create_subprocess_exec)
     monkeypatch.setattr("sys.stdin.isatty", lambda: False)
-    monkeypatch.setattr("claude_tap.commands.cli_clients.shutil.rmtree", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr("token_tap.commands.cli_clients.shutil.rmtree", lambda *_args, **_kwargs: None)
 
     code = await run_client(
         43123,
@@ -359,7 +359,7 @@ api_key = "sk-test"
     cmd = captured["cmd"]
     assert cmd[1] == "--config-file"
     patched_config = Path(cmd[2])
-    assert "claude_tap_kimi_code_" in str(patched_config)
+    assert "token_tap_kimi_code_" in str(patched_config)
     assert patched_config.read_text(encoding="utf-8").count("http://127.0.0.1:43123") == 1
     assert str(override_config) not in cmd
 
@@ -379,7 +379,7 @@ async def test_run_client_kimi_code_reverse_rewrites_model_env_override(
         captured["env"] = kwargs["env"]
         return _DummyProc()
 
-    monkeypatch.setattr("claude_tap.commands.cli.shutil.which", lambda _: "/tmp/kimi")
+    monkeypatch.setattr("token_tap.commands.cli.shutil.which", lambda _: "/tmp/kimi")
     monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_create_subprocess_exec)
     monkeypatch.setattr("sys.stdin.isatty", lambda: False)
 
@@ -405,7 +405,7 @@ async def test_run_client_kimi_code_reverse_drops_inactive_model_base_url(
         captured["env"] = kwargs["env"]
         return _DummyProc()
 
-    monkeypatch.setattr("claude_tap.commands.cli.shutil.which", lambda _: "/tmp/kimi")
+    monkeypatch.setattr("token_tap.commands.cli.shutil.which", lambda _: "/tmp/kimi")
     monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_create_subprocess_exec)
     monkeypatch.setattr("sys.stdin.isatty", lambda: False)
 
@@ -432,7 +432,7 @@ async def test_run_client_kimi_code_reverse_does_not_proxy_non_kimi_model_env_wi
         captured["env"] = kwargs["env"]
         return _DummyProc()
 
-    monkeypatch.setattr("claude_tap.commands.cli.shutil.which", lambda _: "/tmp/kimi")
+    monkeypatch.setattr("token_tap.commands.cli.shutil.which", lambda _: "/tmp/kimi")
     monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_create_subprocess_exec)
     monkeypatch.setattr("sys.stdin.isatty", lambda: False)
 
@@ -472,7 +472,7 @@ base_url = "https://selected.example.com/coding/v1"
         captured["env"] = kwargs["env"]
         return _DummyProc()
 
-    monkeypatch.setattr("claude_tap.commands.cli.shutil.which", lambda _: "/tmp/kimi")
+    monkeypatch.setattr("token_tap.commands.cli.shutil.which", lambda _: "/tmp/kimi")
     monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_create_subprocess_exec)
     monkeypatch.setattr("sys.stdin.isatty", lambda: False)
 
@@ -496,7 +496,7 @@ def test_kimi_code_migration_already_handled_reads_legacy_marker(
         json.dumps({"target_path": str(real_home)}),
         encoding="utf-8",
     )
-    monkeypatch.setattr("claude_tap.commands.cli_clients.Path.home", lambda: tmp_path)
+    monkeypatch.setattr("token_tap.commands.cli_clients.Path.home", lambda: tmp_path)
 
     assert _kimi_code_migration_already_handled(real_home) is True
     assert _kimi_code_migration_already_handled(tmp_path / "other-home") is False
@@ -517,7 +517,7 @@ def test_prepare_kimi_code_reverse_sandbox_writes_skip_marker_when_migrated(
         '[providers."managed:kimi-code"]\ntype = "kimi"\nbase_url = "https://api.kimi.com/coding/v1"\n',
         encoding="utf-8",
     )
-    monkeypatch.setattr("claude_tap.commands.cli_clients.Path.home", lambda: tmp_path)
+    monkeypatch.setattr("token_tap.commands.cli_clients.Path.home", lambda: tmp_path)
     monkeypatch.setenv("KIMI_CODE_HOME", str(real_home))
 
     sandbox, _, _, _ = _prepare_kimi_code_reverse_sandbox(43123)
@@ -876,7 +876,7 @@ def test_merge_kimi_code_session_index_skips_malformed_rows(tmp_path: Path) -> N
 
 def test_remap_kimi_code_sandbox_paths_rewrites_session_index_and_state(tmp_path: Path) -> None:
     source_home = tmp_path / "home"
-    sandbox = tmp_path / "claude_tap_kimi_code_test"
+    sandbox = tmp_path / "token_tap_kimi_code_test"
     source_home.mkdir()
     sandbox.mkdir()
     session_dir = source_home / "sessions" / "wd_demo_abcd1234" / "session_test-id"

@@ -7,7 +7,7 @@ import json
 
 import pytest
 
-from claude_tap.commands.export import export_main
+from token_tap.commands.export import export_main
 
 
 def _write_trace(tmp_path):
@@ -116,7 +116,7 @@ def test_export_help_mentions_html(capsys) -> None:
 
 
 def test_export_defaults_to_compact_trace(tmp_path, capsys) -> None:
-    from claude_tap.core.compact_trace import load_compact_trace
+    from token_tap.core.compact_trace import load_compact_trace
 
     trace_path = _write_trace(tmp_path)
     compact_path = tmp_path / "trace.json"
@@ -124,25 +124,25 @@ def test_export_defaults_to_compact_trace(tmp_path, capsys) -> None:
     assert export_main([str(trace_path), "-o", str(compact_path)]) == 0
 
     compact_text = compact_path.read_text(encoding="utf-8")
-    assert "__claude_tap_compact_trace__" in compact_text
+    assert "__token_tap_compact_trace__" in compact_text
     assert load_compact_trace(compact_text)[0]["request"]["body"]["messages"][0]["content"] == "hello from trace"
     assert f"Exported 1 turns to {compact_path}" in capsys.readouterr().out
 
 
 def test_export_stdout_defaults_to_compact_trace(tmp_path, capsys) -> None:
-    from claude_tap.core.compact_trace import load_compact_trace
+    from token_tap.core.compact_trace import load_compact_trace
 
     trace_path = _write_trace(tmp_path)
 
     assert export_main([str(trace_path)]) == 0
 
     output = capsys.readouterr().out
-    assert "__claude_tap_compact_trace__" in output
+    assert "__token_tap_compact_trace__" in output
     assert load_compact_trace(output)[0]["request"]["body"]["messages"][0]["content"] == "hello from trace"
 
 
 def test_export_compact_trace_is_standalone_and_html_renderable(tmp_path, capsys) -> None:
-    from claude_tap.core.compact_trace import load_compact_trace
+    from token_tap.core.compact_trace import load_compact_trace
 
     trace_path = tmp_path / "trace.jsonl"
     compact_path = tmp_path / "trace.ctap.json"
@@ -179,8 +179,8 @@ def test_export_compact_trace_is_standalone_and_html_renderable(tmp_path, capsys
     assert export_main([str(trace_path), "--format", "compact", "-o", str(compact_path)]) == 0
 
     compact_text = compact_path.read_text(encoding="utf-8")
-    assert "__claude_tap_compact_trace__" in compact_text
-    assert "__claude_tap_blob_ref__" in compact_text
+    assert "__token_tap_compact_trace__" in compact_text
+    assert "__token_tap_blob_ref__" in compact_text
     assert "shared compact input payload" in compact_text
     assert compact_text.count('"role":"user","content":[{"type":"input_text","text":"shared compact') == 1
     assert len(compact_text.encode("utf-8")) < len(raw_jsonl.encode("utf-8")) * 0.5
@@ -267,7 +267,7 @@ def test_export_json_tolerates_null_request_body_and_stream_text_response(tmp_pa
 
 
 def test_export_accepts_positional_sqlite_session_id(trace_db, tmp_path, capsys) -> None:
-    from claude_tap.storage.trace_store import get_trace_store
+    from token_tap.storage.trace_store import get_trace_store
 
     store = get_trace_store()
     session_id = store.create_session(client="claude", proxy_mode="reverse")
@@ -301,7 +301,7 @@ def test_export_accepts_positional_sqlite_session_id(trace_db, tmp_path, capsys)
 
 
 def test_export_session_html_does_not_materialize_jsonl_file(trace_db, tmp_path, capsys, monkeypatch) -> None:
-    from claude_tap.storage.trace_store import TraceStore, get_trace_store
+    from token_tap.storage.trace_store import TraceStore, get_trace_store
 
     store = get_trace_store()
     session_id = store.create_session(client="codex", proxy_mode="reverse")
@@ -390,7 +390,7 @@ def test_export_prompt_markdown_matches_prompt_snapshot_format(tmp_path, capsys)
 
 
 def test_export_prompt_markdown_accepts_sqlite_session(trace_db, tmp_path) -> None:
-    from claude_tap.storage.trace_store import get_trace_store
+    from token_tap.storage.trace_store import get_trace_store
 
     store = get_trace_store()
     session_id = store.create_session(client="codex", proxy_mode="reverse")
@@ -426,8 +426,8 @@ def test_export_prompt_markdown_accepts_sqlite_session(trace_db, tmp_path) -> No
 
 
 def test_export_prompt_from_session_also_writes_raw_trace(trace_db, tmp_path, capsys) -> None:
-    from claude_tap.commands.cli import _export_prompt_from_session
-    from claude_tap.storage.trace_store import get_trace_store
+    from token_tap.commands.cli import _export_prompt_from_session
+    from token_tap.storage.trace_store import get_trace_store
 
     store = get_trace_store()
     session_id = store.create_session(client="codex", proxy_mode="reverse")
@@ -464,8 +464,8 @@ def test_export_prompt_from_session_also_writes_raw_trace(trace_db, tmp_path, ca
 
 
 def test_export_prompt_from_session_stdout_and_missing_prompt(trace_db, capsys) -> None:
-    from claude_tap.commands.cli import _export_prompt_from_session
-    from claude_tap.storage.trace_store import get_trace_store
+    from token_tap.commands.cli import _export_prompt_from_session
+    from token_tap.storage.trace_store import get_trace_store
 
     store = get_trace_store()
     session_id = store.create_session(client="codex", proxy_mode="reverse")
@@ -495,8 +495,8 @@ def test_export_prompt_from_session_stdout_and_missing_prompt(trace_db, capsys) 
 
 
 def test_export_prompt_from_session_uses_stemmed_trace_name(trace_db, tmp_path) -> None:
-    from claude_tap.commands.cli import _export_prompt_from_session
-    from claude_tap.storage.trace_store import get_trace_store
+    from token_tap.commands.cli import _export_prompt_from_session
+    from token_tap.storage.trace_store import get_trace_store
 
     store = get_trace_store()
     session_id = store.create_session(client="codex", proxy_mode="reverse")

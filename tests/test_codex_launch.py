@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from claude_tap.commands.cli import _reverse_proxy_trace_options, _toml_dotted_key_segment, parse_args, run_client
+from token_tap.commands.cli import _reverse_proxy_trace_options, _toml_dotted_key_segment, parse_args, run_client
 
 
 class _DummyProc:
@@ -62,7 +62,7 @@ def _custom_codex_http_args(provider: str, *tail: str) -> tuple[str, ...]:
 
 @pytest.mark.asyncio
 async def test_output_policy_keeps_client_stdout_and_routes_wrapper_status_to_stderr(monkeypatch, capfd) -> None:
-    from claude_tap.commands import cli
+    from token_tap.commands import cli
 
     async def fake_async_main(_args) -> int:
         cli._print("wrapper status")
@@ -82,7 +82,7 @@ async def test_output_policy_keeps_client_stdout_and_routes_wrapper_status_to_st
 
 @pytest.mark.asyncio
 async def test_output_policy_does_not_redirect_concurrent_host_output(monkeypatch, capsys) -> None:
-    from claude_tap.commands import cli
+    from token_tap.commands import cli
 
     started = asyncio.Event()
     release = asyncio.Event()
@@ -109,7 +109,7 @@ async def test_output_policy_does_not_redirect_concurrent_host_output(monkeypatc
 
 @pytest.mark.asyncio
 async def test_output_policy_keeps_prompt_export_payload_on_stdout(monkeypatch, capsys) -> None:
-    from claude_tap.commands import cli
+    from token_tap.commands import cli
 
     class FakeStore:
         def load_records(self, _session_id):
@@ -156,10 +156,10 @@ async def test_run_client_codex_reverse_forces_builtin_provider_to_http(monkeypa
         captured["env"] = kwargs["env"]
         return _DummyProc()
 
-    monkeypatch.setattr("claude_tap.commands.cli.shutil.which", lambda _: "/tmp/codex")
+    monkeypatch.setattr("token_tap.commands.cli.shutil.which", lambda _: "/tmp/codex")
     monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_create_subprocess_exec)
     monkeypatch.setattr("sys.stdin.isatty", lambda: False)
-    monkeypatch.setattr("claude_tap.commands.cli_clients._codex_selected_provider_base_url_key", lambda _: None)
+    monkeypatch.setattr("token_tap.commands.cli_clients._codex_selected_provider_base_url_key", lambda _: None)
 
     code = await run_client(43123, ["exec", "hello"], client="codex", proxy_mode="reverse")
 
@@ -176,10 +176,10 @@ async def test_run_client_codex_reverse_isolates_legacy_openai_base_override(mon
         captured["cmd"] = cmd
         return _DummyProc()
 
-    monkeypatch.setattr("claude_tap.commands.cli.shutil.which", lambda _: "/tmp/codex")
+    monkeypatch.setattr("token_tap.commands.cli.shutil.which", lambda _: "/tmp/codex")
     monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_create_subprocess_exec)
     monkeypatch.setattr("sys.stdin.isatty", lambda: False)
-    monkeypatch.setattr("claude_tap.commands.cli_clients._codex_selected_provider_base_url_key", lambda _: None)
+    monkeypatch.setattr("token_tap.commands.cli_clients._codex_selected_provider_base_url_key", lambda _: None)
 
     code = await run_client(
         43123,
@@ -205,10 +205,10 @@ async def test_run_client_codex_reverse_replaces_builtin_provider_override(monke
         captured["cmd"] = cmd
         return _DummyProc()
 
-    monkeypatch.setattr("claude_tap.commands.cli.shutil.which", lambda _: "/tmp/codex")
+    monkeypatch.setattr("token_tap.commands.cli.shutil.which", lambda _: "/tmp/codex")
     monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_create_subprocess_exec)
     monkeypatch.setattr("sys.stdin.isatty", lambda: False)
-    monkeypatch.setattr("claude_tap.commands.cli_clients._codex_selected_provider_base_url_key", lambda _: None)
+    monkeypatch.setattr("token_tap.commands.cli_clients._codex_selected_provider_base_url_key", lambda _: None)
 
     code = await run_client(
         43123,
@@ -230,7 +230,7 @@ async def test_run_client_codex_forward_sets_rust_tls_ca_env(monkeypatch) -> Non
         captured["env"] = kwargs["env"]
         return _DummyProc()
 
-    monkeypatch.setattr("claude_tap.commands.cli.shutil.which", lambda _: "/tmp/codex")
+    monkeypatch.setattr("token_tap.commands.cli.shutil.which", lambda _: "/tmp/codex")
     monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_create_subprocess_exec)
     monkeypatch.setattr("sys.stdin.isatty", lambda: False)
 
@@ -471,7 +471,7 @@ async def test_run_client_codex_reverse_injects_selected_provider_base_url(monke
         return _DummyProc()
 
     monkeypatch.setenv("CODEX_HOME", str(codex_home))
-    monkeypatch.setattr("claude_tap.commands.cli.shutil.which", lambda _: "/tmp/codex")
+    monkeypatch.setattr("token_tap.commands.cli.shutil.which", lambda _: "/tmp/codex")
     monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_create_subprocess_exec)
     monkeypatch.setattr("sys.stdin.isatty", lambda: False)
 
@@ -511,7 +511,7 @@ async def test_run_client_codex_reverse_injects_profile_provider_base_url(monkey
         return _DummyProc()
 
     monkeypatch.setenv("CODEX_HOME", str(codex_home))
-    monkeypatch.setattr("claude_tap.commands.cli.shutil.which", lambda _: "/tmp/codex")
+    monkeypatch.setattr("token_tap.commands.cli.shutil.which", lambda _: "/tmp/codex")
     monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_create_subprocess_exec)
     monkeypatch.setattr("sys.stdin.isatty", lambda: False)
 
@@ -548,7 +548,7 @@ async def test_run_client_codex_reverse_injects_profile_file_provider_base_url(m
         return _DummyProc()
 
     monkeypatch.setenv("CODEX_HOME", str(codex_home))
-    monkeypatch.setattr("claude_tap.commands.cli.shutil.which", lambda _: "/tmp/codex")
+    monkeypatch.setattr("token_tap.commands.cli.shutil.which", lambda _: "/tmp/codex")
     monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_create_subprocess_exec)
     monkeypatch.setattr("sys.stdin.isatty", lambda: False)
 
@@ -584,7 +584,7 @@ async def test_run_client_codex_reverse_injects_provider_from_model_provider_ove
         return _DummyProc()
 
     monkeypatch.setenv("CODEX_HOME", str(codex_home))
-    monkeypatch.setattr("claude_tap.commands.cli.shutil.which", lambda _: "/tmp/codex")
+    monkeypatch.setattr("token_tap.commands.cli.shutil.which", lambda _: "/tmp/codex")
     monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_create_subprocess_exec)
     monkeypatch.setattr("sys.stdin.isatty", lambda: False)
 
@@ -628,7 +628,7 @@ async def test_run_client_codex_reverse_quotes_non_ascii_provider_base_url_key(m
         return _DummyProc()
 
     monkeypatch.setenv("CODEX_HOME", str(codex_home))
-    monkeypatch.setattr("claude_tap.commands.cli.shutil.which", lambda _: "/tmp/codex")
+    monkeypatch.setattr("token_tap.commands.cli.shutil.which", lambda _: "/tmp/codex")
     monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_create_subprocess_exec)
     monkeypatch.setattr("sys.stdin.isatty", lambda: False)
 
@@ -661,7 +661,7 @@ async def test_run_client_codex_reverse_replaces_conflicting_provider_overrides(
         return _DummyProc()
 
     monkeypatch.setenv("CODEX_HOME", str(codex_home))
-    monkeypatch.setattr("claude_tap.commands.cli.shutil.which", lambda _: "/tmp/codex")
+    monkeypatch.setattr("token_tap.commands.cli.shutil.which", lambda _: "/tmp/codex")
     monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_create_subprocess_exec)
     monkeypatch.setattr("sys.stdin.isatty", lambda: False)
 

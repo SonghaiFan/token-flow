@@ -3,7 +3,7 @@
 import os
 from unittest.mock import patch
 
-from claude_tap.commands.cli_clients import (
+from token_tap.commands.cli_clients import (
     CLIENT_CONFIGS,
     _detect_claude_target,
     _is_aws_native_bedrock_url,
@@ -84,7 +84,7 @@ class TestDetectClaudeTargetBedrock:
         }
         with patch.dict(os.environ, env, clear=False):
             os.environ.pop("ANTHROPIC_BASE_URL", None)
-            with patch("claude_tap.commands.cli_clients._read_settings_env_base_url", return_value=None):
+            with patch("token_tap.commands.cli_clients._read_settings_env_base_url", return_value=None):
                 assert _detect_claude_target() == "https://api.anthropic.com"
 
     def test_api_aws_bedrock_skipped_falls_to_base_url(self):
@@ -111,7 +111,7 @@ class TestDetectClaudeTargetBedrock:
         with patch.dict(os.environ, {}, clear=False):
             for key in values:
                 os.environ.pop(key, None)
-            with patch("claude_tap.commands.cli_clients._read_settings_env_base_url", side_effect=fake_read):
+            with patch("token_tap.commands.cli_clients._read_settings_env_base_url", side_effect=fake_read):
                 assert _detect_claude_target() == "https://ai-gateway.internal.example.com/bedrock"
 
     def test_base_url_used_when_no_bedrock(self):
@@ -123,7 +123,7 @@ class TestDetectClaudeTargetBedrock:
             os.environ.pop("ANTHROPIC_VERTEX_BASE_URL", None)
             assert _detect_claude_target() == "https://custom.example.com"
 
-    @patch("claude_tap.commands.cli_clients._read_settings_env_base_url", return_value=None)
+    @patch("token_tap.commands.cli_clients._read_settings_env_base_url", return_value=None)
     def test_default_when_no_env(self, mock_read):
         with patch.dict(os.environ, {}, clear=False):
             os.environ.pop("CLAUDE_CODE_USE_BEDROCK", None)
@@ -170,7 +170,7 @@ class TestDetectClaudeTargetVertex:
         with patch.dict(os.environ, {}, clear=False):
             for key in values:
                 os.environ.pop(key, None)
-            with patch("claude_tap.commands.cli_clients._read_settings_env_base_url", side_effect=fake_read):
+            with patch("token_tap.commands.cli_clients._read_settings_env_base_url", side_effect=fake_read):
                 assert _detect_claude_target() == "https://vertex-gateway.internal.example.com/vertex"
 
 
@@ -214,7 +214,7 @@ class TestClaudeConfigProviderEnv:
         cfg = CLIENT_CONFIGS["claude"]
         with patch.dict(os.environ, {"CLAUDE_CODE_USE_BEDROCK": "1", "CLAUDE_CODE_USE_VERTEX": "0"}, clear=False):
             os.environ.pop("ANTHROPIC_BEDROCK_BASE_URL", None)
-            with patch("claude_tap.commands.cli_clients._read_settings_env_base_url", return_value=None):
+            with patch("token_tap.commands.cli_clients._read_settings_env_base_url", return_value=None):
                 env_map = cfg.reverse_base_url_env_map(8080)
         assert env_map["ANTHROPIC_BASE_URL"] == "http://127.0.0.1:8080"
         assert "ANTHROPIC_BEDROCK_BASE_URL" not in env_map
@@ -270,7 +270,7 @@ class TestClaudeConfigProviderEnv:
         with patch.dict(os.environ, {}, clear=False):
             for key in values:
                 os.environ.pop(key, None)
-            with patch("claude_tap.commands.cli_clients._read_settings_env_base_url", side_effect=fake_read):
+            with patch("token_tap.commands.cli_clients._read_settings_env_base_url", side_effect=fake_read):
                 env_map = cfg.reverse_base_url_env_map(8080)
                 assert env_map["ANTHROPIC_BASE_URL"] == "http://127.0.0.1:8080"
                 assert "ANTHROPIC_BEDROCK_BASE_URL" not in env_map
@@ -301,7 +301,7 @@ class TestClaudeConfigProviderEnv:
         cfg = CLIENT_CONFIGS["claude"]
         with patch.dict(os.environ, {"CLAUDE_CODE_USE_VERTEX": "1"}, clear=False):
             os.environ.pop("ANTHROPIC_VERTEX_BASE_URL", None)
-            with patch("claude_tap.commands.cli_clients._read_settings_env_base_url", return_value=None):
+            with patch("token_tap.commands.cli_clients._read_settings_env_base_url", return_value=None):
                 env_map = cfg.reverse_base_url_env_map(8080)
         assert env_map["ANTHROPIC_BASE_URL"] == "http://127.0.0.1:8080"
         assert "ANTHROPIC_VERTEX_BASE_URL" not in env_map

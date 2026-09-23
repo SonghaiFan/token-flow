@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from claude_tap.core.prompt_snapshot import infer_provider, render_prompt_markdown, snapshot_from_records
+from token_tap.core.prompt_snapshot import infer_provider, render_prompt_markdown, snapshot_from_records
 
 
 def _record(path: str, body: dict, *, turn: int = 1) -> dict:
@@ -432,7 +432,7 @@ def test_gemini_tools_accept_raw_tool_without_function_declarations():
 
 
 def test_prompt_md_export_format(tmp_path: Path):
-    from claude_tap.commands.export import export_main
+    from token_tap.commands.export import export_main
 
     trace = tmp_path / "trace.jsonl"
     trace.write_text(

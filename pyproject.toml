@@ -32,22 +32,22 @@ Repository = "https://github.com/SonghaiFan/token-flow"
 Issues = "https://github.com/SonghaiFan/token-flow/issues"
 
 [project.scripts]
-token-flow = "claude_tap.commands.cli:main_entry"
+token-flow = "token_tap.commands.cli:main_entry"
 
 [build-system]
 requires = ["setuptools>=68.0", "setuptools-scm[toml]>=8.0"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools]
-packages = ["claude_tap", "claude_tap.analysis", "claude_tap.capture", "claude_tap.commands", "claude_tap.core", "claude_tap.server", "claude_tap.storage", "claude_tap.viewer_assets"]
+packages = ["token_tap", "token_tap.analysis", "token_tap.capture", "token_tap.commands", "token_tap.core", "token_tap.server", "token_tap.storage", "token_tap.viewer_assets"]
 
 [tool.setuptools_scm]
 version_scheme = "guess-next-dev"
 local_scheme = "no-local-version"
 
 [tool.setuptools.package-data]
-claude_tap = ["dashboard.html", "viewer.html", "viewer_i18n.json", "model_prices.json", "py.typed", "static_ui/*", "static_ui/**/*"]
-"claude_tap.viewer_assets" = ["*.css", "*.js", "*.LICENSE.txt"]
+token_tap = ["dashboard.html", "viewer.html", "viewer_i18n.json", "model_prices.json", "py.typed", "static_ui/*", "static_ui/**/*"]
+"token_tap.viewer_assets" = ["*.css", "*.js", "*.LICENSE.txt"]
 
 [project.optional-dependencies]
 dev = [
@@ -91,7 +91,7 @@ markers = [
 timeout = 60
 
 [tool.coverage.run]
-source = ["claude_tap"]
+source = ["token_tap"]
 branch = true
 omit = ["tests/*"]
 

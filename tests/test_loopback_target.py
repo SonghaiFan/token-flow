@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from claude_tap.commands.cli import _extend_no_proxy, _loopback_target_host
+from token_tap.commands.cli import _extend_no_proxy, _loopback_target_host
 
 
 @pytest.mark.parametrize(

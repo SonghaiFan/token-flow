@@ -9,8 +9,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from claude_tap.commands import cli_clients
-from claude_tap.commands.cli import run_client
+from token_tap.commands import cli_clients
+from token_tap.commands.cli import run_client
 
 
 class _DummyProc:
@@ -403,10 +403,10 @@ async def test_run_client_codexapp_forward_launches_app_with_proxy_env(
         return _DummyProc()
 
     monkeypatch.setattr(
-        "claude_tap.commands.cli_clients._resolve_client_executable",
+        "token_tap.commands.cli_clients._resolve_client_executable",
         lambda client, cfg, client_cmd: "/Applications/Codex.app/Contents/MacOS/Codex",
     )
-    monkeypatch.setattr("claude_tap.commands.cli_clients._codex_app_existing_processes", lambda: [])
+    monkeypatch.setattr("token_tap.commands.cli_clients._codex_app_existing_processes", lambda: [])
     monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_create_subprocess_exec)
     monkeypatch.setattr("sys.stdin.isatty", lambda: False)
 
@@ -450,14 +450,14 @@ async def test_run_client_codexapp_forward_launches_isolated_instance_when_app_r
         return _DummyProc()
 
     monkeypatch.setattr(
-        "claude_tap.commands.cli_clients._resolve_client_executable",
+        "token_tap.commands.cli_clients._resolve_client_executable",
         lambda client, cfg, client_cmd: "/Applications/ChatGPT.app/Contents/MacOS/ChatGPT",
     )
     monkeypatch.setattr(
-        "claude_tap.commands.cli_clients._codex_app_existing_processes",
+        "token_tap.commands.cli_clients._codex_app_existing_processes",
         lambda: ["123 /Applications/ChatGPT.app/Contents/MacOS/ChatGPT"],
     )
-    monkeypatch.setattr("claude_tap.commands.cli_clients._codex_app_isolated_profile_dir", lambda: profile)
+    monkeypatch.setattr("token_tap.commands.cli_clients._codex_app_isolated_profile_dir", lambda: profile)
     monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_create_subprocess_exec)
 
     code = await run_client(43123, [], client="codexapp", proxy_mode="forward")
@@ -492,10 +492,10 @@ async def test_run_client_codexapp_forward_respects_preflighted_isolated_profile
         raise AssertionError("prepare should be skipped when preflighted")
 
     monkeypatch.setattr(
-        "claude_tap.commands.cli_clients._resolve_client_executable",
+        "token_tap.commands.cli_clients._resolve_client_executable",
         lambda client, cfg, client_cmd: "/Applications/Codex.app/Contents/MacOS/Codex",
     )
-    monkeypatch.setattr("claude_tap.commands.cli_clients._prepare_codex_app_forward_launch", fail_prepare)
+    monkeypatch.setattr("token_tap.commands.cli_clients._prepare_codex_app_forward_launch", fail_prepare)
     monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_create_subprocess_exec)
 
     code = await run_client(

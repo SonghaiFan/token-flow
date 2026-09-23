@@ -81,14 +81,14 @@ npm run build
 npm run sync
 ```
 
-不要直接修改 `claude_tap/static_ui/`；它由 sync 命令生成。
+不要直接修改 `token_tap/static_ui/`；它由 sync 命令生成。
 
 ## 架构边界
 
 ```text
 Agent 客户端
     ↓ 本地 proxy 或 transcript watcher
-Python capture backend（`claude_tap/`，兼容 namespace）
+Python capture backend（`token_tap/`，兼容 namespace）
     ↓ SQLite + 本地 HTTP API
 Token Flow 静态 UI（`ui/`）
 ```

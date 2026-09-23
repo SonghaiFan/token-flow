@@ -6,8 +6,8 @@ from pathlib import Path
 
 import pytest
 
-from claude_tap.core.usage import normalize_usage
-from claude_tap.server.viewer import _extract_metadata, _extract_request_messages, _generate_html_viewer
+from token_tap.core.usage import normalize_usage
+from token_tap.server.viewer import _extract_metadata, _extract_request_messages, _generate_html_viewer
 from tests.conftest import playwright_skip_reason
 
 _pw_skip = playwright_skip_reason()

@@ -5,9 +5,9 @@ from pathlib import Path
 
 import pytest
 
-from claude_tap import parse_args
-from claude_tap.capture.proxy import _build_record
-from claude_tap.commands.cli import CLIENT_CONFIGS, run_client
+from token_tap import parse_args
+from token_tap.capture.proxy import _build_record
+from token_tap.commands.cli import CLIENT_CONFIGS, run_client
 
 
 class _DummyProc:
@@ -104,7 +104,7 @@ async def test_run_client_qoder_forward_sets_proxy_ca_and_preserves_args(monkeyp
 
     monkeypatch.delenv("QODER_BASE_URL", raising=False)
     monkeypatch.setenv("NO_PROXY", "example.com")
-    monkeypatch.setattr("claude_tap.commands.cli.shutil.which", lambda _: "/tmp/qodercli")
+    monkeypatch.setattr("token_tap.commands.cli.shutil.which", lambda _: "/tmp/qodercli")
     monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_create_subprocess_exec)
     monkeypatch.setattr("sys.stdin.isatty", lambda: False)
 
@@ -139,7 +139,7 @@ async def test_run_client_qoder_reverse_sets_structural_base_url(monkeypatch: py
         captured["env"] = kwargs["env"]
         return _DummyProc()
 
-    monkeypatch.setattr("claude_tap.commands.cli.shutil.which", lambda _: "/tmp/qodercli")
+    monkeypatch.setattr("token_tap.commands.cli.shutil.which", lambda _: "/tmp/qodercli")
     monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_create_subprocess_exec)
     monkeypatch.setattr("sys.stdin.isatty", lambda: False)
 

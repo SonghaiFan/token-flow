@@ -43,9 +43,9 @@ def installed_packlite():
     project_dir = Path(__file__).parent.parent.parent
     # Verify the package is importable (uv run handles installation)
     try:
-        import claude_tap  # noqa: F401
+        import token_tap  # noqa: F401
     except ImportError:
-        pytest.fail("claude_tap is not installed. Run with: uv run --extra dev pytest tests/e2e/ --run-real-e2e")
+        pytest.fail("token_tap is not installed. Run with: uv run --extra dev pytest tests/e2e/ --run-real-e2e")
     return project_dir
 
 
@@ -67,7 +67,7 @@ def claude_env(installed_packlite, monkeypatch):
 
     # Also set in current process so the test can load records from the same database
     monkeypatch.setenv("TOKEN_FLOW_DB", db_path)
-    from claude_tap.storage import trace_store
+    from token_tap.storage import trace_store
 
     trace_store._store = None
     # Remove nesting detection vars

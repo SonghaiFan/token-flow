@@ -6,14 +6,14 @@ import json
 import sqlite3
 from copy import deepcopy
 
-from claude_tap.core.compact_trace import (
+from token_tap.core.compact_trace import (
     BLOB_KIND_JSON,
     BLOB_REF_MARKER,
     json_blob_payload,
     load_compact_trace,
     make_blob_ref,
 )
-from claude_tap.storage.trace_store import (
+from token_tap.storage.trace_store import (
     COMPACT_RECORD_MARKER,
     TraceStore,
     get_trace_store,

@@ -14,8 +14,8 @@ from typing import Any
 
 import pytest
 
-from claude_tap.core.compact_trace import build_compact_trace_bundle
-from claude_tap.server.viewer import (
+from token_tap.core.compact_trace import build_compact_trace_bundle
+from token_tap.server.viewer import (
     _generate_html_viewer,
     _generate_html_viewer_from_compact_bundle,
     _read_viewer_template,
@@ -1086,7 +1086,7 @@ def _user_input_provenance_records() -> tuple[dict[str, Any], ...]:
                     "content": [
                         {"type": "text", "text": human_ask},
                         {"type": "text", "text": "<system-reminder>Budget is nearly spent.</system-reminder>"},
-                        {"type": "text", "text": "diff --git a/claude_tap/viewer.py b/claude_tap/viewer.py"},
+                        {"type": "text", "text": "diff --git a/token_tap/viewer.py b/token_tap/viewer.py"},
                     ],
                 },
             ],
@@ -2424,7 +2424,7 @@ def test_viewer_renders_embedded_and_dropped_compact_trace_bundle(tmp_path: Path
         embedded_state = page.evaluate(
             """() => ({
               entryCount: entries.length,
-              hasBlobRef: JSON.stringify(EMBEDDED_TRACE_COMPACT_DATA).includes('__claude_tap_blob_ref__'),
+              hasBlobRef: JSON.stringify(EMBEDDED_TRACE_COMPACT_DATA).includes('__token_tap_blob_ref__'),
               detailText: document.querySelector('#detail')?.innerText || '',
             })"""
         )

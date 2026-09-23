@@ -14,8 +14,8 @@ from pathlib import Path
 
 import pytest
 
-from claude_tap.commands.cli import run_client
-from claude_tap.storage.history import _rel_posix
+from token_tap.commands.cli import run_client
+from token_tap.storage.history import _rel_posix
 
 
 class _DummyProc:
@@ -52,7 +52,7 @@ async def test_run_client_does_not_touch_sigtstp_when_absent(monkeypatch) -> Non
         return _DummyProc()
 
     _strip_sigtstp(monkeypatch)
-    monkeypatch.setattr("claude_tap.commands.cli.shutil.which", lambda _: r"C:\Users\x\.local\bin\claude.cmd")
+    monkeypatch.setattr("token_tap.commands.cli.shutil.which", lambda _: r"C:\Users\x\.local\bin\claude.cmd")
     monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_create_subprocess_exec)
     monkeypatch.setattr("sys.stdin.isatty", lambda: False)
 
@@ -70,7 +70,7 @@ async def test_run_client_passes_resolved_path_for_cmd_shim(monkeypatch) -> None
 
     shim_path = r"C:\Users\x\.local\bin\claude.cmd"
     _strip_sigtstp(monkeypatch)
-    monkeypatch.setattr("claude_tap.commands.cli.shutil.which", lambda _: shim_path)
+    monkeypatch.setattr("token_tap.commands.cli.shutil.which", lambda _: shim_path)
     monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_create_subprocess_exec)
     monkeypatch.setattr("sys.stdin.isatty", lambda: False)
 
@@ -124,7 +124,7 @@ async def test_run_client_executes_real_cmd_shim_on_windows(monkeypatch, tmp_pat
     client_script = shim_dir / "fake client.py"
     client_script.write_text(
         "import json, os, pathlib, sys\n"
-        "pathlib.Path(os.environ['CLAUDE_TAP_TEST_CAPTURE']).write_text(\n"
+        "pathlib.Path(os.environ['token_tap_TEST_CAPTURE']).write_text(\n"
         "    json.dumps({'argv': sys.argv[1:], 'base_url': os.environ.get('ANTHROPIC_BASE_URL')}),\n"
         "    encoding='utf-8',\n"
         ")\n",
@@ -136,7 +136,7 @@ async def test_run_client_executes_real_cmd_shim_on_windows(monkeypatch, tmp_pat
     cmd_shim_path.write_text(f'@echo off\r\n"{sys.executable}" "{client_script}" %*\r\n', encoding="utf-8")
 
     _strip_sigtstp(monkeypatch)
-    monkeypatch.setenv("CLAUDE_TAP_TEST_CAPTURE", str(capture_path))
+    monkeypatch.setenv("token_tap_TEST_CAPTURE", str(capture_path))
     monkeypatch.setattr("sys.stdin.isatty", lambda: False)
 
     code = await run_client(
@@ -165,7 +165,7 @@ async def test_run_client_uses_wrapper_provided_claude_binary(monkeypatch, tmp_p
     wrapped_claude = tmp_path / "claude"
     wrapped_claude.write_text("#!/bin/sh\n", encoding="utf-8")
     _strip_sigtstp(monkeypatch)
-    monkeypatch.setattr("claude_tap.commands.cli.shutil.which", lambda _: None)
+    monkeypatch.setattr("token_tap.commands.cli.shutil.which", lambda _: None)
     monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_create_subprocess_exec)
     monkeypatch.setattr("sys.stdin.isatty", lambda: False)
 
@@ -191,7 +191,7 @@ async def test_run_client_does_not_execute_wrapper_directory(monkeypatch, tmp_pa
     wrapped_dir = tmp_path / "claude"
     wrapped_dir.mkdir()
     _strip_sigtstp(monkeypatch)
-    monkeypatch.setattr("claude_tap.commands.cli.shutil.which", lambda _: None)
+    monkeypatch.setattr("token_tap.commands.cli.shutil.which", lambda _: None)
     monkeypatch.setattr(asyncio, "create_subprocess_exec", fail_create_subprocess_exec)
     monkeypatch.setattr("sys.stdin.isatty", lambda: False)
 
@@ -206,7 +206,7 @@ async def test_run_client_does_not_execute_wrapper_directory(monkeypatch, tmp_pa
 
 
 def test_module_import_reconfigures_stdout_to_utf8() -> None:
-    import claude_tap.commands.cli  # noqa: F401
+    import token_tap.commands.cli  # noqa: F401
 
     for stream in (sys.stdout, sys.stderr):
         encoding = getattr(stream, "encoding", "")

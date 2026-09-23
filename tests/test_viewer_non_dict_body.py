@@ -13,7 +13,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from claude_tap.server.viewer import LAZY_THRESHOLD, _extract_metadata, _generate_html_viewer
+from token_tap.server.viewer import LAZY_THRESHOLD, _extract_metadata, _generate_html_viewer
 
 
 def _record(req_body, resp_body, *, request_id: str = "req_1", turn: int = 1) -> dict:

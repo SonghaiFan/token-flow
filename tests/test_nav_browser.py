@@ -87,7 +87,7 @@ TRACE_ENTRIES = [
 
 def _build_test_html() -> str:
     """Generate self-contained viewer HTML with embedded test trace data."""
-    from claude_tap.server.viewer import VIEWER_SCRIPT_ANCHOR, _read_viewer_template
+    from token_tap.server.viewer import VIEWER_SCRIPT_ANCHOR, _read_viewer_template
 
     html = _read_viewer_template()
 

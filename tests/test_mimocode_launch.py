@@ -5,8 +5,8 @@ from pathlib import Path
 
 import pytest
 
-from claude_tap import parse_args
-from claude_tap.commands.cli import CLIENT_CONFIGS, run_client
+from token_tap import parse_args
+from token_tap.commands.cli import CLIENT_CONFIGS, run_client
 
 
 class _DummyProc:
@@ -55,7 +55,7 @@ async def test_run_client_mimocode_forward_sets_node_ca_env(monkeypatch) -> None
         captured["env"] = kwargs["env"]
         return _DummyProc()
 
-    monkeypatch.setattr("claude_tap.commands.cli.shutil.which", lambda _: "/tmp/mimo")
+    monkeypatch.setattr("token_tap.commands.cli.shutil.which", lambda _: "/tmp/mimo")
     monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_create_subprocess_exec)
     monkeypatch.setattr("sys.stdin.isatty", lambda: False)
 
@@ -80,7 +80,7 @@ async def test_run_client_mimocode_reverse_sets_anthropic_base_url(monkeypatch) 
         captured["env"] = kwargs["env"]
         return _DummyProc()
 
-    monkeypatch.setattr("claude_tap.commands.cli.shutil.which", lambda _: "/tmp/mimo")
+    monkeypatch.setattr("token_tap.commands.cli.shutil.which", lambda _: "/tmp/mimo")
     monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_create_subprocess_exec)
     monkeypatch.setattr("sys.stdin.isatty", lambda: False)
 
@@ -107,7 +107,7 @@ async def test_run_client_mimocode_reverse_extends_no_proxy_for_localhost(monkey
         captured["env"] = kwargs["env"]
         return _DummyProc()
 
-    monkeypatch.setattr("claude_tap.commands.cli.shutil.which", lambda _: "/tmp/mimo")
+    monkeypatch.setattr("token_tap.commands.cli.shutil.which", lambda _: "/tmp/mimo")
     monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_create_subprocess_exec)
     monkeypatch.setattr("sys.stdin.isatty", lambda: False)
 
@@ -132,7 +132,7 @@ async def test_run_client_mimocode_capture_only_reverse_sets_multi_provider_urls
         captured["env"] = kwargs["env"]
         return _DummyProc()
 
-    monkeypatch.setattr("claude_tap.commands.cli.shutil.which", lambda _: "/tmp/mimo")
+    monkeypatch.setattr("token_tap.commands.cli.shutil.which", lambda _: "/tmp/mimo")
     monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_create_subprocess_exec)
     monkeypatch.setattr("sys.stdin.isatty", lambda: False)
 

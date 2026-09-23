@@ -5,8 +5,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from claude_tap.core.sse import SSEReassembler
-from claude_tap.server.viewer import _extract_metadata, _extract_request_messages
+from token_tap.core.sse import SSEReassembler
+from token_tap.server.viewer import _extract_metadata, _extract_request_messages
 
 
 def test_sse_reassembler_reconstructs_openai_responses_completed_event() -> None:

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Regenerate claude_tap/model_prices.json from LiteLLM's public price table.
+"""Regenerate token_tap/model_prices.json from LiteLLM's public price table.
 
 The upstream file is ~1.8 MB and covers every model LiteLLM knows, including
 embeddings, rerankers and providers Token Flow cannot proxy. Vendoring it whole
@@ -29,7 +29,7 @@ from pathlib import Path
 from typing import Any
 
 UPSTREAM_PATH = "model_prices_and_context_window.json"
-OUTPUT_PATH = Path(__file__).resolve().parent.parent / "claude_tap" / "model_prices.json"
+OUTPUT_PATH = Path(__file__).resolve().parent.parent / "token_tap" / "model_prices.json"
 
 _SHA_RE = re.compile(r"^[0-9a-f]{7,40}$")
 

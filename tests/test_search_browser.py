@@ -10,7 +10,7 @@ from pathlib import Path
 
 import pytest
 
-from claude_tap.server.viewer import _generate_html_viewer
+from token_tap.server.viewer import _generate_html_viewer
 from tests.conftest import playwright_skip_reason
 
 try:

@@ -6,7 +6,7 @@ import ssl
 
 import pytest
 
-from claude_tap.capture.upstream import (
+from token_tap.capture.upstream import (
     KNOWN_UPSTREAM_ENDPOINT_PATHS,
     build_upstream_url,
     format_upstream_error,

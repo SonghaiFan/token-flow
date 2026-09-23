@@ -5,8 +5,8 @@ from pathlib import Path
 
 import pytest
 
-from claude_tap import parse_args
-from claude_tap.commands.cli import CLIENT_CONFIGS, ClientConfig, run_client
+from token_tap import parse_args
+from token_tap.commands.cli import CLIENT_CONFIGS, ClientConfig, run_client
 
 
 class _DummyProc:
@@ -88,7 +88,7 @@ async def test_run_client_hermes_forward_sets_python_ca_env(monkeypatch) -> None
         captured["env"] = kwargs["env"]
         return _DummyProc()
 
-    monkeypatch.setattr("claude_tap.commands.cli.shutil.which", lambda _: "/tmp/hermes")
+    monkeypatch.setattr("token_tap.commands.cli.shutil.which", lambda _: "/tmp/hermes")
     monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_create_subprocess_exec)
     monkeypatch.setattr("sys.stdin.isatty", lambda: False)
 
@@ -112,7 +112,7 @@ async def test_run_client_codex_forward_still_sets_existing_ca_env(monkeypatch) 
         captured["env"] = kwargs["env"]
         return _DummyProc()
 
-    monkeypatch.setattr("claude_tap.commands.cli.shutil.which", lambda _: "/tmp/codex")
+    monkeypatch.setattr("token_tap.commands.cli.shutil.which", lambda _: "/tmp/codex")
     monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_create_subprocess_exec)
     monkeypatch.setattr("sys.stdin.isatty", lambda: False)
 
@@ -139,7 +139,7 @@ async def _capture_cmd(monkeypatch, which: str = "/tmp/hermes") -> dict[str, obj
         captured["cmd"] = cmd
         return _DummyProc()
 
-    monkeypatch.setattr("claude_tap.commands.cli.shutil.which", lambda _: which)
+    monkeypatch.setattr("token_tap.commands.cli.shutil.which", lambda _: which)
     monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_create_subprocess_exec)
     monkeypatch.setattr("sys.stdin.isatty", lambda: False)
     return captured
@@ -274,7 +274,7 @@ async def test_run_client_hermes_reverse_sets_openai_base_url(monkeypatch) -> No
         captured["env"] = kwargs["env"]
         return _DummyProc()
 
-    monkeypatch.setattr("claude_tap.commands.cli.shutil.which", lambda _: "/tmp/hermes")
+    monkeypatch.setattr("token_tap.commands.cli.shutil.which", lambda _: "/tmp/hermes")
     monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_create_subprocess_exec)
     monkeypatch.setattr("sys.stdin.isatty", lambda: False)
     monkeypatch.delenv("ANTHROPIC_BASE_URL", raising=False)
@@ -302,7 +302,7 @@ async def test_run_client_hermes_capture_only_reverse_sets_multi_provider_urls(m
         captured["env"] = kwargs["env"]
         return _DummyProc()
 
-    monkeypatch.setattr("claude_tap.commands.cli.shutil.which", lambda _: "/tmp/hermes")
+    monkeypatch.setattr("token_tap.commands.cli.shutil.which", lambda _: "/tmp/hermes")
     monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_create_subprocess_exec)
     monkeypatch.setattr("sys.stdin.isatty", lambda: False)
 

@@ -22,7 +22,7 @@ def test_package_and_cli_use_token_flow_identity() -> None:
     project = _pyproject()["project"]
 
     assert project["name"] == "token-flow"
-    assert project["scripts"] == {"token-flow": "claude_tap.commands.cli:main_entry"}
+    assert project["scripts"] == {"token-flow": "token_tap.commands.cli:main_entry"}
     assert _pyproject()["dependency-groups"]["dev"] == ["token-flow[dev]"]
 
 

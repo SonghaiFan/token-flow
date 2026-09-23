@@ -7,8 +7,8 @@ from pathlib import Path
 import pytest
 from aiohttp import web
 
-from claude_tap.server.shared_dashboard import (
-    CLAUDE_TAP_VERSION,
+from token_tap.server.shared_dashboard import (
+    token_tap_VERSION,
     DEFAULT_DASHBOARD_PORT,
     _dashboard_listening_pids_for_port,
     _dashboard_lock_path,
@@ -28,7 +28,7 @@ from claude_tap.server.shared_dashboard import (
     stop_legacy_dashboard_process,
     stop_shared_dashboard,
 )
-from claude_tap.storage.trace_store import resolve_db_path
+from token_tap.storage.trace_store import resolve_db_path
 
 
 async def _start_test_app(app: web.Application) -> tuple[web.AppRunner, int]:
@@ -109,10 +109,10 @@ def test_sync_dashboard_health_uses_proxyless_opener(monkeypatch: pytest.MonkeyP
             return FakeResponse(b'{"sessions":[]}')
 
     db_path = tmp_path / "health.sqlite3"
-    health_json_bytes = f'{{"ok":true,"db_path":"{db_path}","version":"{CLAUDE_TAP_VERSION}"}}'.encode()
+    health_json_bytes = f'{{"ok":true,"db_path":"{db_path}","version":"{token_tap_VERSION}"}}'.encode()
     calls: list[tuple[str, float]] = []
     monkeypatch.setenv("TOKEN_FLOW_DB", str(db_path))
-    monkeypatch.setattr("claude_tap.server.shared_dashboard._LOCAL_DASHBOARD_OPENER", FakeOpener())
+    monkeypatch.setattr("token_tap.server.shared_dashboard._LOCAL_DASHBOARD_OPENER", FakeOpener())
 
     assert _sync_dashboard_healthy_for_current_db("127.0.0.1", 19527) is True
     assert [call[0] for call in calls] == [
@@ -144,9 +144,9 @@ def test_sync_dashboard_health_rejects_broken_sessions_api(monkeypatch: pytest.M
             return FakeResponse(500, b"Internal Server Error")
 
     db_path = tmp_path / "health.sqlite3"
-    health_json_bytes = f'{{"ok":true,"db_path":"{db_path}","version":"{CLAUDE_TAP_VERSION}"}}'.encode()
+    health_json_bytes = f'{{"ok":true,"db_path":"{db_path}","version":"{token_tap_VERSION}"}}'.encode()
     monkeypatch.setenv("TOKEN_FLOW_DB", str(db_path))
-    monkeypatch.setattr("claude_tap.server.shared_dashboard._LOCAL_DASHBOARD_OPENER", FakeOpener())
+    monkeypatch.setattr("token_tap.server.shared_dashboard._LOCAL_DASHBOARD_OPENER", FakeOpener())
 
     assert _sync_dashboard_healthy_for_current_db("127.0.0.1", 19527) is False
 
@@ -172,7 +172,7 @@ def test_sync_dashboard_health_rejects_stale_version(monkeypatch: pytest.MonkeyP
     db_path = tmp_path / "health.sqlite3"
     json_bytes = f'{{"ok":true,"db_path":"{db_path}","version":"0.1.106"}}'.encode()
     monkeypatch.setenv("TOKEN_FLOW_DB", str(db_path))
-    monkeypatch.setattr("claude_tap.server.shared_dashboard._LOCAL_DASHBOARD_OPENER", FakeOpener())
+    monkeypatch.setattr("token_tap.server.shared_dashboard._LOCAL_DASHBOARD_OPENER", FakeOpener())
 
     assert _sync_dashboard_healthy_for_current_db("127.0.0.1", 19527) is False
 
@@ -238,8 +238,8 @@ def test_spawn_dashboard_subprocess_hides_windows_console(
     python_exe.touch()
     pythonw_exe.touch()
 
-    monkeypatch.setattr("claude_tap.server.shared_dashboard.sys.platform", "win32")
-    monkeypatch.setattr("claude_tap.server.shared_dashboard.sys.executable", str(python_exe))
+    monkeypatch.setattr("token_tap.server.shared_dashboard.sys.platform", "win32")
+    monkeypatch.setattr("token_tap.server.shared_dashboard.sys.executable", str(python_exe))
     monkeypatch.setattr(subprocess, "Popen", FakePopen)
     monkeypatch.setattr(subprocess, "CREATE_NO_WINDOW", 0x1000, raising=False)
     monkeypatch.setattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0x2000, raising=False)
@@ -270,8 +270,8 @@ def test_spawn_dashboard_subprocess_hides_windows_console(
 async def test_is_dashboard_healthy_real_server(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     import aiohttp
 
-    from claude_tap.server.app import LiveViewerServer
-    from claude_tap.server.shared_dashboard import wait_for_dashboard_healthy
+    from token_tap.server.app import LiveViewerServer
+    from token_tap.server.shared_dashboard import wait_for_dashboard_healthy
 
     monkeypatch.setenv("TOKEN_FLOW_DB", str(tmp_path / "dashboard.sqlite3"))
 
@@ -290,7 +290,7 @@ async def test_is_dashboard_healthy_real_server(monkeypatch: pytest.MonkeyPatch,
                 assert payload["ok"] is True
                 assert payload["db_path"] == str(resolve_db_path())
                 assert payload["dashboard_mode"] is True
-                assert payload["version"] == CLAUDE_TAP_VERSION
+                assert payload["version"] == token_tap_VERSION
                 assert isinstance(payload["quit_token"], str)
                 assert payload["quit_token"]
         assert await is_dashboard_healthy("127.0.0.1", port) is True
@@ -301,7 +301,7 @@ async def test_is_dashboard_healthy_real_server(monkeypatch: pytest.MonkeyPatch,
 
 @pytest.mark.asyncio
 async def test_stop_shared_dashboard_stops_real_server(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    from claude_tap.server.app import LiveViewerServer
+    from token_tap.server.app import LiveViewerServer
 
     monkeypatch.setenv("TOKEN_FLOW_DB", str(tmp_path / "dashboard.sqlite3"))
 
@@ -319,7 +319,7 @@ async def test_bind_all_dashboard_uses_loopback_for_local_controls(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
-    from claude_tap.server.app import LiveViewerServer
+    from token_tap.server.app import LiveViewerServer
 
     monkeypatch.setenv("TOKEN_FLOW_DB", str(tmp_path / "dashboard.sqlite3"))
 
@@ -407,8 +407,8 @@ async def test_stop_shared_dashboard_handles_post_client_error(monkeypatch: pyte
         def post(self, *_args: object, **_kwargs: object) -> object:
             raise aiohttp.ClientError("post failed")
 
-    monkeypatch.setattr("claude_tap.server.shared_dashboard._dashboard_get_status_and_payload", healthy)
-    monkeypatch.setattr("claude_tap.server.shared_dashboard.aiohttp.ClientSession", FailingSession)
+    monkeypatch.setattr("token_tap.server.shared_dashboard._dashboard_get_status_and_payload", healthy)
+    monkeypatch.setattr("token_tap.server.shared_dashboard.aiohttp.ClientSession", FailingSession)
 
     assert await stop_shared_dashboard("127.0.0.1", 19527) is False
 
@@ -429,12 +429,12 @@ async def test_stop_dashboard_service_falls_back_to_legacy_process(monkeypatch: 
         calls.append("process")
         return True
 
-    monkeypatch.setattr("claude_tap.server.shared_dashboard.stop_shared_dashboard", fake_stop_shared_dashboard)
+    monkeypatch.setattr("token_tap.server.shared_dashboard.stop_shared_dashboard", fake_stop_shared_dashboard)
     monkeypatch.setattr(
-        "claude_tap.server.shared_dashboard.is_legacy_dashboard_healthy", fake_is_legacy_dashboard_healthy
+        "token_tap.server.shared_dashboard.is_legacy_dashboard_healthy", fake_is_legacy_dashboard_healthy
     )
     monkeypatch.setattr(
-        "claude_tap.server.shared_dashboard.stop_legacy_dashboard_process", fake_stop_legacy_dashboard_process
+        "token_tap.server.shared_dashboard.stop_legacy_dashboard_process", fake_stop_legacy_dashboard_process
     )
 
     assert await stop_dashboard_service("127.0.0.1", 19527) is True
@@ -443,7 +443,7 @@ async def test_stop_dashboard_service_falls_back_to_legacy_process(monkeypatch: 
 
 def test_looks_like_legacy_dashboard_command_is_strict() -> None:
     assert _looks_like_legacy_dashboard_command(
-        "/usr/bin/python -m claude_tap dashboard --tap-live-port 19527",
+        "/usr/bin/python -m token_tap dashboard --tap-live-port 19527",
         19527,
     )
     assert _looks_like_legacy_dashboard_command(
@@ -459,11 +459,11 @@ def test_looks_like_legacy_dashboard_command_is_strict() -> None:
         19527,
     )
     assert not _looks_like_legacy_dashboard_command(
-        "/usr/bin/python -m claude_tap dashboard --tap-live-port 3000",
+        "/usr/bin/python -m token_tap dashboard --tap-live-port 3000",
         19527,
     )
     assert not _looks_like_legacy_dashboard_command(
-        "/usr/bin/python -m claude_tap proxy --tap-live-port 19527",
+        "/usr/bin/python -m token_tap proxy --tap-live-port 19527",
         19527,
     )
     assert not _looks_like_legacy_dashboard_command(
@@ -486,8 +486,8 @@ def test_dashboard_listening_pids_uses_lsof(monkeypatch: pytest.MonkeyPatch) -> 
         calls.append(cmd)
         return Result()
 
-    monkeypatch.setattr("claude_tap.server.shared_dashboard.shutil.which", fake_which)
-    monkeypatch.setattr("claude_tap.server.shared_dashboard.subprocess.run", fake_run)
+    monkeypatch.setattr("token_tap.server.shared_dashboard.shutil.which", fake_which)
+    monkeypatch.setattr("token_tap.server.shared_dashboard.subprocess.run", fake_run)
 
     assert _dashboard_listening_pids_for_port(19527) == [111, 222]
     assert calls == [["/usr/bin/lsof", "-nP", "-iTCP:19527", "-sTCP:LISTEN", "-t"]]
@@ -501,14 +501,14 @@ def test_dashboard_listening_pids_falls_back_to_ss(monkeypatch: pytest.MonkeyPat
     def fake_which(name: str) -> str | None:
         return "/usr/bin/ss" if name == "ss" else None
 
-    monkeypatch.setattr("claude_tap.server.shared_dashboard.shutil.which", fake_which)
-    monkeypatch.setattr("claude_tap.server.shared_dashboard.subprocess.run", lambda *_args, **_kwargs: Result())
+    monkeypatch.setattr("token_tap.server.shared_dashboard.shutil.which", fake_which)
+    monkeypatch.setattr("token_tap.server.shared_dashboard.subprocess.run", lambda *_args, **_kwargs: Result())
 
     assert _dashboard_listening_pids_for_port(19527) == [333, 444]
 
 
 def test_dashboard_listening_pids_handles_missing_tools(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr("claude_tap.server.shared_dashboard.shutil.which", lambda _name: None)
+    monkeypatch.setattr("token_tap.server.shared_dashboard.shutil.which", lambda _name: None)
 
     assert _dashboard_listening_pids_for_port(0) == []
     assert _dashboard_listening_pids_for_port(19527) == []
@@ -517,12 +517,12 @@ def test_dashboard_listening_pids_handles_missing_tools(monkeypatch: pytest.Monk
 def test_dashboard_process_command_reads_linux_proc(monkeypatch: pytest.MonkeyPatch) -> None:
     def fake_read_bytes(path: Path) -> bytes:
         assert str(path) == "/proc/123/cmdline"
-        return b"python\0-m\0claude_tap\0dashboard\0"
+        return b"python\0-m\0token_tap\0dashboard\0"
 
-    monkeypatch.setattr("claude_tap.server.shared_dashboard.sys.platform", "linux")
+    monkeypatch.setattr("token_tap.server.shared_dashboard.sys.platform", "linux")
     monkeypatch.setattr("pathlib.Path.read_bytes", fake_read_bytes)
 
-    assert _dashboard_process_command(123) == "python -m claude_tap dashboard"
+    assert _dashboard_process_command(123) == "python -m token_tap dashboard"
 
 
 def test_dashboard_process_command_falls_back_to_ps(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -533,22 +533,22 @@ def test_dashboard_process_command_falls_back_to_ps(monkeypatch: pytest.MonkeyPa
     def fake_which(name: str) -> str | None:
         return "/bin/ps" if name == "ps" else None
 
-    monkeypatch.setattr("claude_tap.server.shared_dashboard.sys.platform", "darwin")
-    monkeypatch.setattr("claude_tap.server.shared_dashboard.shutil.which", fake_which)
-    monkeypatch.setattr("claude_tap.server.shared_dashboard.subprocess.run", lambda *_args, **_kwargs: Result())
+    monkeypatch.setattr("token_tap.server.shared_dashboard.sys.platform", "darwin")
+    monkeypatch.setattr("token_tap.server.shared_dashboard.shutil.which", fake_which)
+    monkeypatch.setattr("token_tap.server.shared_dashboard.subprocess.run", lambda *_args, **_kwargs: Result())
 
     assert _dashboard_process_command(123) == "packlite dashboard --tap-live-port 19527"
 
 
 def test_terminate_legacy_dashboard_pids_filters_commands(monkeypatch: pytest.MonkeyPatch) -> None:
     commands = {
-        111: "/usr/bin/python -m claude_tap dashboard --tap-live-port 19527",
-        222: "/usr/bin/python -m claude_tap proxy --tap-live-port 19527",
+        111: "/usr/bin/python -m token_tap dashboard --tap-live-port 19527",
+        222: "/usr/bin/python -m token_tap proxy --tap-live-port 19527",
     }
     killed: list[tuple[int, signal.Signals]] = []
 
-    monkeypatch.setattr("claude_tap.server.shared_dashboard._dashboard_process_command", commands.__getitem__)
-    monkeypatch.setattr("claude_tap.server.shared_dashboard.os.kill", lambda pid, sig: killed.append((pid, sig)))
+    monkeypatch.setattr("token_tap.server.shared_dashboard._dashboard_process_command", commands.__getitem__)
+    monkeypatch.setattr("token_tap.server.shared_dashboard.os.kill", lambda pid, sig: killed.append((pid, sig)))
 
     assert _terminate_legacy_dashboard_pids([111, 222], 19527) is True
     assert killed == [(111, signal.SIGTERM)]
@@ -570,9 +570,9 @@ async def test_stop_legacy_dashboard_process_terminates_and_waits(monkeypatch: p
         calls.append(("wait", (host, port)))
         return True
 
-    monkeypatch.setattr("claude_tap.server.shared_dashboard._dashboard_listening_pids_for_port", fake_listening_pids)
-    monkeypatch.setattr("claude_tap.server.shared_dashboard._terminate_legacy_dashboard_pids", fake_terminate)
-    monkeypatch.setattr("claude_tap.server.shared_dashboard.wait_for_dashboard_stopped", fake_wait_stopped)
+    monkeypatch.setattr("token_tap.server.shared_dashboard._dashboard_listening_pids_for_port", fake_listening_pids)
+    monkeypatch.setattr("token_tap.server.shared_dashboard._terminate_legacy_dashboard_pids", fake_terminate)
+    monkeypatch.setattr("token_tap.server.shared_dashboard.wait_for_dashboard_stopped", fake_wait_stopped)
 
     assert await stop_legacy_dashboard_process("127.0.0.1", 19527) is True
     assert calls == [
@@ -592,7 +592,7 @@ async def test_is_dashboard_healthy_checks_session_data_api(
     app = web.Application()
 
     async def health(request: web.Request) -> web.Response:
-        return web.json_response({"ok": True, "db_path": str(resolve_db_path()), "version": CLAUDE_TAP_VERSION})
+        return web.json_response({"ok": True, "db_path": str(resolve_db_path()), "version": token_tap_VERSION})
 
     async def sessions(request: web.Request) -> web.Response:
         nonlocal sessions_seen
@@ -618,7 +618,7 @@ async def test_is_dashboard_healthy_rejects_broken_session_data_api(
     app = web.Application()
 
     async def health(request: web.Request) -> web.Response:
-        return web.json_response({"ok": True, "db_path": str(resolve_db_path()), "version": CLAUDE_TAP_VERSION})
+        return web.json_response({"ok": True, "db_path": str(resolve_db_path()), "version": token_tap_VERSION})
 
     async def sessions(request: web.Request) -> web.Response:
         return web.Response(status=500, text="Internal Server Error")
@@ -658,7 +658,7 @@ async def test_is_dashboard_healthy_rejects_different_database(monkeypatch: pyte
 
     async def health(request: web.Request) -> web.Response:
         return web.json_response(
-            {"ok": True, "db_path": str(tmp_path / "other.sqlite3"), "version": CLAUDE_TAP_VERSION}
+            {"ok": True, "db_path": str(tmp_path / "other.sqlite3"), "version": token_tap_VERSION}
         )
 
     app.router.add_get("/dashboard/health", health)
@@ -696,8 +696,8 @@ async def test_ensure_shared_dashboard_already_healthy_does_not_reopen_browser(
         return True
 
     migrated: list[Path] = []
-    monkeypatch.setattr("claude_tap.server.shared_dashboard.is_dashboard_healthy", mock_true)
-    monkeypatch.setattr("claude_tap.storage.history.migrate_legacy_traces", migrated.append)
+    monkeypatch.setattr("token_tap.server.shared_dashboard.is_dashboard_healthy", mock_true)
+    monkeypatch.setattr("token_tap.storage.history.migrate_legacy_traces", migrated.append)
 
     opened = []
 
@@ -740,13 +740,13 @@ async def test_ensure_shared_dashboard_stops_stale_dashboard_before_spawn(
         calls.append(("wait", None))
         return True
 
-    monkeypatch.setattr("claude_tap.server.shared_dashboard.is_dashboard_healthy", fake_is_dashboard_healthy)
-    monkeypatch.setattr("claude_tap.server.shared_dashboard.stop_dashboard_service", fake_stop_dashboard_service)
+    monkeypatch.setattr("token_tap.server.shared_dashboard.is_dashboard_healthy", fake_is_dashboard_healthy)
+    monkeypatch.setattr("token_tap.server.shared_dashboard.stop_dashboard_service", fake_stop_dashboard_service)
     monkeypatch.setattr(
-        "claude_tap.server.shared_dashboard._spawn_dashboard_subprocess_if_needed", fake_spawn_if_needed
+        "token_tap.server.shared_dashboard._spawn_dashboard_subprocess_if_needed", fake_spawn_if_needed
     )
     monkeypatch.setattr(
-        "claude_tap.server.shared_dashboard.wait_for_dashboard_healthy", fake_wait_for_dashboard_healthy
+        "token_tap.server.shared_dashboard.wait_for_dashboard_healthy", fake_wait_for_dashboard_healthy
     )
 
     url, spawned = await ensure_shared_dashboard(
@@ -772,8 +772,8 @@ async def test_ensure_shared_dashboard_reports_unstoppable_stale_dashboard(
     async def fake_stop_dashboard_service(_host: str, _port: int) -> bool:
         return False
 
-    monkeypatch.setattr("claude_tap.server.shared_dashboard.is_dashboard_healthy", fake_is_dashboard_healthy)
-    monkeypatch.setattr("claude_tap.server.shared_dashboard.stop_dashboard_service", fake_stop_dashboard_service)
+    monkeypatch.setattr("token_tap.server.shared_dashboard.is_dashboard_healthy", fake_is_dashboard_healthy)
+    monkeypatch.setattr("token_tap.server.shared_dashboard.stop_dashboard_service", fake_stop_dashboard_service)
 
     with pytest.raises(RuntimeError, match="outdated Token Flow dashboard"):
         await ensure_shared_dashboard(
@@ -793,12 +793,12 @@ async def test_ensure_shared_dashboard_migrates_after_lock_time_reuse(
         return False
 
     migrated: list[Path] = []
-    monkeypatch.setattr("claude_tap.server.shared_dashboard.is_dashboard_healthy", mock_false)
-    monkeypatch.setattr("claude_tap.server.shared_dashboard.is_legacy_dashboard_healthy", mock_false)
+    monkeypatch.setattr("token_tap.server.shared_dashboard.is_dashboard_healthy", mock_false)
+    monkeypatch.setattr("token_tap.server.shared_dashboard.is_legacy_dashboard_healthy", mock_false)
     monkeypatch.setattr(
-        "claude_tap.server.shared_dashboard._spawn_dashboard_subprocess_if_needed", lambda h, p, d: False
+        "token_tap.server.shared_dashboard._spawn_dashboard_subprocess_if_needed", lambda h, p, d: False
     )
-    monkeypatch.setattr("claude_tap.server.shared_dashboard._migrate_legacy_traces", migrated.append)
+    monkeypatch.setattr("token_tap.server.shared_dashboard._migrate_legacy_traces", migrated.append)
 
     opened: list[str] = []
 
@@ -831,9 +831,9 @@ async def test_ensure_shared_dashboard_spawns(monkeypatch: pytest.MonkeyPatch, t
     async def mock_legacy_false(h: str, p: int) -> bool:
         return False
 
-    monkeypatch.setattr("claude_tap.server.shared_dashboard.is_dashboard_healthy", mock_health)
-    monkeypatch.setattr("claude_tap.server.shared_dashboard.is_legacy_dashboard_healthy", mock_legacy_false)
-    monkeypatch.setattr("claude_tap.server.shared_dashboard._spawn_dashboard_subprocess", lambda h, p, d: None)
+    monkeypatch.setattr("token_tap.server.shared_dashboard.is_dashboard_healthy", mock_health)
+    monkeypatch.setattr("token_tap.server.shared_dashboard.is_legacy_dashboard_healthy", mock_legacy_false)
+    monkeypatch.setattr("token_tap.server.shared_dashboard._spawn_dashboard_subprocess", lambda h, p, d: None)
 
     opened = []
 
@@ -863,10 +863,10 @@ async def test_ensure_shared_dashboard_timeout_raises_error(monkeypatch: pytest.
     async def mock_wait_false(h: str, p: int, **kw: object) -> bool:
         return False
 
-    monkeypatch.setattr("claude_tap.server.shared_dashboard.is_dashboard_healthy", mock_false)
-    monkeypatch.setattr("claude_tap.server.shared_dashboard.is_legacy_dashboard_healthy", mock_false)
-    monkeypatch.setattr("claude_tap.server.shared_dashboard.wait_for_dashboard_healthy", mock_wait_false)
-    monkeypatch.setattr("claude_tap.server.shared_dashboard._spawn_dashboard_subprocess", lambda h, p, d: None)
+    monkeypatch.setattr("token_tap.server.shared_dashboard.is_dashboard_healthy", mock_false)
+    monkeypatch.setattr("token_tap.server.shared_dashboard.is_legacy_dashboard_healthy", mock_false)
+    monkeypatch.setattr("token_tap.server.shared_dashboard.wait_for_dashboard_healthy", mock_wait_false)
+    monkeypatch.setattr("token_tap.server.shared_dashboard._spawn_dashboard_subprocess", lambda h, p, d: None)
 
     with pytest.raises(RuntimeError, match="Failed to start shared dashboard"):
         await ensure_shared_dashboard(

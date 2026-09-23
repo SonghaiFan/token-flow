@@ -5,7 +5,7 @@ import { fileURLToPath } from "node:url";
 const scriptDirectory = dirname(fileURLToPath(import.meta.url));
 const uiDirectory = resolve(scriptDirectory, "..");
 const source = resolve(uiDirectory, "dist");
-const destination = resolve(uiDirectory, "..", "claude_tap", "static_ui");
+const destination = resolve(uiDirectory, "..", "token_tap", "static_ui");
 
 if (!existsSync(resolve(source, "index.html"))) {
   throw new Error("Run `npm run build:vite` before syncing the Vite UI.");
