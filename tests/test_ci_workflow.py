@@ -26,7 +26,7 @@ def test_package_and_cli_use_token_flow_identity() -> None:
     assert _pyproject()["dependency-groups"]["dev"] == ["token-flow[dev]"]
 
 
-def test_ci_checks_python_and_next_ui() -> None:
+def test_ci_checks_python_and_vite_ui() -> None:
     workflow = _workflow_text()
 
     assert "ruff check ." in workflow

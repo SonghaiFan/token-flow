@@ -1652,7 +1652,7 @@ def test_parse_args(monkeypatch, tmp_path):
 async def test_async_main_live_viewer_default_opens_when_allowed(monkeypatch, tmp_path, capsys):
     """Default live viewer starts, and --tap-no-open controls browser opening."""
     from claude_tap import async_main, parse_args
-    from claude_tap.live import LiveViewerServer
+    from claude_tap.server.app import LiveViewerServer
 
     opened_urls = []
     spawned_servers: list[LiveViewerServer] = []
@@ -1727,7 +1727,7 @@ async def test_async_main_stop_hint_includes_custom_dashboard_address(monkeypatc
 async def test_async_main_reuses_existing_dashboard_without_reopening_browser(monkeypatch, tmp_path):
     """A second Token Flow run should attach to an existing dashboard without opening another tab."""
     from claude_tap import async_main, parse_args
-    from claude_tap.live import LiveViewerServer
+    from claude_tap.server.app import LiveViewerServer
 
     opened_urls = []
     spawned_servers: list[LiveViewerServer] = []
@@ -5257,7 +5257,8 @@ async def test_dashboard_main_serves_viewer(monkeypatch, tmp_path):
                 assert resp.status == 200
                 html = await resp.text()
                 assert "Token Flow" in html
-                assert "/_next/static/" in html
+                assert 'type="module"' in html
+                assert "/assets/index-" in html
     finally:
         task.cancel()
         try:
@@ -5301,7 +5302,8 @@ async def test_dashboard_main_bind_all_opens_loopback_url(monkeypatch, tmp_path)
                 assert resp.status == 200
                 html = await resp.text()
                 assert "Token Flow" in html
-                assert "/_next/static/" in html
+                assert 'type="module"' in html
+                assert "/assets/index-" in html
                 assert "DASHBOARD_QUIT_TOKEN" not in html
     finally:
         task.cancel()

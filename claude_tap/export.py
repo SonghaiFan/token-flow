@@ -7,10 +7,11 @@ import json
 import sys
 from pathlib import Path
 
+from claude_tap.analysis.records import _normalize_record_for_viewer
 from claude_tap.compact_trace import build_compact_trace_bundle, dump_compact_trace, is_compact_trace_bundle
 from claude_tap.prompt_snapshot import render_prompt_markdown, snapshot_from_records
 from claude_tap.usage import normalize_usage
-from claude_tap.viewer import _generate_html_viewer_from_compact_bundle, _normalize_record_for_viewer
+from claude_tap.viewer import _generate_html_viewer_from_compact_bundle
 
 
 def _as_dict(value: object) -> dict:

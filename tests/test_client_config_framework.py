@@ -24,7 +24,6 @@ SUPPORTED_CLIENTS = {
     "openclaw",
     "pi",
     "hermes",
-    "cursor",
     "qoder",
     "codebuddy",
 }
@@ -46,7 +45,6 @@ SUPPORTED_DEFAULT_PROXY_MODES = {
     "openclaw": "reverse",
     "pi": "forward",
     "hermes": "forward",
-    "cursor": "forward",
     "qoder": "forward",
     "codebuddy": "reverse",
 }
@@ -140,7 +138,11 @@ def test_codexapp_declares_raw_backend_capture_mode() -> None:
         "/backend-api/codex/responses",
         "/v1/responses",
     )
-    assert cfg.transcript_only is False
+
+
+def test_parse_args_rejects_removed_cursor_client() -> None:
+    with pytest.raises(SystemExit):
+        parse_args(["--tap-client", "cursor"])
 
 
 def test_parse_args_codexapp_accepts_forward_proxy_mode() -> None:

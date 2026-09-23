@@ -55,9 +55,9 @@ from claude_tap.proxy import (
 )
 from claude_tap.sse import SSEReassembler
 from claude_tap.trace import TraceWriter
+from claude_tap.trace_encoding import _decode_bedrock_eventstream_events
 from claude_tap.upstream import build_upstream_url, format_upstream_error
 from claude_tap.usage import normalize_usage
-from claude_tap.viewer import _decode_bedrock_eventstream_events
 from claude_tap.ws_proxy import (
     _COMPLETED_RESPONSE_KEY_CACHE_SIZE,
     _build_ws_record,

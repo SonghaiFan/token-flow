@@ -342,9 +342,6 @@ class ClientConfig:
     forward_trace_methods: tuple[str, ...] = ()
     forward_trace_path_prefixes: tuple[str, ...] = ()
     forward_trace_path_suffixes: tuple[str, ...] = ()
-    # Transcript-only clients are observed from local session logs instead of a
-    # spawned process and do not need a reverse or forward proxy.
-    transcript_only: bool = False
     # Extra client product endpoints accepted by the reverse proxy. Keep these
     # client-scoped so one client's control-plane routes do not broaden every
     # reverse proxy instance.
@@ -553,19 +550,6 @@ CLIENT_CONFIGS: dict[str, ClientConfig] = {
         # OPENAI_BASE_URL. Default to forward proxy capture.
         default_proxy_mode="forward",
     ),
-    "cursor": ClientConfig(
-        cmd="cursor-agent",
-        label="Cursor",
-        install_url="https://cursor.com/cli",
-        # Neither reverse nor forward proxy: conversations come only from local
-        # agent-transcripts JSONL (CLI + IDE Agent). default_proxy_mode is unused
-        # when transcript_only=True (kept for argparse ClientConfig shape).
-        base_url_env="CURSOR_BASE_URL",
-        base_url_suffix="",
-        default_target="https://api2.cursor.sh",
-        default_proxy_mode="forward",
-        transcript_only=True,
-    ),
     "qoder": ClientConfig(
         cmd="qodercli",
         label="Qoder CLI",
@@ -695,9 +679,7 @@ async def run_client(
     cmd_args = _maybe_rewrite_hermes_gateway_start(client, cmd_args)
     kimi_code_sandbox: Path | None = None
     kimi_code_source_home: Path | None = None
-    # Transcript-only clients (Cursor) are observed from local logs; do not inject
-    # HTTPS_PROXY/CA even when the CLI default proxy_mode string is "forward".
-    inject_proxy = not cfg.transcript_only
+    inject_proxy = True
 
     if inject_proxy and proxy_mode == "forward":
         if client == "dsh" and not _node_supports_env_proxy(env):
@@ -816,9 +798,7 @@ async def run_client(
 
     cmd = [resolved_cmd] + cmd_args
     _print(f"\n🚀 Starting {cfg.label}: {' '.join([display_cmd, *cmd_args])}")
-    if cfg.transcript_only:
-        _print("   Mode: local agent-transcripts (no HTTPS_PROXY)")
-    elif proxy_mode == "forward":
+    if proxy_mode == "forward":
         _print(f"   HTTPS_PROXY=http://127.0.0.1:{port}")
         for env_key in cfg.forward_base_url_envs:
             _print(f"   {env_key}={cfg.reverse_base_url(port)}")

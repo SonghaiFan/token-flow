@@ -34,7 +34,8 @@ from claude_tap.dashboard import (
     select_trace_turn_records,
 )
 from claude_tap.history import migrate_legacy_traces
-from claude_tap.live import LiveViewerServer, _record_limit_from_request
+from claude_tap.server.api import _record_limit_from_request
+from claude_tap.server.app import LiveViewerServer
 from claude_tap.trace import TraceWriter
 from claude_tap.trace_log_handler import SQLiteLogHandler
 from claude_tap.trace_store import get_trace_store
@@ -1368,7 +1369,11 @@ async def test_dashboard_server_serves_session_api_and_exports(trace_db, tmp_pat
                 html = await resp.text()
                 assert "Token Flow" in html
                 assert "Understand what your coding agent sends to the model" in html
-                assert "/_next/static/" in html
+                assert "/assets/index-" in html
+                entry_asset = html.split('src="')[1].split('"')[0]
+                async with session.get(f"http://127.0.0.1:{port}{entry_asset}") as asset_resp:
+                    assert asset_resp.status == 200
+                    assert asset_resp.content_type == "text/javascript"
 
             async with session.get(f"http://127.0.0.1:{port}/api/sessions") as resp:
                 assert resp.status == 200
@@ -1389,7 +1394,7 @@ async def test_dashboard_server_serves_session_api_and_exports(trace_db, tmp_pat
                 html = await resp.text()
                 assert "session-list" not in html
                 assert "Token Flow" in html
-                assert "/_next/static/" in html
+                assert "/assets/index-" in html
 
             async with session.get(f"http://127.0.0.1:{port}/api/agents") as resp:
                 assert resp.status == 200
@@ -1868,7 +1873,7 @@ async def test_dashboard_server_quit_route_stops_dashboard(trace_db) -> None:
 
 @pytest.mark.asyncio
 async def test_dashboard_can_start_and_stop_codex_app_capture(trace_db, monkeypatch) -> None:
-    import claude_tap.live as live_module
+    import claude_tap.capture.manager as capture_manager_module
 
     class FakeCaptureProcess:
         def __init__(self) -> None:
@@ -1902,8 +1907,8 @@ async def test_dashboard_can_start_and_stop_codex_app_capture(trace_db, monkeypa
         launched["kwargs"] = kwargs
         return process
 
-    monkeypatch.setattr(live_module.sys, "platform", "darwin")
-    monkeypatch.setattr(live_module.asyncio, "create_subprocess_exec", fake_create_subprocess_exec)
+    monkeypatch.setattr(capture_manager_module.sys, "platform", "darwin")
+    monkeypatch.setattr(capture_manager_module.asyncio, "create_subprocess_exec", fake_create_subprocess_exec)
 
     server = LiveViewerServer(port=0, dashboard_mode=True)
     port = await server.start()
@@ -1939,16 +1944,16 @@ async def test_dashboard_can_start_and_stop_codex_app_capture(trace_db, monkeypa
                 assert payload["state"] == "idle"
                 assert payload["pid"] is None
 
-            assert process.signal == live_module.signal.SIGINT
+            assert process.signal == capture_manager_module.signal.SIGINT
     finally:
         await server.stop()
 
 
 @pytest.mark.asyncio
 async def test_dashboard_capture_mutations_require_same_origin_token(trace_db, monkeypatch) -> None:
-    import claude_tap.live as live_module
+    import claude_tap.capture.manager as capture_manager_module
 
-    monkeypatch.setattr(live_module.sys, "platform", "darwin")
+    monkeypatch.setattr(capture_manager_module.sys, "platform", "darwin")
     server = LiveViewerServer(port=0, dashboard_mode=True)
     port = await server.start()
     try:

@@ -920,7 +920,7 @@ class TraceStore:
             )
             row = conn.execute("SELECT * FROM sessions WHERE id = ?", (session_id,)).fetchone()
             if row is not None:
-                from claude_tap.dashboard import build_imported_session_summary
+                from claude_tap.analysis.sessions import build_imported_session_summary
 
                 summary = build_imported_session_summary(row, records, manifest_entry)
                 conn.execute(
@@ -973,7 +973,7 @@ class TraceStore:
         record: dict[str, Any],
         record_count: int,
     ) -> None:
-        from claude_tap.dashboard import (
+        from claude_tap.analysis.sessions import (
             build_stored_session_summary,
             is_dashboard_summary_current,
             merge_record_into_summary,

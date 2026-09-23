@@ -28,8 +28,6 @@ coverage.xml
 
 # Token Flow UI
 ui/node_modules/
-ui/.next/
-ui/out/
 ui/tsconfig.tsbuildinfo
 
 # Local browser and review artifacts

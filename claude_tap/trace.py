@@ -14,7 +14,7 @@ from claude_tap.trace_store import TraceStore, get_trace_store
 from claude_tap.usage import normalize_usage
 
 if TYPE_CHECKING:
-    from claude_tap.live import LiveViewerServer
+    from claude_tap.server.app import LiveViewerServer
 
 
 class TraceWriter:

@@ -21,10 +21,10 @@ from yarl import URL
 from claude_tap.bedrock import attach_bedrock_errors, bedrock_model_from_path, is_bedrock_eventstream_path
 from claude_tap.sse import SSEReassembler
 from claude_tap.trace import TraceWriter
+from claude_tap.trace_encoding import _decode_bedrock_eventstream_events
 from claude_tap.trace_encoding import parse_request_body_for_trace as _parse_request_body_for_trace
 from claude_tap.upstream import build_upstream_url, format_upstream_error
 from claude_tap.usage import normalize_usage
-from claude_tap.viewer import _decode_bedrock_eventstream_events
 
 log = logging.getLogger("token-flow")
 

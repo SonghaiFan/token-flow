@@ -19,8 +19,8 @@ from claude_tap.cli import (
 )
 from claude_tap.forward_proxy import ForwardProxyServer
 from claude_tap.history import cleanup_trace_sessions, delete_trace_history, migrate_legacy_traces
-from claude_tap.live import LiveViewerServer
 from claude_tap.proxy import filter_headers
+from claude_tap.server.app import LiveViewerServer
 from claude_tap.sse import SSEReassembler
 from claude_tap.trace import TraceWriter
 from claude_tap.trace_store import get_trace_store, reset_trace_store, resolve_db_path

@@ -270,7 +270,7 @@ def test_spawn_dashboard_subprocess_hides_windows_console(
 async def test_is_dashboard_healthy_real_server(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     import aiohttp
 
-    from claude_tap.live import LiveViewerServer
+    from claude_tap.server.app import LiveViewerServer
     from claude_tap.shared_dashboard import wait_for_dashboard_healthy
 
     monkeypatch.setenv("TOKEN_FLOW_DB", str(tmp_path / "dashboard.sqlite3"))
@@ -301,7 +301,7 @@ async def test_is_dashboard_healthy_real_server(monkeypatch: pytest.MonkeyPatch,
 
 @pytest.mark.asyncio
 async def test_stop_shared_dashboard_stops_real_server(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    from claude_tap.live import LiveViewerServer
+    from claude_tap.server.app import LiveViewerServer
 
     monkeypatch.setenv("TOKEN_FLOW_DB", str(tmp_path / "dashboard.sqlite3"))
 
@@ -319,7 +319,7 @@ async def test_bind_all_dashboard_uses_loopback_for_local_controls(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
-    from claude_tap.live import LiveViewerServer
+    from claude_tap.server.app import LiveViewerServer
 
     monkeypatch.setenv("TOKEN_FLOW_DB", str(tmp_path / "dashboard.sqlite3"))
 

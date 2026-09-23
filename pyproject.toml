@@ -22,6 +22,8 @@ dependencies = [
     "aiohttp==3.14.1",
     "backports-zstd>=1.0; python_version < '3.14'",
     "cryptography>=42.0",
+    "fastapi>=0.115,<1",
+    "uvicorn>=0.30,<1",
 ]
 
 [project.urls]
@@ -37,14 +39,14 @@ requires = ["setuptools>=68.0", "setuptools-scm[toml]>=8.0"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools]
-packages = ["claude_tap", "claude_tap.viewer_assets"]
+packages = ["claude_tap", "claude_tap.analysis", "claude_tap.capture", "claude_tap.server", "claude_tap.viewer_assets"]
 
 [tool.setuptools_scm]
 version_scheme = "guess-next-dev"
 local_scheme = "no-local-version"
 
 [tool.setuptools.package-data]
-claude_tap = ["dashboard.html", "viewer.html", "viewer_i18n.json", "model_prices.json", "py.typed", "web_ui/**/*"]
+claude_tap = ["dashboard.html", "viewer.html", "viewer_i18n.json", "model_prices.json", "py.typed", "static_ui/*", "static_ui/**/*"]
 "claude_tap.viewer_assets" = ["*.css", "*.js", "*.LICENSE.txt"]
 
 [project.optional-dependencies]

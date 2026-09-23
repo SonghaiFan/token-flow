@@ -65,7 +65,7 @@ uv run token-flow dashboard stop
 
 ## UI 开发
 
-`ui/` 里的 Next.js 应用是 UI 唯一的 source of truth。
+`ui/` 里的 Vite + React 应用是 UI 唯一的 source of truth。
 
 ```bash
 cd ui
@@ -81,7 +81,7 @@ npm run build
 npm run sync
 ```
 
-不要直接修改 `claude_tap/web_ui/`；它由 sync 命令生成。
+不要直接修改 `claude_tap/static_ui/`；它由 sync 命令生成。
 
 ## 架构边界
 
@@ -90,7 +90,7 @@ Agent 客户端
     ↓ 本地 proxy 或 transcript watcher
 Python capture backend（`claude_tap/`，兼容 namespace）
     ↓ SQLite + 本地 HTTP API
-Token Flow Next.js UI（`ui/`）
+Token Flow 静态 UI（`ui/`）
 ```
 
 Python package 名暂时保留，是因为当前 capture engine、本地数据和子进程启动
