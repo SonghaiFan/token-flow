@@ -3,8 +3,11 @@
 import dynamic from "next/dynamic";
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Streamdown, type Components } from "streamdown";
-import { categoryLabelForInput } from "@/lib/token-model";
-import type { TokenSelection, TraceRecord, TurnModel } from "@/lib/types";
+import { formatDuration, formatNumber } from "@/lib/format";
+import { classifyInput, LAYER_META, LAYER_ORDER } from "@/lib/token-model";
+import type { InputClass, InputLayer, ItemState, TokenSelection, TraceRecord, TurnModel } from "@/lib/types";
+import { categoryColor } from "@/lib/category-palette";
+import { CategorySwatch } from "../charts/category-legend";
 import { RawJsonTree } from "./raw-json-tree";
 
 type UnknownRecord = Record<string, unknown>;
@@ -23,6 +26,14 @@ const markdownComponents: Components = {
   a: ({ children, href }) => <a className="font-medium underline decoration-line underline-offset-4 hover:decoration-ink" href={href} rel="noreferrer" target="_blank">{children}</a>,
   code: ({ children }) => <code className="rounded bg-canvas px-1 py-0.5 font-mono text-[0.9em]">{children}</code>,
   pre: ({ children }) => <pre className="my-3 max-h-[32rem] overflow-auto rounded-lg border border-line bg-canvas p-3 font-mono text-[11px] leading-5">{children}</pre>,
+  // Captured markdown tables are evidence to read, so render a plain table without
+  // Streamdown's copy, download, and fullscreen chrome. Only wide tables scroll.
+  table: ({ children }) => <div className="my-3 overflow-x-auto"><table className="w-full border-collapse text-left text-[12px] leading-5">{children}</table></div>,
+  thead: ({ children }) => <thead className="border-b border-line">{children}</thead>,
+  tbody: ({ children }) => <tbody className="divide-y divide-line">{children}</tbody>,
+  tr: ({ children }) => <tr>{children}</tr>,
+  th: ({ children, style }) => <th className="whitespace-nowrap px-3 py-1.5 font-medium text-muted first:pl-0" style={style}>{children}</th>,
+  td: ({ children, style }) => <td className="px-3 py-1.5 align-top first:pl-0 [&_code]:whitespace-nowrap" style={style}>{children}</td>,
 };
 
 const JsonTreeView = dynamic(() => import("./json-tree-view").then((module) => module.JsonTreeView), {
@@ -85,23 +96,6 @@ function Pill({ children, tone = "neutral" }: { children: ReactNode; tone?: "neu
     danger: "border-red-200 bg-red-50 text-danger dark:border-red-900 dark:bg-red-950",
   };
   return <span className={`inline-flex max-w-full items-center whitespace-nowrap rounded-full border px-2 py-0.5 font-mono text-[9px] font-medium ${tones[tone]}`}>{children}</span>;
-}
-
-function roleTone(role: string): "neutral" | "system" | "user" | "assistant" {
-  if (role === "developer" || role === "system") return "system";
-  if (role === "user") return "user";
-  if (role === "assistant" || role === "model") return "assistant";
-  return "neutral";
-}
-
-function semanticRole(message: UnknownRecord): string {
-  const role = textValue(message.role).toLowerCase();
-  if (role) return role;
-  const type = textValue(message.type).toLowerCase();
-  if (type === "reasoning" || type === "thinking") return "reasoning";
-  if (type.endsWith("_call_output") || type === "tool_result" || type === "tool_output") return "tool result";
-  if (type.endsWith("_call") || type === "tool_use") return "tool call";
-  return "input";
 }
 
 function inputPreview(message: UnknownRecord, content: unknown, index: number): string {
@@ -455,41 +449,6 @@ function StructuredOutput({ parsed }: { parsed: ParsedStructuredText }) {
   </div>;
 }
 
-function TechnicalDetails({ message }: { message: UnknownRecord }) {
-  const facts = [
-    ["Protocol type", message.type],
-    ["Status", message.status],
-    ["Call ID", message.call_id ?? message.tool_use_id],
-    ["Item ID", message.id],
-  ].filter(([, value]) => value !== undefined && value !== "");
-  if (!facts.length) return null;
-  return <Disclosure summary={<><strong className="text-xs">Technical details</strong><span className="text-[11px] text-muted">Captured identifiers and protocol fields</span></>}>
-    <dl className="grid gap-x-5 gap-y-3 text-xs sm:grid-cols-2">{facts.map(([label, value]) => <div key={String(label)}><dt className="text-muted">{String(label)}</dt><dd className="mt-1 break-all font-mono text-[10px] text-ink">{textValue(value)}</dd></div>)}</dl>
-  </Disclosure>;
-}
-
-function ToolInputView({ value }: { value: unknown }) {
-  if (typeof value === "string" && value.trim()) {
-    return <section>
-      <div className="mb-1.5 flex flex-wrap items-center justify-between gap-2">
-        <h4 className="text-[10px] font-semibold uppercase tracking-[0.1em] text-muted">Input</h4>
-        <Pill>{value.split("\n").length} {value.includes("\n") ? "lines" : "line"}</Pill>
-      </div>
-      <pre className="max-h-[28rem] overflow-auto whitespace-pre-wrap break-words rounded-lg bg-canvas px-3 py-2.5 font-mono text-[11px] leading-5 text-ink"><code>{value}</code></pre>
-    </section>;
-  }
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
-    return <div className="rounded-lg border border-dashed border-line px-3 py-3 text-xs text-muted">No captured input is available for this tool call. Use Tree or Raw to inspect the surrounding evidence.</div>;
-  }
-  const entries = Object.entries(asRecord(value));
-  const commandEntry = entries.find(([key]) => key === "cmd" || key === "command");
-  const details = entries.filter(([key]) => key !== commandEntry?.[0]);
-  return <div className="space-y-3">
-    {commandEntry ? <section><h4 className="mb-1.5 text-[10px] font-semibold uppercase tracking-[0.1em] text-muted">Command</h4><div className="overflow-x-auto rounded-lg bg-canvas px-3 py-2.5 font-mono text-[11px] leading-5 text-ink"><code className="whitespace-pre-wrap break-words">{textValue(commandEntry[1])}</code></div></section> : null}
-    {details.length ? <dl className="grid gap-3 sm:grid-cols-2">{details.map(([key, item]) => <div className="min-w-0" key={key}><dt className="text-[10px] font-medium text-muted">{humanizeField(key)}</dt><dd className="mt-1 min-w-0 break-words text-xs text-ink">{item && typeof item === "object" ? <Disclosure summary={<span className="text-xs">{Array.isArray(item) ? `${item.length} items` : `${Object.keys(asRecord(item)).length} fields`}</span>}><StructuredValue value={item}/></Disclosure> : <span className="font-mono text-[10px]">{formatToolField(key, item) || (item === null ? "null" : "Unknown")}</span>}</dd></div>)}</dl> : null}
-  </div>;
-}
-
 function htmlText(value: string): string {
   return value
     .replace(/<script\b[\s\S]*?<\/script>/gi, " ")
@@ -580,55 +539,16 @@ function ToolOutputView({ value }: { value: string }) {
   return <TextOutput value={output.value}/>;
 }
 
-function ToolEventContent({ message, pairedToolName }: { message: UnknownRecord; pairedToolName?: string }) {
-  const kind = toolEventKind(message);
-  if (kind === "call") {
-    const presentation = toolCallPresentation(message);
-    return <div className="space-y-3 border-l-2 border-ink pl-3 sm:pl-4">
-      <div><div className="flex flex-wrap items-center gap-2"><h4 className="text-sm font-semibold">{presentation.name}</h4>{presentation.wrapperName ? <><span className="text-xs text-muted">invokes</span><Pill>{presentation.wrapperName}</Pill></> : null}</div><p className="mt-1 text-[11px] text-muted">Captured tool invocation</p></div>
-      <ToolInputView value={presentation.input}/>
-      <TechnicalDetails message={message}/>
-    </div>;
-  }
-  const rawOutput = capturedText(message.output ?? message.content ?? message.text);
-  const result = parseToolResult(rawOutput);
-  const failed = /failed|error|timed out/i.test(result.status);
-  return <div className={`space-y-3 border-l-2 pl-3 sm:pl-4 ${failed ? "border-danger" : "border-success"}`}>
-    <div className="flex flex-wrap items-start justify-between gap-2"><div><div className="flex flex-wrap items-center gap-2"><h4 className="text-sm font-semibold">{pairedToolName ? `${pairedToolName} result` : "Tool result"}</h4><Pill tone={failed ? "danger" : "assistant"}>{result.status || "Captured"}</Pill></div><p className="mt-1 text-[11px] text-muted">{result.elapsed ? `Finished in ${result.elapsed}` : "Execution output"}</p></div>{result.output ? <Pill>{result.output.split("\n").length} {result.output.split("\n").length === 1 ? "line" : "lines"}</Pill> : null}</div>
-    <ToolOutputView value={result.output}/>
-    <TechnicalDetails message={message}/>
-  </div>;
-}
-
-function CategoryAnchor({ blockId, children, label, onSelectToken, selection, turnId }: { blockId?: string; children: ReactNode; label: string; onSelectToken: (selection: TokenSelection | null) => void; selection: TokenSelection | null; turnId: string }) {
-  const selectedIds = selection?.blockIds || (selection ? [selection.blockId] : []);
-  const active = Boolean(blockId && selection?.turnId === turnId && selectedIds.includes(blockId));
-  return <div className={`scroll-m-32 rounded-xl transition ${active ? "ring-2 ring-ink ring-offset-2 ring-offset-panel" : ""}`} data-block-id={blockId} data-turn-id={turnId} tabIndex={active ? -1 : undefined}>
-    <div className="mb-2 flex items-center gap-2">{blockId ? <button aria-pressed={active} className={`rounded-full border px-2 py-1 font-mono text-[9px] ${active ? "border-ink bg-ink text-panel" : "border-line bg-canvas text-muted"}`} onClick={() => onSelectToken(active ? null : { blockId, label, turnId })} type="button">{label}</button> : <span className="rounded-full border border-line bg-canvas px-2 py-1 font-mono text-[9px] text-muted">{label}</span>}{active ? <span className="text-[9px] font-semibold uppercase tracking-[0.12em] text-muted">Linked</span> : null}</div>
-    {children}
-  </div>;
-}
-
-function ToolEventAnchor({ children, itemId, message, onSelectToken, parts, selection, turnId }: { children: ReactNode; itemId: string; message: UnknownRecord; onSelectToken: (selection: TokenSelection | null) => void; parts: unknown[]; selection: TokenSelection | null; turnId: string }) {
-  const selectedIds = selection?.blockIds || (selection ? [selection.blockId] : []);
-  const blockIds = parts.map((_, index) => itemId ? `${itemId}:${index}` : "").filter(Boolean);
-  const active = selection?.turnId === turnId && blockIds.some((blockId) => selectedIds.includes(blockId));
-  return <div className={`relative scroll-m-32 rounded-xl transition ${active ? "ring-2 ring-ink ring-offset-2 ring-offset-panel" : ""}`}>
-    {blockIds.map((blockId) => <span className="absolute left-0 top-0 size-px opacity-0" data-block-id={blockId} data-turn-id={turnId} key={blockId} tabIndex={-1}/>) }
-    <div className="mb-2 flex flex-wrap items-center gap-2 text-[9px] text-muted"><span>Token category</span>{parts.map((part, index) => {
-      const blockId = blockIds[index];
-      const label = categoryLabelForInput(message, part);
-      const selected = Boolean(blockId && selection?.turnId === turnId && selectedIds.includes(blockId));
-      return blockId ? <button aria-pressed={selected} className={`rounded-full border px-2 py-1 font-mono text-[9px] ${selected ? "border-ink bg-ink text-panel" : "border-line bg-canvas text-muted"}`} key={blockId} onClick={() => onSelectToken(selected ? null : { blockId, label, turnId })} type="button">{parts.length > 1 ? `${label} ${index + 1}` : label}</button> : <span className="rounded-full border border-line bg-canvas px-2 py-1 font-mono text-[9px] text-muted" key={index}>{label}</span>;
-    })}{active ? <span className="text-[9px] font-semibold uppercase tracking-[0.12em] text-muted">Linked</span> : null}</div>
-    {children}
-  </div>;
-}
-
 function Disclosure({ children, defaultOpen = false, summary }: { children: ReactNode; defaultOpen?: boolean; summary: ReactNode }) {
   const [open, setOpen] = useState(defaultOpen);
+  const [requestedOpen, setRequestedOpen] = useState(defaultOpen);
+  // A later selection inside a closed disclosure must reveal it so the block can be scrolled to.
+  if (defaultOpen !== requestedOpen) {
+    setRequestedOpen(defaultOpen);
+    if (defaultOpen) setOpen(true);
+  }
   return <details className="group rounded-xl border border-line bg-panel" onToggle={(event) => setOpen(event.currentTarget.open)} open={open}>
-    <summary className="flex min-h-11 cursor-pointer list-none items-center gap-2 px-3 py-2 hover:bg-canvas/70">{summary}<span aria-hidden="true" className="ml-auto text-xs text-muted transition group-open:rotate-90">›</span></summary>
+    <summary className="flex min-h-11 cursor-pointer list-none items-center gap-2 px-3 py-2 hover:bg-canvas/70">{summary}<span aria-hidden="true" className="ml-auto text-xs text-muted transition [details[open]>summary>&]:rotate-90">›</span></summary>
     {open ? <div className="border-t border-line px-3 py-3 sm:px-4">{children}</div> : null}
   </details>;
 }
@@ -643,25 +563,6 @@ function ContentPart({ value }: { value: unknown }) {
     return <div className="flex flex-wrap items-center gap-2"><Pill>{type}</Pill><span className="text-xs text-muted">Attachment metadata is available in Raw JSON.</span></div>;
   }
   return <JsonBlock value={value}/>;
-}
-
-function MessageItem({ item, index, defaultOpen, onSelectToken, pairedToolName, selection, turnId }: { item: unknown; index: number; defaultOpen: boolean; onSelectToken: (selection: TokenSelection | null) => void; pairedToolName?: string; selection: TokenSelection | null; turnId: string }) {
-  const message = asRecord(item);
-  const role = semanticRole(message);
-  const type = textValue(message.type) || "message";
-  const eventKind = toolEventKind(message);
-  const parts = inputItemParts(message);
-  const content = parts.length === 1 ? parts[0] : parts;
-  const itemId = textValue(message.id);
-  const callPresentation = eventKind === "call" ? toolCallPresentation(message) : null;
-  const result = eventKind === "result" ? parseToolResult(capturedText(message.output ?? message.content ?? message.text)) : null;
-  const preview = callPresentation?.preview || (result ? [result.status, result.elapsed].filter(Boolean).join(" in ") : inputPreview(message, content, index));
-  const selectedIds = selection?.blockIds || (selection ? [selection.blockId] : []);
-  const selectedItem = selection?.turnId === turnId && Boolean(itemId) && selectedIds.some((id) => id === itemId || id.startsWith(`${itemId}:`));
-  const eventName = callPresentation?.name || pairedToolName;
-  return <Disclosure defaultOpen={defaultOpen || selectedItem} summary={<><Pill tone={roleTone(role)}>{role}</Pill>{eventKind ? <strong className="text-xs text-ink">{eventName || (eventKind === "call" ? "Unknown tool" : "Tool result")}</strong> : <Pill>{type}</Pill>}{eventKind && message.status ? <Pill tone={textValue(message.status).toLowerCase() === "completed" ? "assistant" : "neutral"}>{textValue(message.status)}</Pill> : null}{result?.elapsed ? <Pill>{result.elapsed}</Pill> : null}<span className="min-w-0 truncate text-xs text-muted">{preview}</span></>}>
-    {eventKind ? <ToolEventAnchor itemId={itemId} message={message} onSelectToken={onSelectToken} parts={parts} selection={selection} turnId={turnId}><ToolEventContent message={message} pairedToolName={pairedToolName}/></ToolEventAnchor> : <div className="space-y-3">{parts.map((part, partIndex) => <CategoryAnchor blockId={itemId ? `${itemId}:${partIndex}` : undefined} key={partIndex} label={categoryLabelForInput(message, part)} onSelectToken={onSelectToken} selection={selection} turnId={turnId}><ContentPart value={part}/></CategoryAnchor>)}</div>}
-  </Disclosure>;
 }
 
 function splitBlockId(blockId: string): { itemId: string; partIndex: number | null } {
@@ -706,26 +607,6 @@ function toolGroups(value: unknown): Array<{ name: string; tools: UnknownRecord[
   return [...groups].map(([name, tools]) => ({ name, tools }));
 }
 
-function ToolCatalog({ blockId, onSelectToken, selection, turnId, value }: { blockId?: string; onSelectToken: (selection: TokenSelection | null) => void; selection: TokenSelection | null; turnId: string; value: unknown }) {
-  const groups = toolGroups(value);
-  const total = groups.reduce((sum, group) => sum + group.tools.length, 0);
-  if (!total) return null;
-  return <CategoryAnchor blockId={blockId} label="Tool definitions" onSelectToken={onSelectToken} selection={selection} turnId={turnId}><Disclosure summary={<><strong className="text-sm">Tools</strong><Pill>{total} definitions</Pill><span className="text-xs text-muted">{groups.length} {groups.length === 1 ? "group" : "groups"}</span></>}>
-    <div className="space-y-2">{groups.map((group) => <Disclosure key={group.name} summary={<><strong className="text-xs">{group.name}</strong><Pill>{group.tools.length}</Pill></>}>
-      <div className="divide-y divide-line">{group.tools.map((tool, index) => {
-        const name = textValue(tool.name) || `Tool ${index + 1}`;
-        const description = textValue(tool.description);
-        const schema = tool.parameters ?? tool.input_schema ?? tool.format;
-        return <div className="py-3 first:pt-0 last:pb-0" key={`${name}-${index}`}>
-          <div className="flex flex-wrap items-center gap-2"><strong className="font-mono text-[11px]">{name}</strong><Pill>{textValue(tool.type) || "function"}</Pill></div>
-          {description ? <p className="mt-1 line-clamp-3 text-xs leading-5 text-muted">{description}</p> : null}
-          {schema ? <details className="mt-2"><summary className="cursor-pointer text-[10px] font-medium text-muted hover:text-ink">Schema</summary><div className="mt-2"><JsonBlock value={schema}/></div></details> : null}
-        </div>;
-      })}</div>
-    </Disclosure>)}</div>
-  </Disclosure></CategoryAnchor>;
-}
-
 function collectInput(body: UnknownRecord): unknown[] {
   const items: unknown[] = [];
   const system = body.instructions ?? body.system ?? body.system_instruction;
@@ -734,18 +615,6 @@ function collectInput(body: UnknownRecord): unknown[] {
   if (Array.isArray(source)) items.push(...source);
   else if (source !== undefined) items.push({ type: "message", role: "user", content: source });
   return items;
-}
-
-function toolNamesByCallId(items: unknown[]): Map<string, string> {
-  const names = new Map<string, string>();
-  for (const item of items) {
-    const message = asRecord(item);
-    if (toolEventKind(message) !== "call") continue;
-    const callId = textValue(message.call_id ?? message.id);
-    if (!callId) continue;
-    names.set(callId, toolCallPresentation(message).name);
-  }
-  return names;
 }
 
 function requestToolNames(body: UnknownRecord): string[] {
@@ -777,6 +646,92 @@ function stableValue(value: unknown): string {
   }
 }
 
+type LayerChange = "added" | "removed" | "changed";
+
+interface LayerDiff {
+  after?: number;
+  before?: number;
+  layer: InputLayer;
+  rows: Array<{ change: LayerChange; entry: InputEntry }>;
+  uncompared: number;
+}
+
+function entryDiffKey(entry: InputEntry): string {
+  if (!entry.itemId) return "";
+  return entry.partIndex === undefined ? entry.itemId : `${entry.itemId}:${entry.partIndex}`;
+}
+
+/* Compare the two requests block by block. Blocks are matched only by captured
+   item id (and part index); blocks without an id are counted, never guessed. */
+function layerDiffs(previous: TurnModel, current: TurnModel): LayerDiff[] {
+  const before = inputEntries(previous, collectInput(asRecord(previous.record.request?.body)));
+  const after = inputEntries(current, collectInput(asRecord(current.record.request?.body)));
+  const beforeByKey = new Map(before.map((entry) => [entryDiffKey(entry), entry] as const).filter(([key]) => key));
+  const afterKeys = new Set(after.map(entryDiffKey).filter(Boolean));
+  return LAYER_ORDER.flatMap((layer) => {
+    const beforeLayer = before.filter((entry) => entry.inputClass.layer === layer);
+    const afterLayer = after.filter((entry) => entry.inputClass.layer === layer);
+    if (!beforeLayer.length && !afterLayer.length) return [];
+    const rows: LayerDiff["rows"] = [];
+    for (const entry of afterLayer) {
+      const key = entryDiffKey(entry);
+      if (!key) continue;
+      const earlier = beforeByKey.get(key);
+      if (!earlier) rows.push({ change: "added", entry });
+      else if (stableValue(earlier.part ?? earlier.item) !== stableValue(entry.part ?? entry.item)) rows.push({ change: "changed", entry });
+    }
+    for (const entry of beforeLayer) {
+      const key = entryDiffKey(entry);
+      if (key && !afterKeys.has(key)) rows.push({ change: "removed", entry });
+    }
+    const uncompared = [...beforeLayer, ...afterLayer].filter((entry) => !entryDiffKey(entry)).length;
+    return [{ after: sumTokens(afterLayer)?.tokens, before: sumTokens(beforeLayer)?.tokens, layer, rows, uncompared }];
+  });
+}
+
+function entryPreview(entry: InputEntry): string {
+  if (entry.part !== undefined) return sectionPreview(entry.inputClass.label, capturedText(entry.part));
+  const kind = toolEventKind(entry.item);
+  if (kind === "call") return toolCallPresentation(entry.item).preview || textValue(entry.item.name);
+  if (kind === "result") {
+    const result = parseToolResult(capturedText(entry.item.output ?? entry.item.content ?? entry.item.text));
+    return [result.status, result.elapsed].filter(Boolean).join(" in ") || previewText(result.output);
+  }
+  return inputPreview(entry.item, entry.item.content, 0);
+}
+
+function tokenText(value: number | undefined): string {
+  return value === undefined ? "Unknown" : value.toLocaleString();
+}
+
+function LayerDiffSection({ diff }: { diff: LayerDiff }) {
+  const meta = LAYER_META[diff.layer];
+  const count = (change: LayerChange) => diff.rows.filter((row) => row.change === change).length;
+  const delta = diff.before !== undefined && diff.after !== undefined ? diff.after - diff.before : undefined;
+  const summary = <>
+    <span aria-hidden="true" className="size-2.5 shrink-0 rounded-sm" style={{ background: meta.color }}/>
+    <strong className="text-xs">{meta.title}</strong>
+    {count("added") ? <Pill>+{count("added")} added</Pill> : null}
+    {count("changed") ? <Pill tone="system">{count("changed")} changed</Pill> : null}
+    {count("removed") ? <Pill>{count("removed")} removed</Pill> : null}
+    {!diff.rows.length ? <span className="text-[11px] text-muted">{diff.uncompared ? "No matched changes" : "Unchanged"}</span> : null}
+    <span className="ml-auto shrink-0 font-mono text-[10px] text-muted">{tokenText(diff.before)} → <span className="text-ink">{tokenText(diff.after)}</span>{delta ? ` (${delta > 0 ? "+" : ""}${delta.toLocaleString()})` : ""}</span>
+  </>;
+  if (!diff.rows.length && !diff.uncompared) return <div className="flex min-h-11 items-center gap-2 rounded-xl border border-line px-3 py-2">{summary}</div>;
+  return <Disclosure summary={summary}>
+    <ul className="divide-y divide-line text-xs">
+      {diff.rows.map(({ change, entry }) => <li className="flex items-center gap-2 py-2" key={`${change}-${entry.key}`}>
+        <CategorySwatch label={entry.inputClass.label} layer={entry.inputClass.layer}/>
+        <span className="shrink-0 font-medium">{entry.inputClass.label}</span>
+        <Pill tone={change === "changed" ? "system" : "neutral"}>{change}</Pill>
+        <span className="min-w-0 flex-1 truncate text-muted">{entryPreview(entry)}</span>
+        {entry.tokens ? <span className="shrink-0 font-mono text-[10px] text-muted">{entry.tokens.tokens.toLocaleString()}</span> : null}
+      </li>)}
+      {diff.uncompared ? <li className="py-2 text-muted">{diff.uncompared} {diff.uncompared === 1 ? "block has" : "blocks have"} no captured id, so {diff.uncompared === 1 ? "it is" : "they are"} not compared.</li> : null}
+    </ul>
+  </Disclosure>;
+}
+
 function RequestChanges({ previous, current }: { previous: TurnModel | undefined; current: TurnModel }) {
   if (!previous) return <div className="p-8 text-center"><strong className="text-sm">No previous turn</strong><p className="mt-1 text-xs text-muted">Choose Turn 2 or later to compare captured requests.</p></div>;
 
@@ -794,77 +749,754 @@ function RequestChanges({ previous, current }: { previous: TurnModel | undefined
   ].filter(([, before, after]) => before !== after);
   const keys = [...new Set([...Object.keys(previousBody), ...Object.keys(currentBody)])];
   const changedFields = keys.filter((key) => stableValue(previousBody[key]) !== stableValue(currentBody[key]));
+  const diffs = layerDiffs(previous, current);
 
   return <div className="space-y-4 p-3 sm:p-4">
     <div className="flex flex-wrap items-center justify-between gap-2"><div><h3 className="text-sm font-semibold">Turn {previous.label} → Turn {current.label}</h3><p className="mt-1 text-xs text-muted">Only captured request differences are shown.</p></div><Pill>{changedFields.length} changed fields</Pill></div>
     {facts.length ? <dl className="divide-y divide-line overflow-hidden rounded-xl border border-line">{facts.map(([label, before, after]) => <div className="grid gap-1 px-3 py-3 text-xs sm:grid-cols-[8rem_minmax(0,1fr)_auto_minmax(0,1fr)] sm:items-start" key={label}>
       <dt className="font-medium text-muted">{label}</dt><dd className="min-w-0 break-words font-mono text-[10px] text-muted">{before}</dd><span aria-hidden="true" className="hidden text-muted sm:block">→</span><dd className="min-w-0 break-words font-mono text-[10px] text-ink">{after}</dd>
     </div>)}</dl> : <div className="rounded-xl border border-dashed border-line p-6 text-center text-xs text-muted">No high-level request changes detected.</div>}
+    <section className="space-y-2"><h4 className="text-xs font-semibold">Input by layer</h4>{diffs.map((diff) => <LayerDiffSection diff={diff} key={diff.layer}/>)}</section>
     {changedFields.length ? <Disclosure summary={<><strong className="text-xs">Changed request fields</strong><span className="text-xs text-muted">Exact top-level evidence</span></>}><div className="flex flex-wrap gap-1.5">{changedFields.map((field) => <Pill key={field}>{field}</Pill>)}</div></Disclosure> : null}
   </div>;
 }
 
-function StructuredRequest({ onSelectToken, record, selection, turnId }: { onSelectToken: (selection: TokenSelection | null) => void; record: TraceRecord; selection: TokenSelection | null; turnId: string }) {
-  const request = record.request || {};
-  const body = asRecord(request.body);
-  const reasoning = asRecord(body.reasoning);
-  const text = asRecord(body.text);
-  const format = asRecord(text.format);
-  const input = collectInput(body);
-  const embeddedToolItems = input.filter((item) => asRecord(item).type === "additional_tools");
-  const messageItems = input.filter((item) => asRecord(item).type !== "additional_tools");
-  const pairedToolNames = toolNamesByCallId(messageItems);
-  const topLevelTools = asArray(body.tools);
-  const includes = asArray(body.include).map(textValue).filter(Boolean);
-  const status = Number(record.response?.status || 0);
-  let lastUserIndex = -1;
-  messageItems.forEach((item, index) => { if (asRecord(item).role === "user") lastUserIndex = index; });
-  return <div className="space-y-4 p-3 sm:p-4">
-    <div className="flex flex-wrap gap-1.5">
-      <Pill>{textValue(body.model) || "Unknown model"}</Pill>
-      <Pill>{request.method || "REQUEST"} {request.path || "Unknown endpoint"}</Pill>
-      {record.transport ? <Pill>{record.transport}</Pill> : null}
-      {body.stream !== undefined ? <Pill>{body.stream ? "streaming" : "not streaming"}</Pill> : null}
-      {reasoning.effort ? <Pill>reasoning: {textValue(reasoning.effort)}</Pill> : null}
-      {body.tool_choice ? <Pill>tools: {textValue(body.tool_choice) || "configured"}</Pill> : null}
-      {format.type ? <Pill>output: {textValue(format.type)}</Pill> : null}
-      {status ? <Pill tone={status >= 400 ? "danger" : "neutral"}>HTTP {status}</Pill> : null}
-    </div>
+interface EnvironmentFacts {
+  entries: Array<{ access: string; escalatable: string; special: boolean; target: string }>;
+  fields: Array<[string, string]>;
+  fileSystem: string;
+  profile: string;
+  roots: string[];
+}
 
-    {includes.length ? <section><h3 className="mb-2 text-xs font-semibold text-muted">Included output</h3><div className="flex flex-wrap gap-1.5">{includes.map((item) => <Pill key={item}>{item}</Pill>)}</div></section> : null}
+const ENVIRONMENT_FIELDS: Record<string, string> = {
+  current_date: "Date",
+  cwd: "Working directory",
+  network: "Network",
+  shell: "Shell",
+  timezone: "Time zone",
+};
 
-    {topLevelTools.length ? <ToolCatalog onSelectToken={onSelectToken} selection={selection} turnId={turnId} value={topLevelTools}/> : null}
-    {embeddedToolItems.map((item, index) => <ToolCatalog blockId={textValue(asRecord(item).id)} key={`embedded-tools-${index}`} onSelectToken={onSelectToken} selection={selection} turnId={turnId} value={asRecord(item).tools}/>)}
+function parseEnvironment(value: string): EnvironmentFacts | null {
+  const body = /<environment_context>([\s\S]*?)<\/environment_context>/i.exec(value)?.[1];
+  if (body === undefined) return null;
+  const fileSystem = /<filesystem>([\s\S]*?)<\/filesystem>/i.exec(body)?.[1] || "";
+  const scalars = body.replace(/<filesystem>[\s\S]*?<\/filesystem>/i, "");
+  return {
+    entries: [...fileSystem.matchAll(/<entry\b([^>]*)>([\s\S]*?)<\/entry>/gi)].map((match) => {
+      const path = /<path>([\s\S]*?)<\/path>/i.exec(match[2])?.[1];
+      const special = /<special>([\s\S]*?)<\/special>/i.exec(match[2])?.[1];
+      return {
+        access: /\baccess="([^"]*)"/.exec(match[1])?.[1] || "Unknown",
+        escalatable: /\bescalatable="([^"]*)"/.exec(match[1])?.[1] || "",
+        special: path === undefined && special !== undefined,
+        target: (path ?? special ?? match[2]).trim(),
+      };
+    }),
+    fields: [...scalars.matchAll(/<([A-Za-z_][\w-]*)>([\s\S]*?)<\/\1>/g)].map((match) => [match[1], match[2].trim()]),
+    fileSystem: /<file_system\b[^>]*\btype="([^"]*)"/i.exec(fileSystem)?.[1] || "",
+    profile: /<permission_profile\b[^>]*\btype="([^"]*)"/i.exec(fileSystem)?.[1] || "",
+    roots: [...fileSystem.matchAll(/<root>([\s\S]*?)<\/root>/gi)].map((match) => match[1].trim()),
+  };
+}
 
-    <section>
-      <div className="mb-2 flex items-baseline justify-between gap-3"><h3 className="text-sm font-semibold">Input</h3><span className="font-mono text-[10px] text-muted">{messageItems.length} {messageItems.length === 1 ? "item" : "items"}</span></div>
-      {messageItems.length ? <div className="space-y-2">{messageItems.map((item, index) => <MessageItem defaultOpen={index === lastUserIndex} index={index} item={item} key={textValue(asRecord(item).id) || index} onSelectToken={onSelectToken} pairedToolName={pairedToolNames.get(textValue(asRecord(item).call_id ?? asRecord(item).tool_use_id))} selection={selection} turnId={turnId}/>)}</div> : <div className="rounded-xl border border-dashed border-line p-5 text-center text-xs text-muted">No message content was captured.</div>}
-    </section>
+function accessCounts(facts: EnvironmentFacts): string {
+  const counts = new Map<string, number>();
+  for (const entry of facts.entries) counts.set(entry.access, (counts.get(entry.access) || 0) + 1);
+  return [...counts].map(([access, count]) => `${access} ${count}`).join(" · ");
+}
 
-    {selection?.turnId === turnId && selection.label === "Unattributed input" ? <div className="rounded-xl border border-dashed border-line p-4 text-xs text-muted"><strong className="text-ink">No exact request section</strong><p className="mt-1">This remainder was not attributed to a captured input block, so Token Flow does not guess a destination.</p></div> : null}
+/* Field names whose value differs from the nearest earlier Environment block. */
+function environmentChanges(value: string, previous: string | undefined): string[] {
+  if (!previous) return [];
+  const facts = parseEnvironment(value);
+  const earlier = parseEnvironment(previous);
+  if (!facts || !earlier) return [];
+  const before = new Map(earlier.fields);
+  const changed = facts.fields.filter(([key, item]) => before.has(key) && before.get(key) !== item).map(([key]) => (ENVIRONMENT_FIELDS[key] || humanizeField(key)).toLowerCase());
+  if (stableValue(facts.entries) !== stableValue(earlier.entries) || stableValue(facts.roots) !== stableValue(earlier.roots)) changed.push("file system");
+  return changed;
+}
 
-    <Disclosure summary={<><strong className="text-xs">Request options</strong><span className="text-xs text-muted">Cache, output format, and client metadata</span></>}>
-      <dl className="grid gap-x-5 gap-y-3 text-xs sm:grid-cols-2">
-        {[
-          ["Store", body.store],
-          ["Parallel tool calls", body.parallel_tool_calls],
-          ["Prompt cache key", body.prompt_cache_key],
-          ["Output format", format.name ?? format.type],
-          ["Reasoning context", reasoning.context],
-          ["Client session", asRecord(body.client_metadata).session_id],
-        ].filter(([, value]) => value !== undefined).map(([label, value]) => <div key={String(label)}><dt className="text-muted">{String(label)}</dt><dd className="mt-0.5 break-all font-mono text-[10px] text-ink">{textValue(value) || "configured"}</dd></div>)}
-      </dl>
-    </Disclosure>
+function EnvironmentView({ previous, value }: { previous?: string; value: string }) {
+  const facts = useMemo(() => parseEnvironment(value), [value]);
+  const earlier = useMemo(() => (previous ? parseEnvironment(previous) : null), [previous]);
+  if (!facts) return <ContentPart value={value}/>;
+  const before = new Map(earlier?.fields || []);
+  return <div className="space-y-3">
+    <dl className="grid grid-cols-[7.5rem_minmax(0,1fr)] gap-x-4 gap-y-1.5 text-xs">
+      {facts.fields.map(([key, item]) => {
+        const old = before.get(key);
+        return <div className="contents" key={key}><dt className="text-muted">{ENVIRONMENT_FIELDS[key] || humanizeField(key)}</dt><dd className="min-w-0 break-all font-mono text-[11px] text-ink">{old !== undefined && old !== item ? <s className="mr-2 text-muted">{old}</s> : null}{item || "Empty"}</dd></div>;
+      })}
+      {facts.roots.length ? <><dt className="text-muted">Workspace roots</dt><dd className="min-w-0 space-y-0.5 break-all font-mono text-[11px] text-ink">{facts.roots.map((root) => <div key={root}>{root}</div>)}</dd></> : null}
+      {facts.entries.length ? <><dt className="text-muted">File system</dt><dd className="min-w-0 font-mono text-[11px] text-ink">{[facts.profile && `${facts.profile} profile`, facts.fileSystem, accessCounts(facts)].filter(Boolean).join(" · ")}</dd></> : null}
+    </dl>
+    {facts.entries.length ? <details className="text-xs">
+      <summary className="cursor-pointer text-[11px] text-muted hover:text-ink">{facts.entries.length} access rules</summary>
+      <div className="mt-2 overflow-hidden rounded-lg border border-line"><table className="w-full table-fixed text-left text-[11px]"><tbody className="divide-y divide-line">{facts.entries.map((entry, index) => <tr key={`${entry.target}-${index}`}><td className="w-20 px-3 py-1.5 align-top"><Pill tone={entry.access === "deny" ? "danger" : "neutral"}>{entry.access}</Pill></td><td className="break-all px-3 py-1.5 font-mono text-ink">{entry.target}{entry.special ? <span className="ml-2 font-sans text-[10px] text-muted">special</span> : null}{entry.escalatable === "false" ? <span className="ml-2 font-sans text-[10px] text-muted">not escalatable</span> : null}</td></tr>)}</tbody></table></div>
+    </details> : null}
   </div>;
 }
 
-function RequestRecord({ label, mode, onSelectToken, record, selection, turnId, defaultOpen }: { label: string; mode: RequestMode; onSelectToken: (selection: TokenSelection | null) => void; record: TraceRecord; selection: TokenSelection | null; turnId: string; defaultOpen: boolean }) {
+function parseAgentsMd(value: string): { body: string; path: string } | null {
+  const heading = /^# AGENTS\.md instructions(?: for ([^\n]+))?\s*\n/i.exec(value);
+  const wrapped = /<INSTRUCTIONS>([\s\S]*?)(?:<\/INSTRUCTIONS>|$)/i.exec(value)?.[1];
+  if (!heading && wrapped === undefined) return null;
+  return { body: (wrapped ?? value.slice(heading?.[0].length || 0)).trim(), path: heading?.[1]?.trim() || "" };
+}
+
+function ReadableText({ value }: { value: string }) {
+  return <div className="max-h-[36rem] overflow-auto rounded-lg bg-canvas/60 px-4 py-3"><RichText>{value}</RichText></div>;
+}
+
+/* Harness sections arrive wrapped in one pseudo-XML tag; the section label already
+   names it, so render only its body. The exact text remains in Tree and Raw. */
+function unwrapSection(value: string): string {
+  const match = /^\s*<([A-Za-z][\w -]*)>\s*\n?([\s\S]*?)\n?\s*<\/\1>\s*$/.exec(value);
+  return match ? match[2] : value;
+}
+
+function sectionPreview(label: string, value: string): string {
+  if (label === "Environment") {
+    const facts = parseEnvironment(value);
+    if (facts) return facts.fields.map(([, item]) => item).filter(Boolean).join(" · ");
+  }
+  if (label === "AGENTS.md") {
+    const parsed = parseAgentsMd(value);
+    if (parsed) return parsed.path || previewText(parsed.body.replace(/<!--[\s\S]*?-->/g, ""));
+  }
+  // Previews read as prose: drop markdown heading and emphasis markers.
+  return previewText(unwrapSection(value).replace(/^\s*#{1,6}\s+/gm, "").replace(/\*\*|__/g, ""));
+}
+
+function SectionContent({ label, previous, value }: { label: string; previous?: string; value: unknown }) {
+  const text = typeof value === "string" ? value : textValue(asRecord(value).text);
+  if (!text) return <ContentPart value={value}/>;
+  if (label === "Environment") return <EnvironmentView previous={previous} value={text}/>;
+  if (label === "AGENTS.md") {
+    const parsed = parseAgentsMd(text);
+    if (parsed) return <ReadableText value={parsed.body}/>;
+  }
+  const body = unwrapSection(text);
+  return parseStructuredText(body) ? <StructuredText>{body}</StructuredText> : <ReadableText value={body}/>;
+}
+
+interface InputEntry {
+  blockId?: string;
+  inputClass: InputClass;
+  item: UnknownRecord;
+  itemId: string;
+  key: string;
+  part?: unknown;
+  partIndex?: number;
+  /* The tool result answering this call, when the entry is a call. */
+  result?: InputEntry;
+  /* State shown on the row; omitted when every item is new so rows stay quiet. */
+  rowState?: ItemState;
+  state?: ItemState;
+  tokens?: { cached: number; tokens: number };
+}
+
+function isMessagePartItem(message: UnknownRecord): boolean {
+  return !toolEventKind(message) && Boolean(textValue(message.role)) && textValue(message.type) !== "additional_tools";
+}
+
+function tokenIndex(turn: TurnModel): Map<string, { cached: number; tokens: number }> {
+  const index = new Map<string, { cached: number; tokens: number }>();
+  for (const category of turn.categories) {
+    if (category.layer === "unknown") continue;
+    const itemId = splitBlockId(category.id).itemId;
+    for (const key of new Set([category.id, `item:${itemId}`])) {
+      const current = index.get(key) || { cached: 0, tokens: 0 };
+      index.set(key, { cached: current.cached + category.cached, tokens: current.tokens + category.tokens });
+    }
+  }
+  return index;
+}
+
+function inputEntries(turn: TurnModel, items: unknown[]): InputEntry[] {
+  const tokens = tokenIndex(turn);
+  const entries: InputEntry[] = items.flatMap((raw, itemIndex) => {
+    const item = asRecord(raw);
+    const itemId = textValue(item.id);
+    const state = itemId ? turn.itemStates[itemId] : undefined;
+    const key = itemId || `item-${itemIndex}`;
+    if (!isMessagePartItem(item)) {
+      return [{ blockId: itemId || undefined, inputClass: classifyInput(item), item, itemId, key, state, tokens: itemId ? tokens.get(`item:${itemId}`) : undefined }];
+    }
+    const parts = inputItemParts(item);
+    return parts.map((part, partIndex) => {
+      const blockId = itemId ? `${itemId}:${partIndex}` : undefined;
+      const partTokens = blockId ? tokens.get(blockId) ?? (parts.length === 1 ? tokens.get(`item:${itemId}`) : undefined) : undefined;
+      return { blockId, inputClass: classifyInput(item, part, partIndex), item, itemId, key: `${key}:${partIndex}`, part, partIndex, state, tokens: partTokens };
+    });
+  });
+  const mixed = entries.some((entry) => entry.state && entry.state !== "new");
+  return entries.map((entry) => ({ ...entry, rowState: mixed ? entry.state : undefined }));
+}
+
+function sumTokens(entries: InputEntry[]): { cached: number; tokens: number } | undefined {
+  const known = entries.filter((entry) => entry.tokens);
+  if (!known.length) return undefined;
+  return known.reduce((sum, entry) => ({ cached: sum.cached + (entry.tokens?.cached || 0), tokens: sum.tokens + (entry.tokens?.tokens || 0) }), { cached: 0, tokens: 0 });
+}
+
+function entryBlockIds(entries: Array<InputEntry | undefined>): string[] {
+  return entries.flatMap((entry) => {
+    if (!entry?.itemId) return [];
+    if (entry.part !== undefined) return entry.blockId ? [entry.blockId] : [];
+    const parts = inputItemParts(entry.item);
+    return [entry.itemId, ...parts.map((_, index) => `${entry.itemId}:${index}`)];
+  });
+}
+
+function selectionHits(entries: Array<InputEntry | undefined>, selection: TokenSelection | null, turnId: string): boolean {
+  if (!selection || selection.turnId !== turnId) return false;
+  const selectedIds = selection.blockIds || [selection.blockId];
+  return entries.some((entry) => entry?.itemId && selectedIds.some((id) => id === entry.itemId || id.startsWith(`${entry.itemId}:`)));
+}
+
+const ICON_PATHS: Record<string, string> = {
+  book: "M5 4.5A1.5 1.5 0 0 1 6.5 3H19v15H6.5A1.5 1.5 0 0 0 5 19.5zM5 19.5A1.5 1.5 0 0 0 6.5 21H19M9 7h6",
+  chat: "M4 5h12v9H9l-5 4zM16 9h4v9l-3-2.5h-6V14",
+  history: "M4 12a8 8 0 1 0 2.4-5.7L4 8.5M4 4v4.5h4.5M12 8v4l2.5 2",
+  pin: "M12 21s-6-5.5-6-11a6 6 0 0 1 12 0c0 5.5-6 11-6 11zM12 12.5a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5z",
+  question: "M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18zM9.5 9.5a2.5 2.5 0 1 1 3.5 2.3c-.6.3-1 .9-1 1.6v.6M12 17h.01",
+  sliders: "M6 4v16M12 4v16M18 4v16M4 9h4M10 15h4M16 7h4",
+  sparkle: "M12 4l1.8 4.7L18.5 10.5 13.8 12.3 12 17l-1.8-4.7L5.5 10.5l4.7-1.8zM18 16l.8 2 2 .8-2 .8-.8 2-.8-2-2-.8 2-.8z",
+  terminal: "M4 5h16v14H4zM8 10l2.5 2L8 14M13 14h3",
+  tool: "M14.5 5.5a4 4 0 0 0 4.9 4.9L12 17.8 9.2 20.6a2 2 0 0 1-2.8-2.8L9.2 15 16.6 7.6a4 4 0 0 0-2.1-2.1z",
+  user: "M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM5 20a7 7 0 0 1 14 0",
+};
+
+const LAYER_ICONS: Record<InputLayer, string> = {
+  capabilities: "tool",
+  instructions: "book",
+  context: "pin",
+  conversation: "chat",
+  unknown: "question",
+};
+
+function Icon({ color, name }: { color?: string; name: string }) {
+  return <svg aria-hidden="true" className="size-[18px] shrink-0 text-muted" fill="none" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.7} style={color ? { color } : undefined} viewBox="0 0 24 24"><path d={ICON_PATHS[name]}/></svg>;
+}
+
+type BadgeTone = "new" | "changed" | "neutral" | "danger";
+
+function Badge({ children, tone = "neutral" }: { children: ReactNode; tone?: BadgeTone }) {
+  const tones: Record<BadgeTone, string> = {
+    changed: "bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300",
+    danger: "bg-red-100 text-danger dark:bg-red-950",
+    neutral: "bg-canvas text-muted",
+    new: "bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300",
+  };
+  return <span className={`whitespace-nowrap rounded-md px-2 py-0.5 font-mono text-[11px] ${tones[tone]}`}>{children}</span>;
+}
+
+function StateBadge({ state }: { state?: ItemState }) {
+  if (state === "new") return <Badge tone="new">new</Badge>;
+  if (state === "changed") return <Badge tone="changed">changed</Badge>;
+  return null;
+}
+
+/* Right-aligned token column shared by section headers and rows. */
+function RowEnd({ badge, tokens }: { badge?: ReactNode; tokens?: { cached: number; tokens: number } }) {
+  return <span className="ml-auto flex shrink-0 items-center gap-2 pl-2">
+    {tokens ? <span className="font-mono text-xs tabular-nums text-ink" title={`${tokens.tokens.toLocaleString()} tokens · ${tokens.cached.toLocaleString()} cached`}>{tokens.tokens.toLocaleString()}</span> : null}
+    {badge}
+  </span>;
+}
+
+/* The row's one leading mark: a category swatch, or an icon tinted with the category
+   color. It also links the row's blocks to Composition and Token flow. */
+function LinkSwatch({ blockIds, icon, label, layer, onSelectToken, selection, turnId }: { blockIds: string[]; icon?: string; label: string; layer: InputLayer; onSelectToken: (selection: TokenSelection | null) => void; selection: TokenSelection | null; turnId: string }) {
+  const selectedIds = selection?.turnId === turnId ? selection.blockIds || [selection.blockId] : [];
+  const active = blockIds.some((id) => selectedIds.includes(id));
+  const mark = icon ? <Icon color={categoryColor(label, layer)} name={icon}/> : <CategorySwatch label={label} layer={layer}/>;
+  if (!blockIds.length) return <span className="grid size-5 shrink-0 place-items-center">{mark}</span>;
+  return <button aria-label={active ? `Unlink ${label}` : `Link ${label} in the charts`} aria-pressed={active} className={`grid size-5 shrink-0 place-items-center rounded ${active ? "ring-2 ring-ink" : "hover:ring-1 hover:ring-line"}`} onClick={(event) => { event.preventDefault(); event.stopPropagation(); onSelectToken(active ? null : { blockId: blockIds[0], blockIds, label, turnId }); }} title={`${label} · link in charts`} type="button">{mark}</button>;
+}
+
+/* Invisible scroll targets plus the selection ring for one or more captured blocks. */
+function BlockAnchor({ blockIds, children, selection, turnId }: { blockIds: string[]; children: ReactNode; selection: TokenSelection | null; turnId: string }) {
+  const selectedIds = selection?.turnId === turnId ? selection.blockIds || [selection.blockId] : [];
+  const active = blockIds.some((id) => selectedIds.includes(id));
+  return <div className={`relative scroll-m-32 rounded-lg transition ${active ? "ring-2 ring-ink ring-offset-4 ring-offset-panel" : ""}`}>
+    {blockIds.map((id) => <span className="absolute left-0 top-0 size-px opacity-0" data-block-id={id} data-turn-id={turnId} key={id} tabIndex={-1}/>)}
+    {children}
+  </div>;
+}
+
+/* Flat disclosure row: chevron on the left, summary in one line, body indented under it. */
+function Row({ children, defaultOpen = false, hint, summary }: { children?: ReactNode; defaultOpen?: boolean; hint?: string; summary: ReactNode }) {
   const [open, setOpen] = useState(defaultOpen);
+  const [requestedOpen, setRequestedOpen] = useState(defaultOpen);
+  if (defaultOpen !== requestedOpen) {
+    setRequestedOpen(defaultOpen);
+    if (defaultOpen) setOpen(true);
+  }
+  if (children === undefined) return <div className="flex min-h-11 items-center gap-2.5 py-2 pl-10 pr-3 text-sm sm:pr-4" title={hint}>{summary}</div>;
+  return <details onToggle={(event) => setOpen(event.currentTarget.open)} open={open}>
+    <summary className="flex min-h-11 cursor-pointer list-none items-center gap-2.5 px-3 py-2 text-sm hover:bg-canvas/70 sm:px-4 [&::-webkit-details-marker]:hidden" title={hint}>
+      <span aria-hidden="true" className="w-3 shrink-0 text-center text-xs text-muted/60 transition [details[open]>summary>&]:rotate-90 [details[open]>summary>&]:text-muted">›</span>
+      {summary}
+    </summary>
+    {open ? <div className="pb-4 pl-[3.25rem] pr-3 pt-1 sm:pr-4">{children}</div> : null}
+  </details>;
+}
+
+function Meta({ children, mono = false }: { children: ReactNode; mono?: boolean }) {
+  return <span className={`min-w-0 flex-1 truncate text-xs text-muted ${mono ? "font-mono text-[11px]" : ""}`}>{children}</span>;
+}
+
+function StateSummary({ entries }: { entries: InputEntry[] }) {
+  const counts = { carried: 0, changed: 0, new: 0 };
+  const seen = new Set<string>();
+  for (const entry of entries) {
+    if (!entry.state || seen.has(entry.itemId)) continue;
+    seen.add(entry.itemId);
+    counts[entry.state] += 1;
+  }
+  if (!seen.size) return null;
+  if (!counts.new && !counts.changed) return <Badge>unchanged</Badge>;
+  return <>{counts.changed ? <Badge tone="changed">{counts.changed} changed</Badge> : null}{counts.new ? <Badge tone="new">+{counts.new} new</Badge> : null}</>;
+}
+
+function LayerSection({ badge, children, entries, layer }: { badge?: ReactNode; children: ReactNode; entries: InputEntry[]; layer: InputLayer }) {
+  const meta = LAYER_META[layer];
+  return <section aria-label={meta.title} className="overflow-hidden rounded-xl border border-line bg-panel">
+    <header className="flex min-h-12 items-center gap-2.5 bg-canvas/60 px-3 py-2 sm:px-4">
+      <Icon color={meta.color} name={LAYER_ICONS[layer]}/>
+      <h3 className="shrink-0 text-[15px] font-semibold">{meta.title}</h3>
+      <Meta>{meta.description}</Meta>
+      <RowEnd badge={badge ?? <StateSummary entries={entries}/>} tokens={sumTokens(entries)}/>
+    </header>
+    <div className="divide-y divide-line border-t border-line">{children}</div>
+  </section>;
+}
+
+interface RowProps {
+  defaultOpen?: boolean;
+  onSelectToken: (selection: TokenSelection | null) => void;
+  selection: TokenSelection | null;
+  turnId: string;
+}
+
+function toolSignature(tool: UnknownRecord): string {
+  const format = asRecord(tool.format);
+  if (format.type === "grammar") return `grammar · ${textValue(format.syntax) || "custom"}`;
+  const schema = asRecord(tool.parameters ?? tool.input_schema);
+  const properties = Object.keys(asRecord(schema.properties));
+  const required = new Set(asArray(schema.required).map(textValue));
+  if (!properties.length) return textValue(tool.type) === "custom" ? "free-form input" : "()";
+  const shown = properties.slice(0, 4).map((name) => (required.has(name) ? name : `${name}?`));
+  return `(${shown.join(", ")}${properties.length > 4 ? `, …${properties.length - 4}` : ""})`;
+}
+
+function ToolDefinitionRow({ entry, onSelectToken, selection, tools, turnId }: RowProps & { entry?: InputEntry; tools: unknown }) {
+  const groups = toolGroups(tools);
+  const total = groups.reduce((sum, group) => sum + group.tools.length, 0);
+  const blockIds = entry?.blockId ? [entry.blockId] : [];
+  if (!total) return null;
+  return <Row defaultOpen={selectionHits([entry], selection, turnId)} summary={<>
+    <LinkSwatch blockIds={blockIds} label="Tool definitions" layer="capabilities" onSelectToken={onSelectToken} selection={selection} turnId={turnId}/>
+    <span className="min-w-0 flex-1 truncate">{groups.map((group, index) => <span key={group.name}>{index ? <span className="text-muted"> · </span> : null}<span className="font-mono text-[13px] text-ink">{group.name}</span> <span className="text-xs text-muted">{group.tools.length}</span></span>)}</span>
+    <RowEnd badge={<StateBadge state={entry?.rowState}/>} tokens={entry?.tokens}/>
+  </>}>
+    <BlockAnchor blockIds={blockIds} selection={selection} turnId={turnId}>
+      <div className="space-y-3">{groups.map((group) => <section key={group.name}>
+        {groups.length > 1 ? <h4 className="mb-1 font-mono text-[10px] text-muted">{group.name}</h4> : null}
+        <ul>{group.tools.map((tool, index) => {
+          const name = textValue(tool.name) || `Tool ${index + 1}`;
+          const description = textValue(tool.description);
+          const schema = tool.parameters ?? tool.input_schema ?? tool.format;
+          return <li key={`${name}-${index}`} style={{ containIntrinsicSize: "0 28px", contentVisibility: "auto" }}><details>
+            <summary className="grid cursor-pointer list-none grid-cols-[minmax(6rem,12rem)_minmax(0,1fr)] gap-3 rounded px-1 py-1 font-mono text-xs hover:bg-canvas/70 [&::-webkit-details-marker]:hidden"><span className="truncate text-ink">{name}</span><span className="truncate text-muted">{toolSignature(tool)}</span></summary>
+            <div className="mb-2 ml-1 mt-1 space-y-2 border-l-2 border-line pl-3">
+              {description ? <p className="whitespace-pre-wrap text-xs leading-5 text-muted">{description}</p> : null}
+              {schema ? <details><summary className="cursor-pointer text-[10px] font-medium text-muted hover:text-ink">Schema</summary><div className="mt-2"><JsonBlock value={schema}/></div></details> : null}
+            </div>
+          </details></li>;
+        })}</ul>
+      </section>)}</div>
+    </BlockAnchor>
+  </Row>;
+}
+
+function contentKind(entry: InputEntry): string {
+  const kinds = asRecord(entry.item.internal_chat_message_metadata_passthrough).content_item_kinds;
+  return Array.isArray(kinds) && entry.partIndex !== undefined ? textValue(kinds[entry.partIndex]) : "";
+}
+
+/* A short identifying fact for a row, never a prose preview: the declared content
+   kind, the wrapper tag, or a heading that says more than the label. */
+function sectionFact(entry: InputEntry, text: string): { mono: boolean; value: string } {
+  const label = entry.inputClass.label;
+  if (label === "Environment" || label === "AGENTS.md") return { mono: false, value: sectionPreview(label, text) };
+  if (label === "Assistant messages") return { mono: false, value: [textValue(entry.item.phase).replaceAll("_", " "), previewText(text)].filter(Boolean).join(" · ") };
+  const kind = contentKind(entry);
+  if (kind) return { mono: true, value: kind };
+  const tag = /^\s*<([A-Za-z][\w -]*)>/.exec(text)?.[1];
+  if (tag && unwrapSection(text) !== text) return { mono: true, value: tag };
+  const heading = /^\s*#{1,6}\s+([^\n]+)/.exec(text)?.[1]?.trim();
+  if (heading && heading.toLowerCase() !== label.toLowerCase()) return { mono: false, value: heading };
+  return { mono: false, value: "" };
+}
+
+function PartRow({ defaultOpen = false, entry, onSelectToken, previous, selection, turnId }: RowProps & { entry: InputEntry; previous?: string }) {
+  const label = entry.inputClass.label;
+  const text = capturedText(entry.part);
+  const isPrompt = label === "User prompt";
+  const fact = sectionFact(entry, text);
+  const blockIds = entry.blockId ? [entry.blockId] : [];
+  const changes = label === "Environment" ? environmentChanges(text, previous) : [];
+  const badge = changes.length ? <Badge tone="changed">{changes.length === 1 ? `${changes[0]} changed` : `${changes.length} fields changed`}</Badge> : <StateBadge state={entry.rowState}/>;
+  return <Row defaultOpen={defaultOpen || selectionHits([entry], selection, turnId)} hint={isPrompt ? undefined : sectionPreview(label, text)} summary={<>
+    <LinkSwatch blockIds={blockIds} icon={isPrompt ? "user" : label === "Assistant messages" ? "chat" : undefined} label={label} layer={entry.inputClass.layer} onSelectToken={onSelectToken} selection={selection} turnId={turnId}/>
+    {isPrompt ? <span className="min-w-0 flex-1 truncate font-medium text-ink">{previewText(entry.part) || "Empty prompt"}</span> : <>
+      <span className="shrink-0 text-ink">{label === "Assistant messages" ? "Assistant" : label}</span>
+      <Meta mono={fact.mono}>{fact.value}</Meta>
+    </>}
+    <RowEnd badge={badge} tokens={entry.tokens}/>
+  </>}>
+    <BlockAnchor blockIds={blockIds} selection={selection} turnId={turnId}><SectionContent label={label} previous={previous} value={entry.part}/></BlockAnchor>
+  </Row>;
+}
+
+function reasoningSummary(item: UnknownRecord): string {
+  return asArray(item.summary).map((part) => textValue(asRecord(part).text) || textValue(part)).filter(Boolean).join("\n\n");
+}
+
+function ReasoningRow({ entry, onSelectToken, selection, turnId }: RowProps & { entry: InputEntry }) {
+  const summary = reasoningSummary(entry.item);
+  const encrypted = Boolean(textValue(entry.item.encrypted_content));
+  const blockIds = entryBlockIds([entry]);
+  const detail = [encrypted ? "encrypted" : "", summary ? previewText(summary) : "no summary"].filter(Boolean).join(" · ");
+  return <Row defaultOpen={selectionHits([entry], selection, turnId)} summary={<>
+    <LinkSwatch blockIds={blockIds} icon="sparkle" label="Reasoning" layer="conversation" onSelectToken={onSelectToken} selection={selection} turnId={turnId}/>
+    <span className="shrink-0 text-ink">Reasoning</span>
+    <Meta>{detail}</Meta>
+    <RowEnd badge={<StateBadge state={entry.rowState}/>} tokens={entry.tokens}/>
+  </>}>
+    <BlockAnchor blockIds={blockIds} selection={selection} turnId={turnId}>{summary ? <ReadableText value={summary}/> : <p className="text-xs text-muted">{encrypted ? "The model's reasoning was sent back encrypted. No readable summary was captured." : "No readable reasoning was captured."}</p>}</BlockAnchor>
+  </Row>;
+}
+
+const CALL_SOURCE_KEYS = ["code", "cmd", "command", "source", "script", "query", "input"];
+
+function CallInput({ value }: { value: unknown }) {
+  if (typeof value === "string") return <pre className="max-h-80 overflow-auto whitespace-pre-wrap break-words rounded-lg bg-canvas px-3 py-2 font-mono text-[11px] leading-5 text-ink">{value}</pre>;
+  const record = asRecord(value);
+  const sourceKey = CALL_SOURCE_KEYS.find((key) => typeof record[key] === "string");
+  const rest = Object.entries(record).filter(([key]) => key !== sourceKey);
+  if (!sourceKey && !rest.length) return <p className="text-xs text-muted">No captured input.</p>;
+  return <div className="space-y-2">
+    {sourceKey ? <pre className="max-h-80 overflow-auto whitespace-pre-wrap break-words rounded-lg bg-canvas px-3 py-2 font-mono text-[11px] leading-5 text-ink">{textValue(record[sourceKey])}</pre> : null}
+    {rest.length ? <dl className="grid grid-cols-[7.5rem_minmax(0,1fr)] gap-x-4 gap-y-1 text-xs">{rest.map(([key, item]) => <div className="contents" key={key}><dt className="text-muted">{humanizeField(key)}</dt><dd className="min-w-0 break-words font-mono text-[11px] text-ink">{item && typeof item === "object" ? <StructuredValue value={item}/> : formatToolField(key, item) || (item === null ? "null" : "Unknown")}</dd></div>)}</dl> : null}
+  </div>;
+}
+
+function callSource(message: UnknownRecord, input: unknown): string {
+  const field = message.arguments !== undefined ? "arguments" : "input";
+  const key = CALL_SOURCE_KEYS.find((candidate) => typeof asRecord(input)[candidate] === "string");
+  return key ? `${field}.${key}` : field;
+}
+
+function BlockHeading({ children, tokens }: { children: ReactNode; tokens?: { cached: number; tokens: number } }) {
+  return <div className="mb-1.5 flex items-baseline justify-between gap-3 text-xs text-muted"><span className="min-w-0 truncate">{children}</span>{tokens ? <span className="shrink-0 font-mono">{tokens.tokens.toLocaleString()} tok</span> : null}</div>;
+}
+
+function ToolExchangeRow({ call, onSelectToken, result, selection, turnId }: RowProps & { call?: InputEntry; result?: InputEntry }) {
+  const callItem = call?.item;
+  const resultItem = result?.item;
+  const presentation = callItem ? toolCallPresentation(callItem) : null;
+  const outcome = resultItem ? parseToolResult(capturedText(resultItem.output ?? resultItem.content ?? resultItem.text)) : null;
+  const failed = Boolean(outcome && /failed|error|timed out/i.test(outcome.status));
+  const namespace = textValue(callItem?.namespace);
+  const title = textValue(asRecord(presentation?.input).title) || presentation?.preview || outcome?.status || "";
+  const tokens = sumTokens([call, result].filter((entry): entry is InputEntry => Boolean(entry)));
+  const blockIds = entryBlockIds([call, result]);
+  const state = result?.rowState ?? call?.rowState;
+  const resultParts = resultItem ? inputItemParts(resultItem).length : 0;
+  return <Row defaultOpen={selectionHits([call, result], selection, turnId)} summary={<>
+    <LinkSwatch blockIds={blockIds} icon="terminal" label={call ? "Tool calls" : "Tool results"} layer="conversation" onSelectToken={onSelectToken} selection={selection} turnId={turnId}/>
+    <span className="shrink-0 font-mono text-[13px] text-ink">{namespace ? <span className="text-muted">{namespace}.</span> : null}{presentation?.name || "Tool result"}</span>
+    <Meta>{title}</Meta>
+    <RowEnd badge={failed ? <Badge tone="danger">failed</Badge> : <StateBadge state={state}/>} tokens={tokens}/>
+  </>}>
+    <div className="space-y-4">
+      {call && callItem && presentation ? <BlockAnchor blockIds={entryBlockIds([call])} selection={selection} turnId={turnId}>
+        <BlockHeading tokens={call.tokens}>Call · {callSource(callItem, presentation.input)}{presentation.wrapperName ? ` · ${presentation.wrapperName}` : ""}</BlockHeading>
+        <CallInput value={presentation.input}/>
+      </BlockAnchor> : null}
+      {result && resultItem && outcome ? <BlockAnchor blockIds={entryBlockIds([result])} selection={selection} turnId={turnId}>
+        <BlockHeading tokens={result.tokens}>{["Result", outcome.status, outcome.elapsed && `wall ${outcome.elapsed}`, resultParts > 1 ? `${resultParts} parts` : ""].filter(Boolean).join(" · ")}</BlockHeading>
+        <ToolOutputView value={outcome.output}/>
+      </BlockAnchor> : <p className="text-xs text-muted">The result is not part of this request.</p>}
+    </div>
+  </Row>;
+}
+
+function GenericRow({ entry, onSelectToken, selection, turnId }: RowProps & { entry: InputEntry }) {
+  const blockIds = entryBlockIds([entry]);
+  return <Row defaultOpen={selectionHits([entry], selection, turnId)} summary={<>
+    <LinkSwatch blockIds={blockIds} label={entry.inputClass.label} layer={entry.inputClass.layer} onSelectToken={onSelectToken} selection={selection} turnId={turnId}/>
+    <span className="shrink-0 text-ink">{entry.inputClass.label}</span>
+    <Meta mono>{textValue(entry.item.type) || "input"}</Meta>
+    <RowEnd badge={<StateBadge state={entry.rowState}/>} tokens={entry.tokens}/>
+  </>}>
+    <BlockAnchor blockIds={blockIds} selection={selection} turnId={turnId}>{inputItemParts(entry.item).map((part, index) => <ContentPart key={index} value={part}/>)}</BlockAnchor>
+  </Row>;
+}
+
+/* Join each tool call with the result carrying its call_id so the pair reads as one
+   exchange. Only a result that follows its call is joined; anything else stays a row. */
+function pairToolExchanges(entries: InputEntry[]): InputEntry[] {
+  const results = new Map<string, InputEntry>();
+  for (const entry of entries) {
+    const callId = textValue(entry.item.call_id ?? entry.item.tool_use_id);
+    if (entry.part === undefined && toolEventKind(entry.item) === "result" && callId && !results.has(callId)) results.set(callId, entry);
+  }
+  const placed = new Set<InputEntry>();
+  const paired: InputEntry[] = [];
+  for (const entry of entries) {
+    if (placed.has(entry)) continue;
+    placed.add(entry);
+    const callId = textValue(entry.item.call_id ?? entry.item.id);
+    const result = entry.part === undefined && toolEventKind(entry.item) === "call" && callId ? results.get(callId) : undefined;
+    if (result && !placed.has(result)) {
+      placed.add(result);
+      paired.push({ ...entry, result });
+    } else paired.push(entry);
+  }
+  return paired;
+}
+
+function EntryRow({ entry, previous, ...props }: RowProps & { entry: InputEntry; previous?: string }) {
+  if (entry.part !== undefined) return <PartRow entry={entry} previous={previous} {...props}/>;
+  const kind = toolEventKind(entry.item);
+  if (kind === "call") return <ToolExchangeRow call={entry} result={entry.result} {...props}/>;
+  if (kind === "result") return <ToolExchangeRow result={entry} {...props}/>;
+  if (entry.inputClass.label === "Reasoning") return <ReasoningRow entry={entry} {...props}/>;
+  return <GenericRow entry={entry} {...props}/>;
+}
+
+/* Describe carried rows the way they read: tool exchanges by tool name, then the rest. */
+function carriedSummary(rows: InputEntry[]): string {
+  const counts = new Map<string, number>();
+  for (const entry of rows) {
+    const kind = entry.part === undefined ? toolEventKind(entry.item) : null;
+    const name = kind === "call" ? toolCallPresentation(entry.item).name
+      : kind === "result" ? "tool result"
+        : entry.inputClass.label === "Assistant messages" ? "assistant message"
+          : entry.inputClass.label.toLowerCase();
+    counts.set(name, (counts.get(name) || 0) + 1);
+  }
+  return [...counts].map(([name, count]) => `${count} ${name}`).join(", ");
+}
+
+function ConversationRows({ entries, lastPromptKey, ...props }: RowProps & { entries: InputEntry[]; lastPromptKey: string }) {
+  const carried = entries.filter((entry) => entry.state === "carried" && entry.key !== lastPromptKey);
+  const current = entries.filter((entry) => !carried.includes(entry));
+  const carriedTokens = sumTokens(carried);
+  const carriedItems = new Set(carried.map((entry) => entry.itemId || entry.key)).size;
+  const fullyCached = carriedTokens && carriedTokens.tokens > 0 && carriedTokens.cached >= carriedTokens.tokens;
+  const cacheBadge = carriedTokens && carriedTokens.tokens > 0 ? <Badge>{fullyCached ? "cached" : `${Math.round((carriedTokens.cached / carriedTokens.tokens) * 100)}% cached`}</Badge> : null;
+  const carriedRows = pairToolExchanges(carried);
+  // Keep the prompt that started this query first, even when it was carried over.
+  const prompt = current.filter((entry) => entry.key === lastPromptKey);
+  const rest = current.filter((entry) => entry.key !== lastPromptKey);
+  return <>
+    {prompt.map((entry) => <EntryRow entry={entry} key={entry.key} {...props}/>)}
+    {carried.length ? <Row defaultOpen={selectionHits(carried, props.selection, props.turnId)} summary={<>
+      <span className="grid size-5 shrink-0 place-items-center"><Icon name="history"/></span>
+      <span className="shrink-0 text-ink">Carried over</span>
+      <Meta>{carriedItems} {carriedItems === 1 ? "item" : "items"} · {carriedSummary(carriedRows)}</Meta>
+      <RowEnd badge={cacheBadge} tokens={carriedTokens}/>
+    </>}><NestedRows>{carriedRows.map((entry) => <EntryRow entry={entry} key={entry.key} {...props}/>)}</NestedRows></Row> : null}
+    {pairToolExchanges(rest).map((entry) => <EntryRow entry={entry} key={entry.key} {...props}/>)}
+  </>;
+}
+
+function NestedRows({ children }: { children: ReactNode }) {
+  return <div className="-ml-7 divide-y divide-line overflow-hidden rounded-lg border border-line">{children}</div>;
+}
+
+/* Rows below 5% of their section's tokens collapse into one line when there are at
+   least three of them. Changed rows and the Environment stay visible on their own. */
+function groupMinorRows(entries: InputEntry[]): Array<InputEntry | InputEntry[]> {
+  const total = sumTokens(entries)?.tokens || 0;
+  const minor = (entry: InputEntry) => Boolean(entry.tokens && total && entry.tokens.tokens < total * 0.05 && entry.state !== "changed" && entry.inputClass.label !== "Environment");
+  const group = entries.filter(minor);
+  if (group.length < 3) return entries;
+  const rows: Array<InputEntry | InputEntry[]> = [];
+  for (const entry of entries) {
+    if (!minor(entry)) rows.push(entry);
+    else if (entry === group[0]) rows.push(group);
+  }
+  return rows;
+}
+
+function MinorRowsGroup({ entries, ...props }: RowProps & { entries: InputEntry[] }) {
+  const labels = [...new Set(entries.map((entry) => entry.inputClass.label))];
+  return <Row defaultOpen={selectionHits(entries, props.selection, props.turnId)} summary={<>
+    <span className="flex shrink-0 -space-x-1">{labels.slice(0, 4).map((label) => <span className="rounded-[4px] ring-2 ring-panel" key={label}><CategorySwatch label={label} layer={entries[0].inputClass.layer}/></span>)}</span>
+    <span className="min-w-0 flex-1 truncate text-ink">{labels.join(" · ")}</span>
+    <RowEnd badge={<StateBadge state={entries.find((entry) => entry.rowState)?.rowState}/>} tokens={sumTokens(entries)}/>
+  </>}><NestedRows>{entries.map((entry) => <EntryRow entry={entry} key={entry.key} {...props}/>)}</NestedRows></Row>;
+}
+
+function shortId(value: unknown): string {
+  const text = textValue(value);
+  return text.length > 14 ? `${text.slice(0, 10)}…` : text;
+}
+
+function RequestSettings({ body, record }: { body: UnknownRecord; record: TraceRecord }) {
+  const reasoning = asRecord(body.reasoning);
+  const text = asRecord(body.text);
+  const format = asRecord(text.format);
+  const metadata = asRecord(body.client_metadata);
+  const includes = asArray(body.include).map(textValue).filter(Boolean);
+  const chips = [
+    reasoning.effort ? `reasoning ${[reasoning.effort, reasoning.context].filter(Boolean).map(textValue).join(" · ")}` : "",
+    text.verbosity ? `verbosity ${textValue(text.verbosity)}` : "",
+    body.tool_choice ? `tools ${textValue(body.tool_choice)}${body.parallel_tool_calls ? " · parallel" : ""}` : "",
+    format.type ? `output ${textValue(format.name ?? format.type)}` : "",
+    body.prompt_cache_key ? `cache key ${shortId(body.prompt_cache_key)}` : "",
+    body.previous_response_id ? `previous ${shortId(body.previous_response_id)}` : "",
+    metadata["x-openai-subagent"] ? `subagent ${textValue(metadata["x-openai-subagent"])}` : "",
+  ].filter(Boolean);
+  const groups: Array<[string, Array<[string, unknown]>]> = [
+    ["Generation", [
+      ["Reasoning effort", reasoning.effort],
+      ["Reasoning context", reasoning.context],
+      ["Reasoning summary", reasoning.summary],
+      ["Verbosity", text.verbosity],
+      ["Output format", format.name ?? format.type],
+      ["Tool choice", body.tool_choice],
+      ["Parallel tool calls", body.parallel_tool_calls],
+      ["Streaming", body.stream],
+      ["Included output", includes.join(", ") || undefined],
+    ]],
+    ["Cache and chaining", [
+      ["Store", body.store],
+      ["Prompt cache key", body.prompt_cache_key],
+      ["Previous response", body.previous_response_id],
+    ]],
+    ["Identity", [
+      ["Thread", metadata.thread_id],
+      ["Session", metadata.session_id],
+      ["Turn", metadata.turn_id],
+      ["Parent thread", metadata["x-codex-parent-thread-id"]],
+      ["Subagent", metadata["x-openai-subagent"]],
+      ["Transport", record.transport],
+    ]],
+  ];
+  const visible = groups.map(([title, facts]) => [title, facts.filter(([, value]) => value !== undefined && value !== null && value !== "")] as const).filter(([, facts]) => facts.length);
+  if (!visible.length) return null;
+  return <section aria-label="Request settings" className="overflow-hidden rounded-xl border border-line bg-panel">
+    <header className="flex min-h-12 items-center gap-2.5 bg-canvas/60 px-3 py-2 sm:px-4">
+      <Icon name="sliders"/>
+      <h3 className="shrink-0 text-[15px] font-semibold">Request settings</h3>
+      <Meta>No input tokens</Meta>
+    </header>
+    <div className="divide-y divide-line border-t border-line">
+      {chips.length ? <div className="flex flex-wrap gap-1.5 px-3 py-2.5 sm:px-4">{chips.map((chip) => <Badge key={chip}>{chip}</Badge>)}</div> : null}
+      <Row summary={<span className="text-muted">All settings</span>}>
+        <div className="space-y-4">{visible.map(([title, facts]) => <section key={title}><h4 className="mb-1.5 text-[10px] font-medium text-muted">{title}</h4><dl className="grid grid-cols-[9rem_minmax(0,1fr)] gap-x-4 gap-y-1 text-xs">{facts.map(([label, value]) => <div className="contents" key={label}><dt className="text-muted">{label}</dt><dd className="min-w-0 break-all font-mono text-[11px] text-ink">{typeof value === "boolean" ? (value ? "on" : "off") : textValue(value) || "configured"}</dd></div>)}</dl></section>)}</div>
+      </Row>
+    </div>
+  </section>;
+}
+
+/* Text of the nearest earlier Environment block, for field-level comparison. */
+function earlierEnvironment(earlierTurns: TurnModel[]): string | undefined {
+  for (let index = earlierTurns.length - 1; index >= 0; index -= 1) {
+    for (const raw of collectInput(asRecord(earlierTurns[index].record.request?.body))) {
+      const item = asRecord(raw);
+      if (!isMessagePartItem(item)) continue;
+      const parts = inputItemParts(item);
+      for (let partIndex = 0; partIndex < parts.length; partIndex += 1) {
+        if (classifyInput(item, parts[partIndex], partIndex).label === "Environment") return capturedText(parts[partIndex]);
+      }
+    }
+  }
+  return undefined;
+}
+
+function RequestHeader({ turn }: { turn: TurnModel }) {
+  const record = turn.record;
+  const status = Number(record.response?.status || 0);
+  const route = record.transport || `${record.request?.method || ""} ${record.request?.path || ""}`.trim();
+  const facts = [`Turn ${turn.label}`, turn.model, route, status ? String(status) : "", turn.durationMs ? formatDuration(turn.durationMs) : ""].filter(Boolean);
+  return <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1 px-1 pb-1">
+    <h3 className="min-w-0 max-w-full truncate text-lg font-semibold tracking-[-0.01em]">{turn.queryText || turn.title}</h3>
+    <span className={`text-xs ${status >= 400 ? "text-danger" : "text-muted"}`}>{facts.join(" · ")}</span>
+    <span className="ml-auto font-mono text-xs text-muted">{turn.input ? <>{formatNumber(turn.input)} in · {formatNumber(turn.cached)} cached · <span className="text-ink">{formatNumber(turn.fresh)} new</span></> : "Token usage unknown"}</span>
+  </div>;
+}
+
+function StructuredRequest({ earlierTurns, onSelectToken, selection, turn }: { earlierTurns: TurnModel[]; onSelectToken: (selection: TokenSelection | null) => void; selection: TokenSelection | null; turn: TurnModel }) {
+  const record = turn.record;
+  const turnId = turn.id;
+  const body = asRecord(record.request?.body);
+  const input = useMemo(() => collectInput(body), [body]);
+  const entries = useMemo(() => inputEntries(turn, input), [turn, input]);
+  const previousEnvironment = useMemo(() => earlierEnvironment(earlierTurns), [earlierTurns]);
+  const topLevelTools = asArray(body.tools);
+  const byLayer = new Map<InputLayer, InputEntry[]>();
+  for (const entry of entries) byLayer.set(entry.inputClass.layer, [...(byLayer.get(entry.inputClass.layer) || []), entry]);
+  const lastPromptKey = [...entries].reverse().find((entry) => entry.inputClass.label === "User prompt")?.key || "";
+  const hasContent = entries.length > 0 || topLevelTools.length > 0;
+  const rowProps = { onSelectToken, selection, turnId };
+  const contextChanges = (byLayer.get("context") || []).filter((entry) => entry.inputClass.label === "Environment" && environmentChanges(capturedText(entry.part), previousEnvironment).length).length;
+
+  return <div className="space-y-4 p-3 sm:p-4">
+    <RequestHeader turn={turn}/>
+
+    {LAYER_ORDER.map((layer) => {
+      const layerEntries = byLayer.get(layer) || [];
+      if (layer === "capabilities") {
+        if (!layerEntries.length && !topLevelTools.length) return null;
+        return <LayerSection entries={layerEntries} key={layer} layer={layer}>
+          {topLevelTools.length ? <ToolDefinitionRow tools={topLevelTools} {...rowProps}/> : null}
+          {layerEntries.map((entry) => <ToolDefinitionRow entry={entry} key={entry.key} tools={entry.item.tools} {...rowProps}/>)}
+        </LayerSection>;
+      }
+      if (!layerEntries.length) return null;
+      const badge = layer === "context" && contextChanges ? <Badge tone="changed">{contextChanges} changed</Badge> : undefined;
+      return <LayerSection badge={badge} entries={layerEntries} key={layer} layer={layer}>
+        {layer === "conversation"
+          ? <ConversationRows entries={layerEntries} lastPromptKey={lastPromptKey} {...rowProps}/>
+          : groupMinorRows(layerEntries).map((row) => Array.isArray(row)
+            ? <MinorRowsGroup entries={row} key={`minor-${layer}`} {...rowProps}/>
+            : <EntryRow entry={row} key={row.key} previous={previousEnvironment} {...rowProps}/>)}
+      </LayerSection>;
+    })}
+
+    {!hasContent ? <div className="rounded-xl border border-dashed border-line p-5 text-center text-xs text-muted">No message content was captured.</div> : null}
+
+    {selection?.turnId === turnId && selection.label === "Unattributed input" ? <div className="rounded-xl border border-dashed border-line p-4 text-xs text-muted"><strong className="text-ink">No exact request section</strong><p className="mt-1">This remainder was not attributed to a captured input block, so Token Flow does not guess a destination.</p></div> : null}
+
+    <RequestSettings body={body} record={record}/>
+  </div>;
+}
+
+function RequestRecord({ bare = false, earlierTurns, label, mode, onSelectToken, selection, turn, defaultOpen }: { bare?: boolean; earlierTurns: TurnModel[]; label: string; mode: RequestMode; onSelectToken: (selection: TokenSelection | null) => void; selection: TokenSelection | null; turn: TurnModel; defaultOpen: boolean }) {
+  const [open, setOpen] = useState(defaultOpen);
+  const record = turn.record;
+  const turnId = turn.id;
   const body = asRecord(record.request?.body);
   const treeSelectionPath = useMemo(() => selectedJsonPath(record, selection, turnId), [record, selection, turnId]);
+  // A single turn needs no collapsible wrapper; its structured header already names it.
+  if (bare) {
+    if (mode === "structured") return <StructuredRequest earlierTurns={earlierTurns} onSelectToken={onSelectToken} selection={selection} turn={turn}/>;
+    return <div className="p-3 sm:p-4"><div className="overflow-hidden rounded-xl border border-line">{mode === "tree" ? <JsonTreeView selectedBlockId={selection?.turnId === turnId ? selection.blockId : undefined} selectedPath={treeSelectionPath} value={record}/> : <RawJsonTree selectedBlockId={selection?.turnId === turnId ? selection.blockId : undefined} selectedPath={treeSelectionPath} turnId={turnId} value={record}/>}</div></div>;
+  }
   return <details className="overflow-hidden rounded-xl border border-line" onToggle={(event) => setOpen(event.currentTarget.open)} open={open}>
     <summary className="flex min-h-12 cursor-pointer list-none items-center gap-2 px-3 text-sm font-semibold hover:bg-canvas sm:px-4"><span>{label}</span><Pill>{textValue(body.model) || "Unknown model"}</Pill><span className="ml-auto hidden font-mono text-[10px] font-normal text-muted sm:block">{record.request?.method} {record.request?.path}</span><span aria-hidden="true" className="text-xs text-muted">›</span></summary>
-    {open ? mode === "structured" ? <div className="border-t border-line"><StructuredRequest onSelectToken={onSelectToken} record={record} selection={selection} turnId={turnId}/></div> : mode === "tree" ? <JsonTreeView selectedBlockId={selection?.turnId === turnId ? selection.blockId : undefined} selectedPath={treeSelectionPath} value={record}/> : <RawJsonTree selectedBlockId={selection?.turnId === turnId ? selection.blockId : undefined} selectedPath={treeSelectionPath} turnId={turnId} value={record}/> : null}
+    {open ? mode === "structured" ? <div className="border-t border-line"><StructuredRequest earlierTurns={earlierTurns} onSelectToken={onSelectToken} selection={selection} turn={turn}/></div> : mode === "tree" ? <JsonTreeView selectedBlockId={selection?.turnId === turnId ? selection.blockId : undefined} selectedPath={treeSelectionPath} value={record}/> : <RawJsonTree selectedBlockId={selection?.turnId === turnId ? selection.blockId : undefined} selectedPath={treeSelectionPath} turnId={turnId} value={record}/> : null}
   </details>;
 }
 
@@ -893,8 +1525,8 @@ export function RequestView({ jumpToBlock, onSelectToken, selection, turn, turns
         <div aria-label="Request scope" className="grid grid-cols-3 rounded-lg bg-canvas p-1 text-[11px] font-semibold">{(["turn", "changes", "conversation"] as const).map((item) => <button aria-current={scope === item ? "page" : undefined} className={`min-h-8 rounded-md px-3 ${scope === item ? "bg-panel text-ink shadow-sm" : "text-muted"}`} key={item} onClick={() => setScope(item)} type="button">{item === "turn" ? "This turn" : item === "changes" ? "Changes" : "Conversation"}</button>)}</div>
       </div>
     </div>
-    {scope === "changes" ? <RequestChanges current={turn} previous={previous}/> : <div className="space-y-2 p-3 sm:p-4">
-      {scopedTurns.map((item, index) => <RequestRecord defaultOpen={scope === "turn"} key={`${scope}-${item.record.request_id || index}`} label={scope === "turn" ? "Captured request" : `Turn ${index + 1}`} mode={mode} onSelectToken={onSelectToken} record={item.record} selection={selection} turnId={item.id}/>)}
+    {scope === "changes" ? <RequestChanges current={turn} previous={previous}/> : <div className={scope === "turn" ? "" : "space-y-2 p-3 sm:p-4"}>
+      {scopedTurns.map((item, index) => <RequestRecord bare={scope === "turn"} defaultOpen={scope === "turn"} earlierTurns={turns.slice(0, scope === "turn" ? Math.max(0, selectedIndex) : index)} key={`${scope}-${item.record.request_id || index}`} label={scope === "turn" ? "Captured request" : `Turn ${index + 1}`} mode={mode} onSelectToken={onSelectToken} selection={selection} turn={item}/>)}
     </div>}
   </section>;
 }

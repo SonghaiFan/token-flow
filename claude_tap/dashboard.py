@@ -40,7 +40,7 @@ CLIENT_LABELS = {
     "pi": "Pi",
     "qoder": "Qoder",
 }
-DASHBOARD_SUMMARY_VERSION = 6
+DASHBOARD_SUMMARY_VERSION = 7
 VALID_SESSION_STATUSES = {"active", "complete", "error", "empty"}
 _REDACTED_VALUE = "REDACTED"
 _SENSITIVE_KEY_NAMES = {
@@ -308,8 +308,13 @@ def merge_record_into_summary(
     preview_user = _first_user_preview([record])
     if preview_user:
         existing_first = str(summary.get("first_user") or "")
-        # Prefer readable transcript prompts over earlier protobuf/binary noise.
-        if (not existing_first) or (_is_cursor_transcript_record(record) and looks_like_binary_text(existing_first)):
+        # Prefer readable transcript prompts over earlier protobuf/binary noise, and a
+        # real user prompt over an auxiliary one such as task-title generation.
+        if (
+            (not existing_first)
+            or (_is_cursor_transcript_record(record) and looks_like_binary_text(existing_first))
+            or (_is_metadata_prompt(existing_first) and not _is_metadata_prompt(preview_user))
+        ):
             summary["first_user"] = preview_user
     if not summary.get("agent"):
         summary["agent"] = _infer_agent([record], manifest_entry)
@@ -1178,11 +1183,25 @@ def _is_successful_primary_record(record: dict[str, Any]) -> bool:
     return 200 <= status_code < 400 and not _is_auxiliary_record(record)
 
 
+_METADATA_PROMPT_PREFIXES = (
+    "generate a concise, single-line task title",
+    "write a brief catch-up for a user returning",
+    "the user stepped away and is coming back",
+    "you are a helpful assistant. you will be presented with a user prompt, and your job is to provide a short title",
+)
+
+
+def _is_metadata_prompt(text: str) -> bool:
+    """Return whether a user-role prompt was written by the agent for itself."""
+    return text.strip().lower().startswith(_METADATA_PROMPT_PREFIXES)
+
+
 def _first_user_preview(records: list[dict[str, Any]]) -> str:
     ordered = sorted(
         records,
         key=lambda record: 0 if _is_cursor_transcript_record(record) else 1,
     )
+    fallback = ""
     for record in ordered:
         if _is_protobuf_noise_record(record) or _is_auxiliary_record(record):
             if not _is_cursor_transcript_record(record):
@@ -1191,9 +1210,12 @@ def _first_user_preview(records: list[dict[str, Any]]) -> str:
         body = request.get("body") if isinstance(request, dict) else None
         headers = request.get("headers") if isinstance(request, dict) else None
         text = _request_user_text(body, headers=headers)
-        if text:
+        if not text:
+            continue
+        if not _is_metadata_prompt(text):
             return _preview(text, 220)
-    return ""
+        fallback = fallback or _preview(text, 220)
+    return fallback
 
 
 def _last_response_preview(records: list[dict[str, Any]]) -> str:
@@ -1323,7 +1345,7 @@ def _input_user_text(value: Any) -> str:
             continue
         role = str(item.get("role") or "").lower()
         if role == "user":
-            prompt = _clean_user_content_text(item.get("content") or item.get("text"))
+            prompt = _clean_user_content_text(_declared_user_text_parts(item))
             if prompt:
                 return prompt
 
@@ -1339,6 +1361,16 @@ def _input_user_text(value: Any) -> str:
             if prompt:
                 return prompt
     return ""
+
+
+def _declared_user_text_parts(item: dict[str, Any]) -> Any:
+    """Keep only parts Codex App declares as typed user text, when it declares any."""
+    content = item.get("content") or item.get("text")
+    metadata = item.get("internal_chat_message_metadata_passthrough")
+    kinds = metadata.get("content_item_kinds") if isinstance(metadata, dict) else None
+    if not isinstance(kinds, list) or not isinstance(content, list) or len(kinds) != len(content):
+        return content
+    return [part for part, kind in zip(content, kinds) if kind == "user.text"]
 
 
 def _clean_user_content_text(value: Any) -> str:
@@ -1386,11 +1418,15 @@ def _clean_user_prompt_text(text: str) -> str:
     if session:
         return session.group(1).strip()
 
-    first_tag = re.match(r"^<([A-Za-z_-]+)>", text)
+    first_tag = re.match(r"^<([A-Za-z_-]+)[\s>]", text)
     if first_tag and first_tag.group(1).lower() in {
+        "app-context",
         "artifacts",
         "additional_metadata",
         "environment_context",
+        "in-app-browser-context",
+        "permissions",
+        "recommended_plugins",
         "session_context",
         "skills",
         "slash_commands",

@@ -82,10 +82,26 @@ export interface SessionRecordsPayload {
   records: TraceRecord[];
 }
 
+/* Where a captured input block comes from, independent of its protocol shape:
+   tool capabilities, harness instructions, harness-injected context, or the
+   prompt/agent loop itself. */
+export type InputLayer = "capabilities" | "instructions" | "context" | "conversation" | "unknown";
+
+/* Relation of a captured input item to earlier turns of the same conversation,
+   decided only by its captured item id and content. */
+export type ItemState = "new" | "carried" | "changed";
+
+export interface InputClass {
+  layer: InputLayer;
+  label: string;
+}
+
 export interface TokenCategory {
   id: string;
   memberIds?: string[];
   label: string;
+  layer?: InputLayer;
+  state?: ItemState;
   tokens: number;
   cached: number;
   fresh: number;
@@ -121,6 +137,7 @@ export interface TurnModel {
   cached: number;
   fresh: number;
   categories: TokenCategory[];
+  itemStates: Record<string, ItemState>;
   record: TraceRecord;
 }
 

@@ -4,6 +4,8 @@ import { useMemo, type KeyboardEvent, type MouseEvent } from "react";
 import { hierarchy, treemap, treemapBinary, type HierarchyRectangularNode } from "d3-hierarchy";
 import { sankey, type SankeyGraph, type SankeyLink, type SankeyNode } from "d3-sankey";
 import { formatNumber } from "@/lib/format";
+import { categoryColor } from "@/lib/category-palette";
+import { CategoryLegend } from "./category-legend";
 import type { TokenCategory, TokenSelection, TurnModel } from "@/lib/types";
 
 interface FlowNode {
@@ -67,7 +69,7 @@ function rankedFlowTurn(turn: TurnModel): TurnModel {
     tokens: small.reduce((sum, category) => sum + category.tokens, 0),
     cached: small.reduce((sum, category) => sum + category.cached, 0),
     fresh: small.reduce((sum, category) => sum + category.fresh, 0),
-    color: "#94a3b8",
+    color: categoryColor("Others"),
     aggregate: true,
     memberIds: small.flatMap((category) => category.memberIds || [category.id]),
   });
@@ -300,5 +302,6 @@ export function SankeyChart({ onOpenRequest, onSelectToken, onSelectTurn, select
     <DesktopFlow flowTurns={flowTurns} graph={desktopGraph} onOpenRequest={onOpenRequest} onSelectToken={onSelectToken} onSelectTurn={onSelectTurn} selected={selected} selection={selection} turns={turns} width={desktopWidth}/>
     <MobileFlow flowTurns={flowTurns} graph={mobileGraph} height={mobileHeight} onSelectToken={onSelectToken} onSelectTurn={onSelectTurn} selected={selected} selection={selection} turns={turns}/>
     <MobileTreemaps flowTurns={flowTurns} onOpenRequest={onOpenRequest} onSelectToken={onSelectToken} onSelectTurn={onSelectTurn} selection={selection}/>
+    <CategoryLegend categories={flowTurns.flatMap(({ turn }) => turn.categories)}/>
   </section>;
 }

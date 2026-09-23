@@ -3,6 +3,7 @@
 import { useMemo } from "react";
 import { hierarchy, treemap, treemapBinary, type HierarchyRectangularNode } from "d3-hierarchy";
 import { formatNumber } from "@/lib/format";
+import { CategoryLegend } from "./category-legend";
 import type { TokenCategory, TokenSelection, TurnModel } from "@/lib/types";
 
 const WIDTH = 900;
@@ -56,5 +57,6 @@ export function TreemapChart({ onOpenRequest, onSelectToken, selection, turn }: 
           </g>;
         })}
       </svg></div>}
+    <CategoryLegend categories={categories}/>
   </section>;
 }

@@ -665,6 +665,75 @@ def test_dashboard_first_message_uses_first_user_prompt(trace_db, tmp_path: Path
     assert summary["first_user"] == "What is this project?"
 
 
+def test_dashboard_first_message_uses_declared_codex_app_user_text(trace_db, tmp_path: Path) -> None:
+    trace_path = tmp_path / "2026-05-20" / "trace_100500.jsonl"
+    injected = {
+        "role": "user",
+        "content": [
+            {"type": "input_text", "text": "<recommended_plugins>\n- Box\n</recommended_plugins>"},
+            {"type": "input_text", "text": "Unlabelled harness note"},
+        ],
+        "internal_chat_message_metadata_passthrough": {
+            "content_item_kinds": ["plugins.recommendations", "environments.environment_context"],
+        },
+    }
+    typed = {
+        "role": "user",
+        "content": [{"type": "input_text", "text": "Check Google stock"}],
+        "internal_chat_message_metadata_passthrough": {"content_item_kinds": ["user.text"]},
+    }
+    _write_jsonl(
+        trace_path,
+        [
+            {
+                "timestamp": "2026-05-20T10:05:00+00:00",
+                "turn": 1,
+                "request": {
+                    "method": "POST",
+                    "path": "/v1/responses",
+                    "body": {"model": "gpt-5.5", "input": [injected, typed]},
+                },
+                "response": {"status": 200, "body": {"model": "gpt-5.5", "usage": {"input_tokens": 1}}},
+            }
+        ],
+    )
+
+    _seed_legacy(tmp_path)
+
+    assert list_trace_sessions()[0]["first_user"] == "Check Google stock"
+
+
+def test_dashboard_first_message_prefers_real_prompt_over_title_generation(trace_db, tmp_path: Path) -> None:
+    trace_path = tmp_path / "2026-05-20" / "trace_100700.jsonl"
+
+    def record(turn: int, text: str) -> dict:
+        return {
+            "timestamp": f"2026-05-20T10:07:0{turn}+00:00",
+            "turn": turn,
+            "request": {
+                "method": "POST",
+                "path": "/v1/responses",
+                "body": {
+                    "model": "gpt-5.5",
+                    "input": [{"role": "user", "content": [{"type": "input_text", "text": text}]}],
+                },
+            },
+            "response": {"status": 200, "body": {"model": "gpt-5.5", "usage": {"input_tokens": 1}}},
+        }
+
+    _write_jsonl(
+        trace_path,
+        [
+            record(1, "Generate a concise, single-line task title of at most 36 characters."),
+            record(2, "Explain the cache layout"),
+        ],
+    )
+
+    _seed_legacy(tmp_path)
+
+    assert list_trace_sessions()[0]["first_user"] == "Explain the cache layout"
+
+
 def test_dashboard_first_message_skips_injected_user_content_blocks(trace_db, tmp_path: Path) -> None:
     trace_path = tmp_path / "2026-05-20" / "trace_101500.jsonl"
     _write_jsonl(

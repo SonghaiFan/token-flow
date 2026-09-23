@@ -243,6 +243,11 @@ Never present missing capture data as a successful zero.
   destructive action, and amber for warning or incomplete state.
 - Categorical visualization colors require a visible legend and stable category
   identity. Do not reuse navigation or status colors as data categories.
+- Token categories use one fixed palette, `ui/lib/category-palette.ts`, in
+  Composition, Token flow, and Request alike. Each category label has an
+  explicit color within its input layer's hue family (capabilities teal,
+  instructions violet, injected context amber, conversation blue, unattributed
+  gray). A new classifier label needs a palette entry; never hash or cycle colors.
 - Use sentence case and direct, human-facing labels. Keep protocol paths and
   identifiers in monospace without reformatting their literal values.
 - Compact large measurements in overview contexts, but show exact measurements
