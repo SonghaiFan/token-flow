@@ -370,6 +370,48 @@ function categoryRows(record: TraceRecord, catalog: Map<string, CatalogEntry>, i
   }));
 }
 
+/* Summarize the input items this turn adds for the first time: a typed prompt, the
+   tools it calls, or results whose call arrived earlier. Carried items are skipped. */
+function stepSummary(body: AnyObject, states: Record<string, ItemState>): string {
+  const input = Array.isArray(body.input) ? body.input.map(asObject) : [];
+  const fresh = input.filter((item) => typeof item.id === "string" && states[item.id] === "new");
+  const freshCalls = new Set(fresh.map((item) => String(item.call_id || "")).filter(Boolean));
+  const counts = new Map<string, number>();
+  const add = (name: string) => counts.set(name, (counts.get(name) || 0) + 1);
+  for (const item of fresh) {
+    const type = String(item.type || "").toLowerCase();
+    if (item.role === "user") {
+      const prompt = userPromptParts(item).map(cleanPromptText).find((text) => text && !INJECTED_USER_PREFIXES.some((prefix) => text.startsWith(prefix)));
+      if (prompt) add(`“${brief(prompt, 40)}”`);
+    } else if (type.endsWith("_call_output") || type === "tool_result") {
+      if (!freshCalls.has(String(item.call_id || ""))) add("tool result");
+    } else if (type.endsWith("_call") || type === "tool_use") add(String(item.name || "tool call"));
+    else if (item.role === "assistant") add("reply");
+  }
+  return [...counts].map(([name, count]) => (count > 1 ? `${name} ×${count}` : name)).join(", ");
+}
+
+/* The captured thread a request belongs to. Auxiliary requests such as title
+   generation run in their own thread, so they never join the main flow. */
+function laneFor(record: TraceRecord): string {
+  const body = asObject(record.request?.body);
+  const metadata = asObject(body.client_metadata);
+  const headers = asObject(record.request?.headers);
+  return String(metadata.thread_id || body.prompt_cache_key || headers["thread-id"] || headers["session-id"] || "");
+}
+
+export type LayerTotals = Record<InputLayer, { cached: number; tokens: number }>;
+
+export function layerTotals(turn: TurnModel): LayerTotals {
+  const totals = Object.fromEntries(LAYER_ORDER.map((layer) => [layer, { cached: 0, tokens: 0 }])) as LayerTotals;
+  for (const category of turn.categories) {
+    const total = totals[category.layer || "unknown"];
+    total.tokens += category.tokens;
+    total.cached += category.cached;
+  }
+  return totals;
+}
+
 export function buildTurns(records: TraceRecord[]): TurnModel[] {
   const turnRecords = records.filter(isTurnRecord).sort((left, right) => {
     const leftTurn = Number(left.turn);
@@ -395,6 +437,7 @@ export function buildTurns(records: TraceRecord[]): TurnModel[] {
       label: String(record.display_turn ?? index + 1),
       captureTurn: record.capture_turn ?? record.turn,
       title: identity.title,
+      step: identity.kind === "metadata" ? identity.title : stepSummary(body, states[index]) || identity.title,
       kind: identity.kind,
       queryText: query.text,
       queryUserIndex: query.userIndex,
@@ -411,6 +454,7 @@ export function buildTurns(records: TraceRecord[]): TurnModel[] {
       fresh: Math.max(0, input - cached),
       categories: categoryRows(record, catalog, index, states[index]),
       itemStates: states[index],
+      lane: laneFor(record),
       record,
     };
   });

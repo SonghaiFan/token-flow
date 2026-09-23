@@ -1,6 +1,5 @@
 "use client";
 
-import dynamic from "next/dynamic";
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Streamdown, type Components } from "streamdown";
 import { formatDuration, formatNumber } from "@/lib/format";
@@ -8,11 +7,14 @@ import { classifyInput, LAYER_META, LAYER_ORDER } from "@/lib/token-model";
 import type { InputClass, InputLayer, ItemState, TokenSelection, TraceRecord, TurnModel } from "@/lib/types";
 import { categoryColor } from "@/lib/category-palette";
 import { CategorySwatch } from "../charts/category-legend";
+import { SearchIcon } from "../icons";
+import { activateOnKey, Segmented, useAccordion } from "../motion";
 import { RawJsonTree } from "./raw-json-tree";
+import { clearCurrentMatch, clearHighlights, focusMatch, highlightMatches, MIN_QUERY, SEARCH_HIT_LIMIT, searchRecord, type JsonPathPart, type SearchHit } from "./request-search";
 
 type UnknownRecord = Record<string, unknown>;
-type RequestMode = "structured" | "tree" | "raw";
-type RequestScope = "turn" | "changes" | "conversation";
+type RequestMode = "structured" | "raw";
+type RequestScope = "turn" | "changes";
 
 const markdownComponents: Components = {
   h1: ({ children }) => <h1 className="mb-3 mt-5 text-xl font-semibold tracking-[-0.03em] first:mt-0">{children}</h1>,
@@ -35,11 +37,6 @@ const markdownComponents: Components = {
   th: ({ children, style }) => <th className="whitespace-nowrap px-3 py-1.5 font-medium text-muted first:pl-0" style={style}>{children}</th>,
   td: ({ children, style }) => <td className="px-3 py-1.5 align-top first:pl-0 [&_code]:whitespace-nowrap" style={style}>{children}</td>,
 };
-
-const JsonTreeView = dynamic(() => import("./json-tree-view").then((module) => module.JsonTreeView), {
-  loading: () => <div className="border-t border-line p-8 text-center text-xs text-muted">Loading JSON tree…</div>,
-  ssr: false,
-});
 
 function asRecord(value: unknown): UnknownRecord {
   return value && typeof value === "object" && !Array.isArray(value) ? value as UnknownRecord : {};
@@ -540,17 +537,12 @@ function ToolOutputView({ value }: { value: string }) {
 }
 
 function Disclosure({ children, defaultOpen = false, summary }: { children: ReactNode; defaultOpen?: boolean; summary: ReactNode }) {
-  const [open, setOpen] = useState(defaultOpen);
-  const [requestedOpen, setRequestedOpen] = useState(defaultOpen);
-  // A later selection inside a closed disclosure must reveal it so the block can be scrolled to.
-  if (defaultOpen !== requestedOpen) {
-    setRequestedOpen(defaultOpen);
-    if (defaultOpen) setOpen(true);
-  }
-  return <details className="group rounded-xl border border-line bg-panel" onToggle={(event) => setOpen(event.currentTarget.open)} open={open}>
-    <summary className="flex min-h-11 cursor-pointer list-none items-center gap-2 px-3 py-2 hover:bg-canvas/70">{summary}<span aria-hidden="true" className="ml-auto text-xs text-muted transition [details[open]>summary>&]:rotate-90">›</span></summary>
-    {open ? <div className="border-t border-line px-3 py-3 sm:px-4">{children}</div> : null}
-  </details>;
+  // A later selection inside a closed disclosure opens it at once so the block can be scrolled to.
+  const { mounted, open, toggle } = useAccordion(defaultOpen);
+  return <div className="t-acc rounded-xl border border-line bg-panel" data-open={open ? "true" : "false"}>
+    <div aria-expanded={open} className="t-acc-head flex min-h-11 cursor-pointer items-center gap-2 rounded-xl px-3 py-2 outline-none hover:bg-canvas/70 focus-visible:ring-2 focus-visible:ring-ink/30" onClick={toggle} onKeyDown={(event) => activateOnKey(event, toggle)} role="button" tabIndex={0}>{summary}<span aria-hidden="true" className="t-acc-chevron ml-auto text-xs text-muted">›</span></div>
+    {mounted ? <div className="t-acc-panel"><div className="t-acc-panel-inner"><div className="border-t border-line px-3 py-3 sm:px-4">{children}</div></div></div> : null}
+  </div>;
 }
 
 function ContentPart({ value }: { value: unknown }) {
@@ -951,10 +943,34 @@ function entryBlockIds(entries: Array<InputEntry | undefined>): string[] {
   });
 }
 
+/* Block ids a selection points at in this turn. A whole-layer selection returns none:
+   it highlights its section instead of individual rows. */
+function selectionIds(selection: TokenSelection | null, turnId: string, focusOnly = false): string[] {
+  if (!selection || selection.turnId !== turnId || selection.layer) return [];
+  return focusOnly ? [selection.blockId] : selection.blockIds || [selection.blockId];
+}
+
+function entryHit(entry: InputEntry | undefined, ids: string[]): boolean {
+  if (!entry?.itemId || !ids.length) return false;
+  if (entry.part !== undefined) return ids.some((id) => id === entry.blockId || id === entry.itemId);
+  return ids.some((id) => id === entry.itemId || id.startsWith(`${entry.itemId}:`));
+}
+
 function selectionHits(entries: Array<InputEntry | undefined>, selection: TokenSelection | null, turnId: string): boolean {
-  if (!selection || selection.turnId !== turnId) return false;
-  const selectedIds = selection.blockIds || [selection.blockId];
-  return entries.some((entry) => entry?.itemId && selectedIds.some((id) => id === entry.itemId || id.startsWith(`${entry.itemId}:`)));
+  const ids = selectionIds(selection, turnId);
+  return entries.some((entry) => entryHit(entry, ids));
+}
+
+/* How a row reflects the shared selection: matching rows take their category color,
+   the focused block opens, and everything else in the turn steps back. */
+function rowMarks(entries: Array<InputEntry | undefined>, label: string, layer: InputLayer, selection: TokenSelection | null, turnId: string): { accent?: string; dimmed: boolean; open: boolean } {
+  const ids = selectionIds(selection, turnId);
+  const matched = entries.some((entry) => entryHit(entry, ids));
+  return {
+    accent: matched ? categoryColor(label, layer) : undefined,
+    dimmed: ids.length > 0 && !matched,
+    open: entries.some((entry) => entryHit(entry, selectionIds(selection, turnId, true))),
+  };
 }
 
 const ICON_PATHS: Record<string, string> = {
@@ -1018,32 +1034,29 @@ function LinkSwatch({ blockIds, icon, label, layer, onSelectToken, selection, tu
   return <button aria-label={active ? `Unlink ${label}` : `Link ${label} in the charts`} aria-pressed={active} className={`grid size-5 shrink-0 place-items-center rounded ${active ? "ring-2 ring-ink" : "hover:ring-1 hover:ring-line"}`} onClick={(event) => { event.preventDefault(); event.stopPropagation(); onSelectToken(active ? null : { blockId: blockIds[0], blockIds, label, turnId }); }} title={`${label} · link in charts`} type="button">{mark}</button>;
 }
 
-/* Invisible scroll targets plus the selection ring for one or more captured blocks. */
-function BlockAnchor({ blockIds, children, selection, turnId }: { blockIds: string[]; children: ReactNode; selection: TokenSelection | null; turnId: string }) {
-  const selectedIds = selection?.turnId === turnId ? selection.blockIds || [selection.blockId] : [];
-  const active = blockIds.some((id) => selectedIds.includes(id));
-  return <div className={`relative scroll-m-32 rounded-lg transition ${active ? "ring-2 ring-ink ring-offset-4 ring-offset-panel" : ""}`}>
+/* Invisible scroll targets for one or more captured blocks; the row carries the highlight. */
+function BlockAnchor({ blockIds, children, turnId }: { blockIds: string[]; children: ReactNode; turnId: string }) {
+  return <div className="relative scroll-m-32" data-block-anchor="">
     {blockIds.map((id) => <span className="absolute left-0 top-0 size-px opacity-0" data-block-id={id} data-turn-id={turnId} key={id} tabIndex={-1}/>)}
     {children}
   </div>;
 }
 
 /* Flat disclosure row: chevron on the left, summary in one line, body indented under it. */
-function Row({ children, defaultOpen = false, hint, summary }: { children?: ReactNode; defaultOpen?: boolean; hint?: string; summary: ReactNode }) {
-  const [open, setOpen] = useState(defaultOpen);
-  const [requestedOpen, setRequestedOpen] = useState(defaultOpen);
-  if (defaultOpen !== requestedOpen) {
-    setRequestedOpen(defaultOpen);
-    if (defaultOpen) setOpen(true);
-  }
-  if (children === undefined) return <div className="flex min-h-11 items-center gap-2.5 py-2 pl-10 pr-3 text-sm sm:pr-4" title={hint}>{summary}</div>;
-  return <details onToggle={(event) => setOpen(event.currentTarget.open)} open={open}>
-    <summary className="flex min-h-11 cursor-pointer list-none items-center gap-2.5 px-3 py-2 text-sm hover:bg-canvas/70 sm:px-4 [&::-webkit-details-marker]:hidden" title={hint}>
-      <span aria-hidden="true" className="w-3 shrink-0 text-center text-xs text-muted/60 transition [details[open]>summary>&]:rotate-90 [details[open]>summary>&]:text-muted">›</span>
+/* Flat accordion row: chevron on the left, summary in one line, body indented under it. */
+function Row({ accent, children, defaultOpen = false, dimmed = false, hint, summary }: { accent?: string; children?: ReactNode; defaultOpen?: boolean; dimmed?: boolean; hint?: string; summary: ReactNode }) {
+  const { mounted, open, toggle } = useAccordion(defaultOpen);
+  // A selected row carries its category color as a left bar and a light tint.
+  const mark = accent ? { backgroundColor: `color-mix(in srgb, ${accent} 9%, transparent)`, boxShadow: `inset 3px 0 0 ${accent}` } : undefined;
+  const fade = dimmed ? "opacity-45 hover:opacity-100" : "";
+  if (children === undefined) return <div className={`t-fade flex min-h-11 items-center gap-2.5 py-2 pl-10 pr-3 text-sm sm:pr-4 ${fade}`} style={mark} title={hint}>{summary}</div>;
+  return <div className="t-acc" data-open={open ? "true" : "false"}>
+    <div aria-expanded={open} className={`t-acc-head t-fade flex min-h-11 cursor-pointer items-center gap-2.5 px-3 py-2 text-sm outline-none hover:bg-canvas/70 focus-visible:bg-canvas sm:px-4 ${fade}`} onClick={toggle} onKeyDown={(event) => activateOnKey(event, toggle)} role="button" style={mark} tabIndex={0} title={hint}>
+      <span aria-hidden="true" className={`t-acc-chevron w-3 shrink-0 text-center text-xs ${open ? "text-muted" : "text-muted/60"}`}>›</span>
       {summary}
-    </summary>
-    {open ? <div className="pb-4 pl-[3.25rem] pr-3 pt-1 sm:pr-4">{children}</div> : null}
-  </details>;
+    </div>
+    {mounted ? <div className="t-acc-panel"><div className="t-acc-panel-inner"><div className="pb-4 pl-[3.25rem] pr-3 pt-1 sm:pr-4">{children}</div></div></div> : null}
+  </div>;
 }
 
 function Meta({ children, mono = false }: { children: ReactNode; mono?: boolean }) {
@@ -1063,9 +1076,13 @@ function StateSummary({ entries }: { entries: InputEntry[] }) {
   return <>{counts.changed ? <Badge tone="changed">{counts.changed} changed</Badge> : null}{counts.new ? <Badge tone="new">+{counts.new} new</Badge> : null}</>;
 }
 
-function LayerSection({ badge, children, entries, layer }: { badge?: ReactNode; children: ReactNode; entries: InputEntry[]; layer: InputLayer }) {
+function LayerSection({ badge, children, entries, layer, selection, turnId }: { badge?: ReactNode; children: ReactNode; entries: InputEntry[]; layer: InputLayer; selection: TokenSelection | null; turnId: string }) {
   const meta = LAYER_META[layer];
-  return <section aria-label={meta.title} className="overflow-hidden rounded-xl border border-line bg-panel">
+  const picked = selection?.turnId === turnId && selection.layer === layer;
+  const dimmed = selection?.turnId === turnId && Boolean(selection.layer) && !picked;
+  // A selected layer takes its own color; the other layers step back while it is selected.
+  const ring = picked ? { borderColor: meta.color, boxShadow: `0 0 0 3px color-mix(in srgb, ${meta.color} 18%, transparent)` } : undefined;
+  return <section aria-label={meta.title} className={`scroll-m-24 overflow-hidden rounded-xl border bg-panel transition ${picked ? "" : "border-line"} ${dimmed ? "opacity-50 hover:opacity-100" : ""}`} data-layer={layer} data-turn-id={turnId} style={ring} tabIndex={-1}>
     <header className="flex min-h-12 items-center gap-2.5 bg-canvas/60 px-3 py-2 sm:px-4">
       <Icon color={meta.color} name={LAYER_ICONS[layer]}/>
       <h3 className="shrink-0 text-[15px] font-semibold">{meta.title}</h3>
@@ -1099,12 +1116,13 @@ function ToolDefinitionRow({ entry, onSelectToken, selection, tools, turnId }: R
   const total = groups.reduce((sum, group) => sum + group.tools.length, 0);
   const blockIds = entry?.blockId ? [entry.blockId] : [];
   if (!total) return null;
-  return <Row defaultOpen={selectionHits([entry], selection, turnId)} summary={<>
+  const marks = rowMarks([entry], "Tool definitions", "capabilities", selection, turnId);
+  return <Row accent={marks.accent} defaultOpen={marks.open} dimmed={marks.dimmed} summary={<>
     <LinkSwatch blockIds={blockIds} label="Tool definitions" layer="capabilities" onSelectToken={onSelectToken} selection={selection} turnId={turnId}/>
     <span className="min-w-0 flex-1 truncate">{groups.map((group, index) => <span key={group.name}>{index ? <span className="text-muted"> · </span> : null}<span className="font-mono text-[13px] text-ink">{group.name}</span> <span className="text-xs text-muted">{group.tools.length}</span></span>)}</span>
     <RowEnd badge={<StateBadge state={entry?.rowState}/>} tokens={entry?.tokens}/>
   </>}>
-    <BlockAnchor blockIds={blockIds} selection={selection} turnId={turnId}>
+    <BlockAnchor blockIds={blockIds} turnId={turnId}>
       <div className="space-y-3">{groups.map((group) => <section key={group.name}>
         {groups.length > 1 ? <h4 className="mb-1 font-mono text-[10px] text-muted">{group.name}</h4> : null}
         <ul>{group.tools.map((tool, index) => {
@@ -1152,7 +1170,8 @@ function PartRow({ defaultOpen = false, entry, onSelectToken, previous, selectio
   const blockIds = entry.blockId ? [entry.blockId] : [];
   const changes = label === "Environment" ? environmentChanges(text, previous) : [];
   const badge = changes.length ? <Badge tone="changed">{changes.length === 1 ? `${changes[0]} changed` : `${changes.length} fields changed`}</Badge> : <StateBadge state={entry.rowState}/>;
-  return <Row defaultOpen={defaultOpen || selectionHits([entry], selection, turnId)} hint={isPrompt ? undefined : sectionPreview(label, text)} summary={<>
+  const marks = rowMarks([entry], label, entry.inputClass.layer, selection, turnId);
+  return <Row accent={marks.accent} defaultOpen={defaultOpen || marks.open} dimmed={marks.dimmed} hint={isPrompt ? undefined : sectionPreview(label, text)} summary={<>
     <LinkSwatch blockIds={blockIds} icon={isPrompt ? "user" : label === "Assistant messages" ? "chat" : undefined} label={label} layer={entry.inputClass.layer} onSelectToken={onSelectToken} selection={selection} turnId={turnId}/>
     {isPrompt ? <span className="min-w-0 flex-1 truncate font-medium text-ink">{previewText(entry.part) || "Empty prompt"}</span> : <>
       <span className="shrink-0 text-ink">{label === "Assistant messages" ? "Assistant" : label}</span>
@@ -1160,7 +1179,7 @@ function PartRow({ defaultOpen = false, entry, onSelectToken, previous, selectio
     </>}
     <RowEnd badge={badge} tokens={entry.tokens}/>
   </>}>
-    <BlockAnchor blockIds={blockIds} selection={selection} turnId={turnId}><SectionContent label={label} previous={previous} value={entry.part}/></BlockAnchor>
+    <BlockAnchor blockIds={blockIds} turnId={turnId}><SectionContent label={label} previous={previous} value={entry.part}/></BlockAnchor>
   </Row>;
 }
 
@@ -1173,13 +1192,14 @@ function ReasoningRow({ entry, onSelectToken, selection, turnId }: RowProps & { 
   const encrypted = Boolean(textValue(entry.item.encrypted_content));
   const blockIds = entryBlockIds([entry]);
   const detail = [encrypted ? "encrypted" : "", summary ? previewText(summary) : "no summary"].filter(Boolean).join(" · ");
-  return <Row defaultOpen={selectionHits([entry], selection, turnId)} summary={<>
+  const marks = rowMarks([entry], "Reasoning", "conversation", selection, turnId);
+  return <Row accent={marks.accent} defaultOpen={marks.open} dimmed={marks.dimmed} summary={<>
     <LinkSwatch blockIds={blockIds} icon="sparkle" label="Reasoning" layer="conversation" onSelectToken={onSelectToken} selection={selection} turnId={turnId}/>
     <span className="shrink-0 text-ink">Reasoning</span>
     <Meta>{detail}</Meta>
     <RowEnd badge={<StateBadge state={entry.rowState}/>} tokens={entry.tokens}/>
   </>}>
-    <BlockAnchor blockIds={blockIds} selection={selection} turnId={turnId}>{summary ? <ReadableText value={summary}/> : <p className="text-xs text-muted">{encrypted ? "The model's reasoning was sent back encrypted. No readable summary was captured." : "No readable reasoning was captured."}</p>}</BlockAnchor>
+    <BlockAnchor blockIds={blockIds} turnId={turnId}>{summary ? <ReadableText value={summary}/> : <p className="text-xs text-muted">{encrypted ? "The model's reasoning was sent back encrypted. No readable summary was captured." : "No readable reasoning was captured."}</p>}</BlockAnchor>
   </Row>;
 }
 
@@ -1219,18 +1239,19 @@ function ToolExchangeRow({ call, onSelectToken, result, selection, turnId }: Row
   const blockIds = entryBlockIds([call, result]);
   const state = result?.rowState ?? call?.rowState;
   const resultParts = resultItem ? inputItemParts(resultItem).length : 0;
-  return <Row defaultOpen={selectionHits([call, result], selection, turnId)} summary={<>
+  const marks = rowMarks([call, result], result && selectionHits([result], selection, turnId) ? "Tool results" : "Tool calls", "conversation", selection, turnId);
+  return <Row accent={marks.accent} defaultOpen={marks.open} dimmed={marks.dimmed} summary={<>
     <LinkSwatch blockIds={blockIds} icon="terminal" label={call ? "Tool calls" : "Tool results"} layer="conversation" onSelectToken={onSelectToken} selection={selection} turnId={turnId}/>
     <span className="shrink-0 font-mono text-[13px] text-ink">{namespace ? <span className="text-muted">{namespace}.</span> : null}{presentation?.name || "Tool result"}</span>
     <Meta>{title}</Meta>
     <RowEnd badge={failed ? <Badge tone="danger">failed</Badge> : <StateBadge state={state}/>} tokens={tokens}/>
   </>}>
     <div className="space-y-4">
-      {call && callItem && presentation ? <BlockAnchor blockIds={entryBlockIds([call])} selection={selection} turnId={turnId}>
+      {call && callItem && presentation ? <BlockAnchor blockIds={entryBlockIds([call])} turnId={turnId}>
         <BlockHeading tokens={call.tokens}>Call · {callSource(callItem, presentation.input)}{presentation.wrapperName ? ` · ${presentation.wrapperName}` : ""}</BlockHeading>
         <CallInput value={presentation.input}/>
       </BlockAnchor> : null}
-      {result && resultItem && outcome ? <BlockAnchor blockIds={entryBlockIds([result])} selection={selection} turnId={turnId}>
+      {result && resultItem && outcome ? <BlockAnchor blockIds={entryBlockIds([result])} turnId={turnId}>
         <BlockHeading tokens={result.tokens}>{["Result", outcome.status, outcome.elapsed && `wall ${outcome.elapsed}`, resultParts > 1 ? `${resultParts} parts` : ""].filter(Boolean).join(" · ")}</BlockHeading>
         <ToolOutputView value={outcome.output}/>
       </BlockAnchor> : <p className="text-xs text-muted">The result is not part of this request.</p>}
@@ -1240,13 +1261,14 @@ function ToolExchangeRow({ call, onSelectToken, result, selection, turnId }: Row
 
 function GenericRow({ entry, onSelectToken, selection, turnId }: RowProps & { entry: InputEntry }) {
   const blockIds = entryBlockIds([entry]);
-  return <Row defaultOpen={selectionHits([entry], selection, turnId)} summary={<>
+  const marks = rowMarks([entry], entry.inputClass.label, entry.inputClass.layer, selection, turnId);
+  return <Row accent={marks.accent} defaultOpen={marks.open} dimmed={marks.dimmed} summary={<>
     <LinkSwatch blockIds={blockIds} label={entry.inputClass.label} layer={entry.inputClass.layer} onSelectToken={onSelectToken} selection={selection} turnId={turnId}/>
     <span className="shrink-0 text-ink">{entry.inputClass.label}</span>
     <Meta mono>{textValue(entry.item.type) || "input"}</Meta>
     <RowEnd badge={<StateBadge state={entry.rowState}/>} tokens={entry.tokens}/>
   </>}>
-    <BlockAnchor blockIds={blockIds} selection={selection} turnId={turnId}>{inputItemParts(entry.item).map((part, index) => <ContentPart key={index} value={part}/>)}</BlockAnchor>
+    <BlockAnchor blockIds={blockIds} turnId={turnId}>{inputItemParts(entry.item).map((part, index) => <ContentPart key={index} value={part}/>)}</BlockAnchor>
   </Row>;
 }
 
@@ -1309,7 +1331,7 @@ function ConversationRows({ entries, lastPromptKey, ...props }: RowProps & { ent
   const rest = current.filter((entry) => entry.key !== lastPromptKey);
   return <>
     {prompt.map((entry) => <EntryRow entry={entry} key={entry.key} {...props}/>)}
-    {carried.length ? <Row defaultOpen={selectionHits(carried, props.selection, props.turnId)} summary={<>
+    {carried.length ? <Row defaultOpen={selectionHits(carried, props.selection, props.turnId)} dimmed={selectionIds(props.selection, props.turnId).length > 0 && !selectionHits(carried, props.selection, props.turnId)} summary={<>
       <span className="grid size-5 shrink-0 place-items-center"><Icon name="history"/></span>
       <span className="shrink-0 text-ink">Carried over</span>
       <Meta>{carriedItems} {carriedItems === 1 ? "item" : "items"} · {carriedSummary(carriedRows)}</Meta>
@@ -1340,7 +1362,8 @@ function groupMinorRows(entries: InputEntry[]): Array<InputEntry | InputEntry[]>
 
 function MinorRowsGroup({ entries, ...props }: RowProps & { entries: InputEntry[] }) {
   const labels = [...new Set(entries.map((entry) => entry.inputClass.label))];
-  return <Row defaultOpen={selectionHits(entries, props.selection, props.turnId)} summary={<>
+  const matched = entries.find((entry) => selectionHits([entry], props.selection, props.turnId));
+  return <Row accent={matched ? categoryColor(matched.inputClass.label, matched.inputClass.layer) : undefined} defaultOpen={Boolean(matched)} dimmed={selectionIds(props.selection, props.turnId).length > 0 && !matched} summary={<>
     <span className="flex shrink-0 -space-x-1">{labels.slice(0, 4).map((label) => <span className="rounded-[4px] ring-2 ring-panel" key={label}><CategorySwatch label={label} layer={entries[0].inputClass.layer}/></span>)}</span>
     <span className="min-w-0 flex-1 truncate text-ink">{labels.join(" · ")}</span>
     <RowEnd badge={<StateBadge state={entries.find((entry) => entry.rowState)?.rowState}/>} tokens={sumTokens(entries)}/>
@@ -1453,20 +1476,19 @@ function StructuredRequest({ earlierTurns, onSelectToken, selection, turn }: { e
   const contextChanges = (byLayer.get("context") || []).filter((entry) => entry.inputClass.label === "Environment" && environmentChanges(capturedText(entry.part), previousEnvironment).length).length;
 
   return <div className="space-y-4 p-3 sm:p-4">
-    <RequestHeader turn={turn}/>
 
     {LAYER_ORDER.map((layer) => {
       const layerEntries = byLayer.get(layer) || [];
       if (layer === "capabilities") {
         if (!layerEntries.length && !topLevelTools.length) return null;
-        return <LayerSection entries={layerEntries} key={layer} layer={layer}>
+        return <LayerSection entries={layerEntries} key={layer} layer={layer} selection={selection} turnId={turnId}>
           {topLevelTools.length ? <ToolDefinitionRow tools={topLevelTools} {...rowProps}/> : null}
           {layerEntries.map((entry) => <ToolDefinitionRow entry={entry} key={entry.key} tools={entry.item.tools} {...rowProps}/>)}
         </LayerSection>;
       }
       if (!layerEntries.length) return null;
       const badge = layer === "context" && contextChanges ? <Badge tone="changed">{contextChanges} changed</Badge> : undefined;
-      return <LayerSection badge={badge} entries={layerEntries} key={layer} layer={layer}>
+      return <LayerSection badge={badge} entries={layerEntries} key={layer} layer={layer} selection={selection} turnId={turnId}>
         {layer === "conversation"
           ? <ConversationRows entries={layerEntries} lastPromptKey={lastPromptKey} {...rowProps}/>
           : groupMinorRows(layerEntries).map((row) => Array.isArray(row)
@@ -1483,50 +1505,194 @@ function StructuredRequest({ earlierTurns, onSelectToken, selection, turn }: { e
   </div>;
 }
 
-function RequestRecord({ bare = false, earlierTurns, label, mode, onSelectToken, selection, turn, defaultOpen }: { bare?: boolean; earlierTurns: TurnModel[]; label: string; mode: RequestMode; onSelectToken: (selection: TokenSelection | null) => void; selection: TokenSelection | null; turn: TurnModel; defaultOpen: boolean }) {
-  const [open, setOpen] = useState(defaultOpen);
+function RequestBody({ earlierTurns, focusPath, mode, onSelectToken, selection, turn }: { earlierTurns: TurnModel[]; focusPath?: JsonPathPart[] | null; mode: RequestMode; onSelectToken: (selection: TokenSelection | null) => void; selection: TokenSelection | null; turn: TurnModel }) {
   const record = turn.record;
   const turnId = turn.id;
-  const body = asRecord(record.request?.body);
-  const treeSelectionPath = useMemo(() => selectedJsonPath(record, selection, turnId), [record, selection, turnId]);
-  // A single turn needs no collapsible wrapper; its structured header already names it.
-  if (bare) {
-    if (mode === "structured") return <StructuredRequest earlierTurns={earlierTurns} onSelectToken={onSelectToken} selection={selection} turn={turn}/>;
-    return <div className="p-3 sm:p-4"><div className="overflow-hidden rounded-xl border border-line">{mode === "tree" ? <JsonTreeView selectedBlockId={selection?.turnId === turnId ? selection.blockId : undefined} selectedPath={treeSelectionPath} value={record}/> : <RawJsonTree selectedBlockId={selection?.turnId === turnId ? selection.blockId : undefined} selectedPath={treeSelectionPath} turnId={turnId} value={record}/>}</div></div>;
-  }
-  return <details className="overflow-hidden rounded-xl border border-line" onToggle={(event) => setOpen(event.currentTarget.open)} open={open}>
-    <summary className="flex min-h-12 cursor-pointer list-none items-center gap-2 px-3 text-sm font-semibold hover:bg-canvas sm:px-4"><span>{label}</span><Pill>{textValue(body.model) || "Unknown model"}</Pill><span className="ml-auto hidden font-mono text-[10px] font-normal text-muted sm:block">{record.request?.method} {record.request?.path}</span><span aria-hidden="true" className="text-xs text-muted">›</span></summary>
-    {open ? mode === "structured" ? <div className="border-t border-line"><StructuredRequest earlierTurns={earlierTurns} onSelectToken={onSelectToken} selection={selection} turn={turn}/></div> : mode === "tree" ? <JsonTreeView selectedBlockId={selection?.turnId === turnId ? selection.blockId : undefined} selectedPath={treeSelectionPath} value={record}/> : <RawJsonTree selectedBlockId={selection?.turnId === turnId ? selection.blockId : undefined} selectedPath={treeSelectionPath} turnId={turnId} value={record}/> : null}
-  </details>;
+  const selectedPath = useMemo(() => focusPath || selectedJsonPath(record, selection, turnId), [focusPath, record, selection, turnId]);
+  if (mode === "structured") return <StructuredRequest earlierTurns={earlierTurns} onSelectToken={onSelectToken} selection={selection} turn={turn}/>;
+  return <div className="p-3 sm:p-4"><div className="overflow-hidden rounded-xl border border-line"><RawJsonTree selectedBlockId={selection?.turnId === turnId ? selection.blockId : undefined} selectedPath={selectedPath} turnId={turnId} value={record}/></div></div>;
 }
 
-export function RequestView({ jumpToBlock, onSelectToken, selection, turn, turns }: { jumpToBlock: (TokenSelection & { nonce: number }) | null; onSelectToken: (selection: TokenSelection | null) => void; selection: TokenSelection | null; turn: TurnModel; turns: TurnModel[] }) {
+
+type InspectorJump = TokenSelection & { nonce: number; path?: JsonPathPart[]; query?: string };
+
+/* The shared selection, named in its category color. A category that spans several
+   blocks can be stepped through here; each step opens and scrolls to that block. */
+function SelectionChip({ onJump, onSelectToken, selection }: { onJump: (selection: TokenSelection) => void; onSelectToken: (selection: TokenSelection | null) => void; selection: TokenSelection }) {
+  // Step by captured item, not by attribution part: one tool result can span several parts.
+  const ids: string[] = [];
+  for (const id of selection.layer ? [] : selection.blockIds || [selection.blockId]) {
+    if (!ids.some((known) => splitBlockId(known).itemId === splitBlockId(id).itemId)) ids.push(id);
+  }
+  const position = Math.max(0, ids.findIndex((id) => splitBlockId(id).itemId === splitBlockId(selection.blockId).itemId));
+  const move = (delta: number) => {
+    const next = { ...selection, blockId: ids[(position + delta + ids.length) % ids.length] };
+    onSelectToken(next);
+    onJump(next);
+  };
+  return <span className="inline-flex min-h-8 max-w-full items-center gap-1.5 rounded-full border border-line bg-canvas pl-2.5 pr-1 text-[11px]">
+    <CategorySwatch label={selection.label} layer={selection.layer}/>
+    <span className="max-w-40 truncate font-medium text-ink">{selection.label}{selection.layer ? " layer" : ""}</span>
+    {ids.length > 1 ? <span className="flex items-center font-mono text-[10px] text-muted">
+      <button aria-label="Previous matching block" className="grid size-6 place-items-center rounded-full hover:bg-panel hover:text-ink" onClick={() => move(-1)} type="button">‹</button>
+      {position + 1}/{ids.length}
+      <button aria-label="Next matching block" className="grid size-6 place-items-center rounded-full hover:bg-panel hover:text-ink" onClick={() => move(1)} type="button">›</button>
+    </span> : null}
+    <button aria-label="Clear selection" className="grid size-6 place-items-center rounded-full text-muted hover:bg-panel hover:text-ink" onClick={() => onSelectToken(null)} type="button">×</button>
+  </span>;
+}
+
+function SearchResults({ current, hits, onPick, query }: { current: number; hits: SearchHit[]; onPick: (index: number) => void; query: string }) {
+  return <div className="t-dropdown-enter border-t border-line">
+    <div className="flex items-center justify-between gap-3 px-3 py-1.5 text-[11px] text-muted sm:px-4">
+      <span>{hits.length >= SEARCH_HIT_LIMIT ? `${SEARCH_HIT_LIMIT}+` : hits.length} {hits.length === 1 ? "match" : "matches"}{current >= 0 ? ` · ${current + 1} of ${hits.length}` : ""}</span>
+      <span className="hidden sm:inline">Enter next · Shift+Enter previous · Esc clears</span>
+    </div>
+    {hits.length ? <ol className="max-h-64 overflow-y-auto border-t border-line">{hits.map((hit, index) => <li key={hit.key}>
+      <button aria-current={index === current ? "true" : undefined} className={`grid w-full gap-0.5 px-3 py-2 text-left hover:bg-canvas/70 sm:px-4 ${index === current ? "bg-canvas" : ""}`} onClick={() => onPick(index)} type="button">
+        <span className="flex min-w-0 items-center gap-2 text-[11px]">
+          <i className="size-2.5 shrink-0 rounded-[3px]" style={{ background: hit.color || "var(--line)" }}/>
+          <span className="truncate font-medium text-ink">{hit.location}</span>
+          <code className="ml-auto hidden max-w-[45%] truncate font-mono text-[10px] text-muted sm:block">{hit.pathText.replace(/^trace\.?/, "")}</code>
+        </span>
+        <span className="truncate pl-[18px] text-xs text-muted">{hit.before}<mark className="rounded-sm bg-warning/40 px-0.5 text-ink">{hit.match}</mark>{hit.after}</span>
+      </button>
+    </li>)}</ol> : <p className="border-t border-line px-4 py-3 text-xs text-muted">Nothing in this turn&apos;s captured request or response contains “{query}”.</p>}
+  </div>;
+}
+
+/* The turn level of the workspace: one selected turn's request, beside the flow. */
+export function RequestView({ jumpToBlock, onNavigate, onSelectToken, selection, turn, turns }: { jumpToBlock: (TokenSelection & { nonce: number }) | null; onNavigate: (index: number | null) => void; onSelectToken: (selection: TokenSelection | null) => void; selection: TokenSelection | null; turn: TurnModel; turns: TurnModel[] }) {
   const [scope, setScope] = useState<RequestScope>("turn");
   const [mode, setMode] = useState<RequestMode>("structured");
-  const rootRef = useRef<HTMLElement>(null);
+  const [query, setQuery] = useState("");
+  const [cursor, setCursor] = useState({ index: -1, query: "" });
+  const [listOpen, setListOpen] = useState(true);
+  const [localJump, setLocalJump] = useState<InspectorJump | null>(null);
+  const bodyRef = useRef<HTMLDivElement>(null);
+  const rangesRef = useRef<Range[]>([]);
   const selectedIndex = turns.findIndex((item) => item.id === turn.id);
   const previous = selectedIndex > 0 ? turns[selectedIndex - 1] : undefined;
-  const scopedTurns = scope === "turn" ? [turn] : scope === "conversation" ? turns : [];
+  // Page side-by-side: a later turn slides in from the right, an earlier one from the left.
+  const [shownIndex, setShownIndex] = useState(selectedIndex);
+  const [direction, setDirection] = useState(1);
+  if (selectedIndex !== shownIndex) {
+    setDirection(selectedIndex > shownIndex ? 1 : -1);
+    setShownIndex(selectedIndex);
+  }
+  const searching = scope === "turn" && query.trim().length >= MIN_QUERY;
+  const hits = useMemo(() => (searching ? searchRecord(turn.record, query) : []), [query, searching, turn.record]);
+  const current = cursor.query === query ? cursor.index : -1;
+  // The newest request to reveal something wins, whether it came from the flow or from here.
+  const jump = [jumpToBlock as InspectorJump | null, localJump]
+    .filter((item): item is InspectorJump => Boolean(item && item.turnId === turn.id))
+    .sort((left, right) => right.nonce - left.nonce)[0] || null;
+
+  // Mark every visible occurrence, and keep marking as rows open and close.
   useEffect(() => {
-    if (!jumpToBlock || scope === "changes") return;
+    const body = bodyRef.current;
+    if (!body || !searching) {
+      clearHighlights();
+      rangesRef.current = [];
+      return;
+    }
+    // A new query drops the previous jump's emphasis; reapplying after DOM changes keeps it.
+    clearCurrentMatch();
+    let timer = 0;
+    const run = () => { rangesRef.current = highlightMatches(body, query); };
+    run();
+    const observer = new MutationObserver(() => {
+      window.clearTimeout(timer);
+      timer = window.setTimeout(run, 120);
+    });
+    observer.observe(body, { characterData: true, childList: true, subtree: true });
+    return () => {
+      observer.disconnect();
+      window.clearTimeout(timer);
+    };
+  }, [mode, query, searching, turn.id]);
+  useEffect(() => () => clearHighlights(), []);
+
+  useEffect(() => {
+    if (!jump || scope === "changes") return;
     const frame = window.requestAnimationFrame(() => {
-      const target = [...(rootRef.current?.querySelectorAll<HTMLElement>("[data-block-id]") || [])].find((element) => element.dataset.blockId === jumpToBlock.blockId && element.dataset.turnId === jumpToBlock.turnId);
-      target?.scrollIntoView({ behavior: "smooth", block: "center" });
-      target?.focus({ preventScroll: true });
+      const body = bodyRef.current;
+      if (!body) return;
+      const target = jump.path
+        ? body.querySelector<HTMLElement>('[data-json-selected="true"]')
+        : [...body.querySelectorAll<HTMLElement>(jump.layer ? "[data-layer]" : "[data-block-id]")].find((element) => element.dataset.turnId === jump.turnId && (jump.layer ? element.dataset.layer === jump.layer : element.dataset.blockId === jump.blockId));
+      if (!target) return;
+      if (jump.query) {
+        rangesRef.current = highlightMatches(body, jump.query);
+        focusMatch(jump.path ? target : target.closest("[data-block-anchor]") ?? target, rangesRef.current);
+      } else target.scrollIntoView({ behavior: "smooth", block: jump.layer ? "start" : "center" });
+      target.focus({ preventScroll: true });
     });
     return () => window.cancelAnimationFrame(frame);
-  }, [jumpToBlock, mode, scope]);
-  return <section className="rounded-2xl border border-line bg-panel shadow-sm" ref={rootRef}>
-    <div className="flex flex-wrap items-center justify-between gap-3 border-b border-line p-4 sm:p-5">
-      <div><h2 className="text-base font-semibold">Request</h2><p className="mt-1 text-xs text-muted">Read the request by structure, explore its JSON tree, compare it, or inspect the original evidence.</p></div>
-      <div className="flex flex-wrap gap-2">
-        {selection ? <button className="max-w-48 truncate rounded-full border border-ink bg-ink px-2 py-1 font-mono text-[9px] text-panel" onClick={() => onSelectToken(null)} type="button">{selection.label} ×</button> : null}
-        {scope !== "changes" ? <div aria-label="Request format" className="grid grid-cols-3 rounded-lg bg-canvas p-1 text-[11px] font-semibold">{(["structured", "tree", "raw"] as const).map((item) => <button aria-current={mode === item ? "page" : undefined} className={`min-h-8 rounded-md px-3 ${mode === item ? "bg-panel text-ink shadow-sm" : "text-muted"}`} key={item} onClick={() => setMode(item)} type="button">{item === "structured" ? "Structured" : item === "tree" ? "Tree" : "Raw"}</button>)}</div> : null}
-        <div aria-label="Request scope" className="grid grid-cols-3 rounded-lg bg-canvas p-1 text-[11px] font-semibold">{(["turn", "changes", "conversation"] as const).map((item) => <button aria-current={scope === item ? "page" : undefined} className={`min-h-8 rounded-md px-3 ${scope === item ? "bg-panel text-ink shadow-sm" : "text-muted"}`} key={item} onClick={() => setScope(item)} type="button">{item === "turn" ? "This turn" : item === "changes" ? "Changes" : "Conversation"}</button>)}</div>
+  }, [jump, mode, scope]);
+
+  const step = (delta: number) => {
+    const next = selectedIndex + delta;
+    if (next >= 0 && next < turns.length) onNavigate(next);
+  };
+  // A match inside a structured block opens that block; anything else opens in Raw at its path.
+  const goTo = (index: number) => {
+    const hit = hits[index];
+    if (!hit) return;
+    setCursor({ index, query });
+    // On narrow screens the result list would cover the match, so fold it after a jump.
+    if (window.matchMedia("(max-width: 1023px)").matches) setListOpen(false);
+    const reveal = { nonce: Date.now(), query, turnId: turn.id };
+    if (mode === "structured" && hit.blockId) {
+      const next: TokenSelection = { blockId: hit.blockId, blockIds: [hit.blockId], label: hit.label, turnId: turn.id };
+      onSelectToken(next);
+      setLocalJump({ ...next, ...reveal });
+    } else {
+      // Raw locations have no node in the flow, so the flow selection is cleared.
+      onSelectToken(null);
+      setMode("raw");
+      setLocalJump({ blockId: "", label: hit.label, path: hit.path, ...reveal });
+    }
+  };
+  const onSearchKey = (event: React.KeyboardEvent<HTMLInputElement>) => {
+    if (event.key === "Escape") {
+      event.preventDefault();
+      setQuery("");
+    } else if (event.key === "Enter" && hits.length) {
+      event.preventDefault();
+      goTo((current + (event.shiftKey ? -1 : 1) + hits.length) % hits.length);
+    }
+  };
+
+  return <section aria-label={`Turn ${turn.label}`} className="rounded-2xl border border-line bg-panel shadow-sm">
+    <div className="sticky top-0 z-20 rounded-t-2xl border-b border-line bg-panel lg:top-14" data-search-ignore="">
+      <div className="flex flex-wrap items-center gap-2 px-3 py-2.5 sm:px-4">
+        <button className="inline-flex min-h-9 items-center gap-1.5 rounded-lg px-2 text-xs font-medium text-muted hover:bg-canvas hover:text-ink" onClick={() => onNavigate(null)} type="button">← Overview</button>
+        <div className="flex items-center gap-1">
+          <button aria-label="Previous turn" className="grid size-9 place-items-center rounded-lg text-muted hover:bg-canvas hover:text-ink disabled:opacity-30" disabled={selectedIndex <= 0} onClick={() => step(-1)} type="button">‹</button>
+          <span className="font-mono text-[11px] text-muted">{selectedIndex + 1} / {turns.length}</span>
+          <button aria-label="Next turn" className="grid size-9 place-items-center rounded-lg text-muted hover:bg-canvas hover:text-ink disabled:opacity-30" disabled={selectedIndex >= turns.length - 1} onClick={() => step(1)} type="button">›</button>
+        </div>
+        {selection?.turnId === turn.id ? <SelectionChip onJump={(next) => setLocalJump({ ...next, nonce: Date.now() })} onSelectToken={onSelectToken} selection={selection}/> : null}
+        <div className="ml-auto flex flex-wrap items-center gap-2">
+          {scope === "turn" ? <Segmented label="Request format" onChange={setMode} options={[["structured", "Structured"], ["raw", "Raw"]]} value={mode}/> : null}
+          <Segmented label="Request scope" onChange={setScope} options={[["turn", "This turn"], ["changes", "Changes"]]} value={scope}/>
+        </div>
       </div>
+      {scope === "turn" ? <div className="flex items-center gap-2 px-3 pb-2.5 sm:px-4">
+        <label className="relative block min-w-0 flex-1">
+          <span className="sr-only">Search this turn</span>
+          <SearchIcon className="pointer-events-none absolute left-2.5 top-2.5 size-4 text-muted"/>
+          <input className="h-9 w-full rounded-lg border border-line bg-canvas pl-8 pr-8 text-xs outline-none placeholder:text-muted focus:border-muted" onChange={(event) => { setQuery(event.target.value); setListOpen(true); }} onKeyDown={onSearchKey} placeholder="Search this turn's request and response" type="search" value={query}/>
+          {query ? <button aria-label="Clear search" className="absolute right-0.5 top-0 grid size-9 place-items-center text-sm text-muted hover:text-ink" onClick={() => setQuery("")} type="button">×</button> : null}
+        </label>
+        {searching && hits.length ? <button aria-expanded={listOpen} className="min-h-9 shrink-0 rounded-lg px-2 text-[11px] font-medium text-muted hover:bg-canvas hover:text-ink" onClick={() => setListOpen(!listOpen)} type="button">{listOpen ? "Hide list" : `Show ${hits.length}`}</button> : null}
+      </div> : null}
+      {searching && listOpen ? <SearchResults current={current} hits={hits} onPick={goTo} query={query}/> : null}
     </div>
-    {scope === "changes" ? <RequestChanges current={turn} previous={previous}/> : <div className={scope === "turn" ? "" : "space-y-2 p-3 sm:p-4"}>
-      {scopedTurns.map((item, index) => <RequestRecord bare={scope === "turn"} defaultOpen={scope === "turn"} earlierTurns={turns.slice(0, scope === "turn" ? Math.max(0, selectedIndex) : index)} key={`${scope}-${item.record.request_id || index}`} label={scope === "turn" ? "Captured request" : `Turn ${index + 1}`} mode={mode} onSelectToken={onSelectToken} selection={selection} turn={item}/>)}
-    </div>}
+    <div className="t-page-enter" key={turn.id} ref={bodyRef} style={{ "--t-page-dir": direction } as React.CSSProperties}>
+      <div className="px-3 pt-3 sm:px-4 sm:pt-4"><RequestHeader turn={turn}/></div>
+      {scope === "changes" ? <RequestChanges current={turn} previous={previous}/> : <RequestBody earlierTurns={turns.slice(0, Math.max(0, selectedIndex))} focusPath={mode === "raw" ? jump?.path : null} mode={mode} onSelectToken={onSelectToken} selection={selection} turn={turn}/>}
+    </div>
   </section>;
 }

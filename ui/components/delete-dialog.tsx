@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
+import { motionMs } from "./motion";
 
 export function DeleteDialog({ busy, description, error, onCancel, onConfirm, open, title }: {
   busy: boolean;
@@ -20,9 +21,23 @@ export function DeleteDialog({ busy, description, error, onCancel, onConfirm, op
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [busy, onCancel, open]);
 
-  if (!open) return null;
-  return <div className="fixed inset-0 z-[100] grid place-items-center bg-black/45 p-4" onMouseDown={(event) => { if (event.currentTarget === event.target && !busy) onCancel(); }}>
-    <section aria-describedby="delete-dialog-description" aria-labelledby="delete-dialog-title" aria-modal="true" className="w-full max-w-md rounded-2xl border border-line bg-panel p-5 shadow-2xl" role="alertdialog">
+  // Modal open / close: stay mounted while the closing scale-down plays, then unmount.
+  const [shown, setShown] = useState(open);
+  const [wasOpen, setWasOpen] = useState(open);
+  if (open !== wasOpen) {
+    setWasOpen(open);
+    if (open) setShown(true);
+  }
+  const closing = shown && !open;
+  useEffect(() => {
+    if (!closing) return;
+    const timer = window.setTimeout(() => setShown(false), motionMs("--modal-close-dur", 150));
+    return () => window.clearTimeout(timer);
+  }, [closing]);
+
+  if (!shown) return null;
+  return <div className={`t-modal-backdrop fixed inset-0 z-[100] grid place-items-center bg-black/45 p-4 ${closing ? "is-closing" : ""}`} onMouseDown={(event) => { if (event.currentTarget === event.target && !busy) onCancel(); }}>
+    <section aria-describedby="delete-dialog-description" aria-labelledby="delete-dialog-title" aria-modal="true" className={`t-modal ${closing ? "is-closing " : ""}w-full max-w-md rounded-2xl border border-line bg-panel p-5 shadow-2xl`} role="alertdialog">
       <h2 className="text-lg font-semibold tracking-[-0.02em]" id="delete-dialog-title">{title}</h2>
       <p className="mt-2 text-sm leading-6 text-muted" id="delete-dialog-description">{description}</p>
       {error ? <div className="mt-3 rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700 dark:border-red-900 dark:bg-red-950 dark:text-red-300">{error}</div> : null}

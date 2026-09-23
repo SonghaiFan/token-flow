@@ -20,7 +20,7 @@ export function AppShell({ children, onBack, title, meta }: AppShellProps) {
   }
 
   return (
-    <div className="min-h-dvh min-w-0 overflow-x-hidden bg-canvas text-ink">
+    <div className="min-h-dvh min-w-0 overflow-x-clip bg-canvas text-ink">
       <header className="sticky top-0 z-50 border-b border-line bg-panel/95 backdrop-blur">
         <div className="mx-auto flex min-h-14 max-w-[1600px] items-center gap-2 px-3 sm:px-5">
           {onBack ? (

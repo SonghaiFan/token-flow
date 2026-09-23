@@ -114,6 +114,8 @@ export interface TokenSelection {
   blockId: string;
   blockIds?: string[];
   label: string;
+  /* Set when a whole input layer of the turn is selected rather than one block. */
+  layer?: InputLayer;
 }
 
 export interface TurnModel {
@@ -122,6 +124,8 @@ export interface TurnModel {
   label: string;
   captureTurn?: number | string;
   title: string;
+  /* What this turn added to the conversation, such as its prompt or tool calls. */
+  step: string;
   kind: "user" | "metadata" | "tool" | "unknown";
   queryText: string;
   queryUserIndex: number;
@@ -138,7 +142,7 @@ export interface TurnModel {
   fresh: number;
   categories: TokenCategory[];
   itemStates: Record<string, ItemState>;
+  /* Captured thread identity; the token flow only connects turns in the same lane. */
+  lane: string;
   record: TraceRecord;
 }
-
-export type WorkspaceLens = "composition" | "flow" | "request";

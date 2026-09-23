@@ -1,6 +1,6 @@
 ---
 owner: token-flow-maintainers
-last_reviewed: 2026-09-22
+last_reviewed: 2026-09-23
 source_of_truth: AGENTS.md
 ---
 
@@ -24,7 +24,7 @@ competing navigators, repeated summaries, or decorative chrome.
 
 ### Context
 
-Keep people oriented. Preserve the selected agent, conversation, turn, and lens
+Keep people oriented. Preserve the selected agent, conversation, turn, and block
 when navigating or changing viewport size. A layout may reflow, but the user's
 mental model and current selection must not change.
 
@@ -46,17 +46,22 @@ visual tokens, and interaction behavior.
 Token Flow service
 └── Conversations
     └── Conversation workspace
-        ├── Turn
-        ├── Lens: Composition | Token flow | Request
-        └── Detail or raw evidence
+        ├── Turn flow (conversation level, always visible)
+        └── Inspector: conversation overview, or the selected turn's request
 ```
 
 - A **conversation** is the top-level task or session captured from an agent.
 - A **turn** is one captured model request inside a conversation.
+- A **block** is one attributed part of a turn's input, such as a tool
+  definition, an instruction section, or a tool result.
+- An **input layer** groups blocks by origin: capabilities, instructions,
+  injected context, conversation, and unattributed input.
 - An **agent** is the originating coding agent, such as Codex or Claude Code.
-- A **lens** is a mutually exclusive way to inspect the same selected turn.
-- **Request** is the captured source evidence. It is a lens, not another level
-  in the navigation hierarchy.
+- The **turn flow** is the conversation itself: its turns in order, each with
+  its input composition, joined by the tokens that carry over.
+- The **inspector** shows the conversation overview when nothing is selected,
+  and the selected turn's captured request evidence otherwise. It is the
+  detail of the flow, not another level in the navigation hierarchy.
 
 Use these terms consistently in the interface. Do not use `trace`, `session`,
 and `conversation` interchangeably in user-facing copy. Internal identifiers
@@ -83,18 +88,18 @@ The dashboard answers one question: **Which conversation should I open?**
 
 The workspace answers a second question: **What happened in this conversation?**
 
-- There is one persistent selected turn shared by every lens.
-- On wide screens, turns use the rich vertical rail. On narrow screens, the
-  same turn cards reflow into a horizontal rail with the same order, metadata,
-  and selection state.
-- The turn rail offers three local ordering modes without creating another
-  navigator: `Model` groups requests by model, `Turn` preserves chronological
-  order, and `Query` groups a user request with its follow-up model calls.
-- `Composition`, `Token flow`, and `Request` are the primary content tabs.
-- Turn-versus-conversation grouping is a local control for the request content,
-  not a competing top-level view.
-- Structured, tree, and raw representations belong inside the Request lens.
-- Do not render a second turn navigator or maintain parallel selection state.
+- Opening a conversation shows the conversation overview. No turn is selected
+  until the user selects one; never drop the user into the first turn.
+- The turn list and the token flow Sankey are one component. Every turn is a
+  row with its identity on the left and its Sankey nodes on the right; the
+  Sankey runs top to bottom in every layout, so desktop and mobile read in the
+  same direction.
+- Selecting a row opens that turn in the inspector. Selecting a Sankey node
+  opens the same turn and highlights that layer or category. `Esc` or the
+  overview row returns to the conversation overview.
+- Structured and raw representations, search, and the comparison with the
+  previous turn, belong inside the turn inspector.
+- Do not render a second turn navigator, lens tabs, or parallel selection state.
 
 ## Control scope
 
@@ -102,19 +107,18 @@ The workspace answers a second question: **What happened in this conversation?**
 | --- | --- |
 | Service | Agent filter, watching state, theme, language, service actions |
 | Conversation collection | Search, date, status, bulk selection, refresh |
-| Conversation | Selected turn, turn ordering, Composition, Token flow, Request |
-| Request content | Turn/conversation grouping, structured/tree/raw, request actions |
+| Conversation | Selected turn or overview, selected layer or block, turn search |
+| Turn inspector | Structured/raw, search, selection stepping, this turn versus changes, previous/next turn |
 
 Place a control beside the content it affects. If a control changes only one
 panel, it does not belong in the global toolbar.
 
 ## Persistent layout
 
-Use at most three persistent bands before the main content:
+Use at most two persistent bands:
 
 1. App toolbar for identity and service-wide controls.
-2. Context or primary lens tabs for the current conversation.
-3. Main split content: turn navigator plus the selected lens.
+2. Main split content: the turn flow plus the inspector.
 
 The content is the interface. Avoid repeating page names, selected-turn facts,
 or metric summaries merely to fill a band.
@@ -126,66 +130,94 @@ or metric summaries merely to fill a band.
 Shows Token Flow identity, current collection context, watching state, and global
 utilities. It remains visually stable between the dashboard and workspace.
 
-### Lens tabs
+### Turn flow
 
-Use a single tab set for mutually exclusive main panes. Selection must be
-persistent, keyboard reachable, and apparent without relying on color alone.
+The token flow is a Sankey diagram drawn top to bottom, one node row per turn,
+aligned with the turn list. Rows are in chronological capture order and never
+regrouped by model; query boundaries appear as quiet headers between rows. All
+row text sits in the left column (ordinal, input tokens, a short step summary
+such as the prompt or the tools the turn added, cache share, duration, time,
+and problem state); the right column belongs to the Sankey alone.
 
-### Turn navigator
+Nodes are `Layers` by default (capabilities, instructions, injected context,
+conversation, unattributed) or `Categories` (blocks sharing a label, with
+categories below 3% of the turn's input combined as `Others`). Both keep prompt
+order. Every node uses one scale across the conversation, so context growth is
+visible, and each turn's nodes are centered as a compact group. The cached
+portion of a node is hatched from its leading edge, using captured per-block
+cache counts.
 
-Each card shows the same essential identity in every orientation: ordinal,
-input tokens, duration, model, endpoint or request kind, time, and problem state
-when available. `Model`, `Turn`, and `Query` change the order or grouping of the
-same cards and must preserve the selected turn. Desktop is vertical; narrow
-layouts are horizontal.
+Each node links to the nearest earlier node with the same layer or category in
+the same captured thread (`thread_id`, otherwise the prompt cache key). A quiet,
+low-opacity base ribbon spans both nodes and communicates continuity only; a
+darker fresh-use ribbon overlays it at each node's trailing edge and tapers to
+zero when the destination is fully cached. Do not add balancing nodes such as
+`New` or `Cache saved`. Auxiliary requests such as title generation stay in the
+list, marked `Meta`, but outside the flow. Links are hidden while the list is
+filtered. Keep row height fixed so nodes and ribbons stay aligned with rows.
+
+### Conversation overview
+
+Summarizes the whole conversation from captured usage: turns, input, cache
+read, and output; where the input went; and the turns with the most new,
+uncached input or a problem status, which link into the inspector.
+
+Where the input went is a unit treemap: one rounded square per fixed, round
+amount of input tokens summed over every turn (1, 2, or 5 times a power of ten,
+chosen so the conversation fits in about 700 squares), laid out as a
+slice-and-dice treemap on the grid. Layers take consecutive cells in prompt
+order along the major direction (vertical bands on wide layouts, horizontal on
+narrow ones); categories, largest first, take consecutive cells of their layer
+along the other direction. Counts are exact and no cell is left empty except in
+the chart's last column or row, so boundaries may step by one cell rather than
+leave gaps. Cached squares are pale and fresh squares solid. There are no borders:
+layers and categories are told apart by color alone. Labels never take area inside the chart. Below it,
+one legend line names the layer color families and the unit, followed by bars
+for the five largest categories (swatch, share bar on one axis, exact tokens,
+share of input, cache rate) and one quiet row totaling the other categories, so
+the list still sums to the whole. Those rows are the keyboard-reachable way to
+focus a category. A category under half a
+square still shows as one square and is marked `<`. The legend states the unit.
+
+Selecting a square or a category focuses that category: other squares fade,
+the token flow keeps the category (or its layer, in `Layers` mode) bright in
+every turn, and the overview names the turns where it is largest, or where it
+first appears when its size never changes. Those turns open in the inspector
+with the category selected. Selecting it again, or clearing it, ends the focus.
+
+### Turn inspector
+
+Shows the selected turn with previous/next controls and a way back to the
+overview. Its header states the turn's query, model, route, status, duration,
+and input, cached, and new tokens in every representation. On narrow screens it
+opens over the flow and closing it returns to the same place in the flow.
 
 ### Metric summary
 
 Shows only metrics needed to understand the current scope. Overview values may
 be compact; exact values remain available in details, tooltips, and exports.
 
-### Composition treemap
-
-Each rectangle owns its category label, token total, turn share, and cached
-versus fresh subdivision. Encode these values directly in the rectangle when
-space allows; retain exact values in its accessible label and tooltip. Do not
-require a separate inspector to interpret the selected rectangle.
-
-### Token flow
-
-Token flow answers one question: how does each category's token amount change
-across turns? Every visible node is one category total in one turn, aggregating
-the real captured blocks that share that category; its size is their actual
-combined token count. Keep the primary Composition view fully disaggregated so
-the underlying blocks remain inspectable. Omit metadata-only turns from the
-flow while retaining them in the global turn list. A quiet, low-opacity base
-ribbon connects the nearest earlier node with the same category and spans the
-full height of both nodes. It communicates category continuity only and does
-not encode cache volume. A darker fresh-use ribbon overlays that base and uses
-each endpoint's fresh-token share; it tapers to zero when the destination is
-fully cached. Cache remains encoded by the hatched portion of each node; do not
-infer cache provenance from a category label. This full-height continuity base
-is an intentional exception to quantity encoding because the user needs a
-stable visual channel underneath the quantitative fresh-use layer. Rank
-categories by token count within each turn and combine categories below 3% of
-that turn's input as `Others` in the flow and its aligned mini treemap. Do not
-add balancing nodes such as `New` or `Cache saved`. Center each D3-laid-out turn
-column as a compact, balanced group. Place each turn's compact composition
-treemap beneath its corresponding desktop axis; use the same filtered turn
-order in the mobile vertical layout.
-
 ### Coordinated inspection
 
-Composition, Token flow, and Request share a selection identified by `turnId`
-plus one or more real block ids. A Composition rectangle selects one exact
-block. An aggregated Token flow category selects its member blocks in that turn;
-repeated labels in other turns are related category flow, not the same selected
-objects. Double-clicking a treemap rectangle opens its exact structured request
-block. Clicking unused plot space clears selection. `Unattributed input` must
-never link to a guessed request section. The same selection persists across
-Structured, Tree, and Raw. Tree expands only the selected block's ancestor path,
-then scrolls and highlights the exact captured node; it must not expand the
-entire trace just to reveal one selection.
+The flow and the inspector share one selection identified by `turnId` plus
+either one or more real block ids or one input layer. Every highlight uses the
+selection's own category or layer color, never a generic outline.
+
+- A layer node selects a layer. The inspector scrolls to that layer's section,
+  outlines it in the layer color, and lets other sections step back, without
+  expanding every row in it.
+- A category node selects its member blocks. Matching rows show a left bar and
+  a light tint in the category color; non-matching rows step back; only the
+  focused block opens. The selection chip names the category and steps through
+  its blocks one captured item at a time.
+- In the flow, the selected node is outlined and the same layer or category
+  stays bright in every turn, with its ribbons, so its path through the
+  conversation reads at once. Everything else fades.
+- A row's category swatch in the inspector selects that row's blocks.
+- `Unattributed input` must never link to a guessed request section.
+- The same selection persists across Structured and Raw. Raw expands only the
+  selected block's ancestor path, then scrolls to and highlights the exact
+  captured node.
 
 ### Local control bar
 
@@ -205,7 +237,7 @@ summary, and state visible so disclosure never becomes information loss.
 
 ### Structured machine output
 
-In the Request lens, parse valid JSON embedded in captured text into readable
+In the turn inspector, parse valid JSON embedded in captured text into readable
 objects and lists. Preserve any warning or truncation preamble as visible
 metadata. Tool-definition collections use one collapsed entry per captured tool:
 show its name and plain-language summary first, then place its declaration and
@@ -213,16 +245,20 @@ additional fields in nested disclosures. Large collections render lazily. When
 captured JSON is malformed, recover only a known, unambiguous structure; do not
 invent missing fields. Raw JSON always retains the exact captured evidence.
 
-The Request lens has three evidence-preserving representations. `Structured`
-uses domain-specific renderers for known trace shapes. `Tree` is a generic,
-read-only JSON explorer for unknown or deeply nested shapes; it starts fully
-expanded so the captured structure is immediately visible, supports manual
-node folding, key/value search, and subtree copying, and loads only when selected.
-`Raw` preserves the exact captured trace for auditing and copying, presented as
-a literal, type-colored JSON tree with quoted keys, JSON punctuation, full-copy,
-and in-place folding. Unlike the exploratory Tree, Raw has no search or depth
-controls and does not semantically rewrite values. A generic tree must
-complement, not replace, known semantic renderers. Hover-only tree
+The turn inspector has two evidence-preserving representations. `Structured`
+uses domain-specific renderers for known trace shapes. `Raw` preserves the exact
+captured trace for auditing and copying, presented as a literal, type-colored
+JSON tree with quoted keys, JSON punctuation, full-copy, and in-place folding;
+it does not semantically rewrite values.
+
+Search in the inspector covers the turn's captured request and response keys
+and values. Results appear as you type, in document order, each naming its
+location in structured vocabulary (layer and category, request settings, or
+response), a snippet with the match marked, and the exact JSON path. Choosing a
+result reveals it in context: in Structured it opens and scrolls to the block
+and marks the occurrence; locations without a structured row open in Raw at the
+exact path. Occurrences stay marked as content opens, `Enter` and
+`Shift+Enter` step through results, and `Esc` clears the search. Hover-only
 actions reserve their space and stay outside text flow so rows never rewrap or
 shift when an action appears.
 
@@ -244,7 +280,7 @@ Never present missing capture data as a successful zero.
 - Categorical visualization colors require a visible legend and stable category
   identity. Do not reuse navigation or status colors as data categories.
 - Token categories use one fixed palette, `ui/lib/category-palette.ts`, in
-  Composition, Token flow, and Request alike. Each category label has an
+  the turn flow, the overview, and the inspector alike. Each category label has an
   explicit color within its input layer's hue family (capabilities teal,
   instructions violet, injected context amber, conversation blue, unattributed
   gray). A new classifier label needs a palette entry; never hash or cycle colors.
@@ -261,9 +297,9 @@ Never present missing capture data as a successful zero.
 
 Responsive design reflows the same objects; it does not invent a second product.
 
-- Wide layouts use a vertical turn rail and a flexible content stage.
-- Narrow layouts use the same turn cards in a horizontal, locally scrollable
-  rail followed by the content stage.
+- Wide layouts place the turn flow beside the inspector.
+- Narrow layouts show the same top-to-bottom turn flow; the overview follows
+  it, and a selected turn opens over it.
 - The page itself must not overflow horizontally. Wide charts, tables, and code
   can scroll inside a clearly bounded local container.
 - Interactive targets on touch layouts are at least 44 by 44 CSS pixels.
@@ -289,7 +325,7 @@ Every material UI change must exercise this path with real captured data:
 1. Open the dashboard.
 2. Filter or search conversations.
 3. Open a conversation.
-4. Change the selected turn and lens.
+4. Select a turn and a Sankey node, then return to the overview.
 5. Inspect readable and raw request evidence.
 6. Return to the dashboard and confirm that the user remains oriented.
 

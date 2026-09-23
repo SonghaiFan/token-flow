@@ -2,22 +2,23 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { deleteSession, fetchSessionRecords } from "@/lib/api";
-import { formatCompact, formatNumber } from "@/lib/format";
+import { formatCompact } from "@/lib/format";
 import { buildTurns } from "@/lib/token-model";
-import type { SessionRecordsPayload, TokenSelection, WorkspaceLens } from "@/lib/types";
+import type { SessionRecordsPayload, TokenSelection } from "@/lib/types";
 import { AppShell } from "../app-shell";
 import { DeleteDialog } from "../delete-dialog";
 import { DownloadIcon, TrashIcon } from "../icons";
-import { SankeyChart } from "../charts/sankey-chart";
-import { TreemapChart } from "../charts/treemap-chart";
-import { MetricStrip } from "../workspace/metric-strip";
+import { ConversationOverview } from "../workspace/conversation-overview";
+import type { CategoryFocus } from "../workspace/input-units";
 import { RequestView } from "../workspace/request-view";
-import { TurnNavigator } from "../workspace/turn-navigator";
+import { TurnFlow } from "../workspace/turn-flow";
 
 export function WorkspaceView({ sessionId, onBack }: { sessionId: string; onBack: () => void }) {
   const [data, setData] = useState<SessionRecordsPayload | null>(null);
+  // No selected turn means the conversation overview: opening a conversation starts there.
   const [selectedId, setSelectedId] = useState("");
-  const [lens, setLens] = useState<WorkspaceLens>("composition");
+  // A category chosen in the overview treemap, followed through the flow until cleared.
+  const [focusCategory, setFocusCategory] = useState<CategoryFocus | null>(null);
   const [tokenSelection, setTokenSelection] = useState<TokenSelection | null>(null);
   const [requestJump, setRequestJump] = useState<(TokenSelection & { nonce: number }) | null>(null);
   const [error, setError] = useState("");
@@ -85,22 +86,21 @@ export function WorkspaceView({ sessionId, onBack }: { sessionId: string; onBack
   const turns = useMemo(() => buildTurns(data?.records || []), [data?.records]);
   const selected = useMemo(() => {
     const index = turns.findIndex((item) => item.id === selectedId);
-    return index >= 0 ? index : 0;
+    return index >= 0 ? index : null;
   }, [selectedId, turns]);
-  const turn = turns[selected] || turns[0];
+  const turn = selected === null ? undefined : turns[selected];
   const title = data?.session.first_user || "Conversation";
-  const selectTurn = useCallback((index: number) => {
-    const id = turns[index]?.id;
-    if (!id) return;
-    setSelectedId(id);
+  const selectTurn = useCallback((index: number | null) => {
+    setSelectedId(index === null ? "" : turns[index]?.id || "");
     setTokenSelection(null);
   }, [turns]);
-  const openSelectionInRequest = useCallback((selection: TokenSelection) => {
-    setSelectedId(selection.turnId);
+  // A Sankey node opens its turn and jumps to that layer, or to that category's blocks.
+  const selectNode = useCallback((index: number, selection: TokenSelection) => {
+    if (!turns[index]) return;
+    setSelectedId(turns[index].id);
     setTokenSelection(selection);
     setRequestJump({ ...selection, nonce: Date.now() });
-    setLens("request");
-  }, []);
+  }, [turns]);
   const closeDeleteDialog = useCallback(() => {
     if (deleting) return;
     setDeleteOpen(false);
@@ -119,27 +119,22 @@ export function WorkspaceView({ sessionId, onBack }: { sessionId: string; onBack
   }, [onBack, sessionId]);
 
   if (error) return <AppShell onBack={onBack} title="Conversation"><main className="mx-auto max-w-3xl p-6"><div className="rounded-2xl border border-red-200 bg-red-50 p-5 text-red-700">{error}</div></main></AppShell>;
-  if (!data || !turn) return <AppShell onBack={onBack} title="Conversation"><main className="grid min-h-[70dvh] place-items-center text-sm text-muted">Loading conversation…</main></AppShell>;
+  if (!data) return <AppShell onBack={onBack} title="Conversation"><main className="grid min-h-[70dvh] place-items-center text-sm text-muted">Loading conversation…</main></AppShell>;
 
   const liveLabel = liveState === "watching" ? "Watching" : liveState === "stale" ? "Updates paused" : liveState === "reconnecting" ? "Reconnecting" : "Connecting";
   const active = data.session.live || data.session.status === "active";
   const meta = <><span>{turns.length} turns</span><span>{formatCompact(data.session.total_tokens || turns.reduce((sum, item) => sum + item.input + item.output, 0))} tokens</span><span className={liveState === "watching" ? "text-success" : "text-warning"}>● {liveLabel}</span><a className="inline-flex min-h-9 items-center gap-1.5 rounded-lg border border-line px-3 text-ink hover:bg-canvas" href={`/api/sessions/${encodeURIComponent(sessionId)}/export/compact`}><DownloadIcon className="size-4"/> Export</a><button className="inline-flex min-h-9 items-center gap-1.5 rounded-lg border border-red-200 px-3 text-red-700 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-40 dark:border-red-900 dark:text-red-300 dark:hover:bg-red-950" disabled={active} onClick={() => setDeleteOpen(true)} title={active ? "Active conversations cannot be deleted" : "Delete conversation"} type="button"><TrashIcon className="size-4"/> Delete</button></>;
 
   return <AppShell meta={meta} onBack={onBack} title={title}>
-    <nav aria-label="Analysis view" className="sticky top-14 z-40 border-b border-line bg-panel/95 px-3 py-1.5 backdrop-blur sm:px-5">
-      <div className="mx-auto grid max-w-xl grid-cols-3 rounded-xl bg-canvas p-1 text-xs font-semibold">
-        {(["composition", "flow", "request"] as const).map((item) => <button aria-current={lens === item ? "page" : undefined} className={`min-h-10 rounded-lg px-2 transition ${lens === item ? "bg-ink text-panel shadow-sm" : "text-muted hover:text-ink"}`} key={item} onClick={() => setLens(item)} type="button">{item === "composition" ? "Composition" : item === "flow" ? "Token flow" : "Request"}</button>)}
-      </div>
-    </nav>
-
-    <main className="mx-auto grid min-w-0 w-full max-w-[1600px] gap-3 py-3 lg:grid-cols-[252px_minmax(0,1fr)] lg:px-4">
-      <TurnNavigator onSelect={selectTurn} selected={selected} turns={turns}/>
-      <div className="min-w-0 space-y-3 px-3 lg:px-0">
-        <MetricStrip previous={turns[selected - 1]} turn={turn}/>
-        {lens === "composition" ? <TreemapChart key={turn.id} onOpenRequest={openSelectionInRequest} onSelectToken={setTokenSelection} selection={tokenSelection} turn={turn}/> : null}
-        {lens === "flow" ? <SankeyChart onOpenRequest={openSelectionInRequest} onSelectToken={setTokenSelection} onSelectTurn={selectTurn} selected={selected} selection={tokenSelection} turns={turns}/> : null}
-        {lens === "request" ? <RequestView jumpToBlock={requestJump?.turnId === turn.id ? requestJump : null} onSelectToken={setTokenSelection} selection={tokenSelection} turn={turn} turns={turns}/> : null}
-        <div className="flex flex-wrap items-center justify-between gap-3 px-1 pb-5 text-[11px] text-muted"><span>{data.session.agent || "Unknown agent"} · {turn.model}</span><span>{formatNumber(turn.input)} input · {formatNumber(turn.output)} output</span></div>
+    <main className="mx-auto grid min-w-0 w-full max-w-[1600px] gap-3 py-3 lg:grid-cols-[minmax(24rem,32rem)_minmax(0,1fr)] lg:px-4">
+      <TurnFlow focus={turn ? null : focusCategory} onSelectNode={selectNode} onSelectTurn={selectTurn} selected={selected} selection={tokenSelection} turns={turns}/>
+      {/* On narrow screens the selected turn opens over the flow; closing it returns to the same place. */}
+      {/* Opening a turn slides forward from the overview and closing it slides back
+          (page side-by-side); on narrow screens the turn rises over the flow instead. */}
+      <div className={`t-page-enter ${turn ? "fixed inset-0 z-50 overflow-y-auto bg-canvas p-2 lg:static lg:z-auto lg:overflow-visible lg:bg-transparent lg:p-0" : "min-w-0 px-3 pb-5 lg:px-0"}`} data-overlay={turn ? "true" : undefined} key={turn ? "turn" : "overview"} style={{ "--t-page-dir": turn ? 1 : -1 } as React.CSSProperties}>
+        {turn
+          ? <RequestView jumpToBlock={requestJump?.turnId === turn.id ? requestJump : null} onNavigate={selectTurn} onSelectToken={setTokenSelection} selection={tokenSelection} turn={turn} turns={turns}/>
+          : <section className="rounded-2xl border border-line bg-panel shadow-sm"><ConversationOverview focus={focusCategory} onFocus={setFocusCategory} onSelectNode={selectNode} onSelectTurn={selectTurn} session={data.session} turns={turns}/></section>}
       </div>
     </main>
     <DeleteDialog busy={deleting} description={`This permanently deletes “${title}” and its captured records.`} error={deleteError} onCancel={closeDeleteDialog} onConfirm={() => void confirmDelete()} open={deleteOpen} title="Delete this conversation?"/>

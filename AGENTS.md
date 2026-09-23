@@ -96,7 +96,7 @@ npm run sync
 ```
 
 For material UI changes, verify the real path with captured data: dashboard →
-search/filter → conversation → turn/lens selection → structured/tree/raw
+search/filter → conversation overview → turn flow row and Sankey node selection → structured/raw
 request evidence → back to dashboard. Check both wide and narrow viewports.
 
 
