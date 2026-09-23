@@ -9,16 +9,16 @@ from datetime import datetime, timezone
 from typing import Any
 from urllib.parse import parse_qsl, urlencode, urlparse, urlsplit, urlunsplit
 
-from claude_tap.bedrock import bedrock_model_from_path
-from claude_tap.trace_encoding import (
+from claude_tap.core.bedrock import bedrock_model_from_path
+from claude_tap.core.trace_encoding import (
     _decode_bedrock_eventstream_events,
     content_type_from_headers,
     is_encoded_blob_body,
     is_protobuf_content_type,
     looks_like_binary_text,
 )
-from claude_tap.trace_store import SessionQuery, TraceStore, get_trace_store
-from claude_tap.usage import normalize_usage
+from claude_tap.core.usage import normalize_usage
+from claude_tap.storage.trace_store import SessionQuery, TraceStore, get_trace_store
 
 _DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 

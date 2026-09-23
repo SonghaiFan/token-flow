@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 
-from claude_tap.pricing import (
+from claude_tap.analysis.pricing import (
     _int,
     _search_cost_per_query,
     entry_cost,
@@ -225,7 +225,7 @@ def _sum_usage(usages: list[dict]) -> dict:
     shape flag rather than a count, so it is carried from the first response that
     states it — every response in one record comes from the same provider.
 
-    Counts go through :func:`claude_tap.pricing._int` so a non-finite or
+    Counts go through :func:`claude_tap.analysis.pricing._int` so a non-finite or
     oversize value in one response cannot abort viewer generation.
     """
     totals: dict[str, object] = {}
@@ -261,7 +261,7 @@ def _aggregate_cost_fields(
     tier they never hit — and the resulting figures are then added.
 
     Returns an empty dict when any response is unpriceable, matching
-    :func:`claude_tap.pricing.entry_cost`: a total that silently omits some of the
+    :func:`claude_tap.analysis.pricing.entry_cost`: a total that silently omits some of the
     responses in a record would still be displayed as if it covered all of them.
     """
     if not usages:

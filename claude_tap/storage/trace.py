@@ -10,8 +10,8 @@ import uuid
 from datetime import datetime
 from typing import TYPE_CHECKING
 
-from claude_tap.trace_store import TraceStore, get_trace_store
-from claude_tap.usage import normalize_usage
+from claude_tap.core.usage import normalize_usage
+from claude_tap.storage.trace_store import TraceStore, get_trace_store
 
 if TYPE_CHECKING:
     from claude_tap.server.app import LiveViewerServer

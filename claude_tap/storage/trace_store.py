@@ -16,7 +16,7 @@ from hashlib import sha256
 from pathlib import Path
 from typing import Any, Iterator
 
-from claude_tap.compact_trace import (
+from claude_tap.core.compact_trace import (
     BLOB_KIND_JSON,
     COMPACT_RECORD_MARKER,
     COMPACT_RECORD_VERSION,

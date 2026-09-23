@@ -5,9 +5,14 @@ import asyncio
 import pytest
 
 from claude_tap import parse_args
-from claude_tap.cli import CLIENT_CONFIGS, _reverse_proxy_path_prefixes, _reverse_proxy_trace_options, run_client
-from claude_tap.cli_clients import _detect_grok_target
-from claude_tap.proxy import _is_allowed_path, _matches_path_prefixes
+from claude_tap.capture.proxy import _is_allowed_path, _matches_path_prefixes
+from claude_tap.commands.cli import (
+    CLIENT_CONFIGS,
+    _reverse_proxy_path_prefixes,
+    _reverse_proxy_trace_options,
+    run_client,
+)
+from claude_tap.commands.cli_clients import _detect_grok_target
 
 
 class _DummyProc:
@@ -75,7 +80,7 @@ async def test_run_client_grok_reverse_sets_chat_proxy_base_url_and_preserves_ar
         captured["env"] = kwargs["env"]
         return _DummyProc()
 
-    monkeypatch.setattr("claude_tap.cli.shutil.which", lambda _: "/tmp/grok")
+    monkeypatch.setattr("claude_tap.commands.cli.shutil.which", lambda _: "/tmp/grok")
     monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_create_subprocess_exec)
     monkeypatch.setattr("sys.stdin.isatty", lambda: False)
 

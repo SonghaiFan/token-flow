@@ -25,12 +25,12 @@ from pathlib import Path
 import pytest
 from yarl import URL
 
-from claude_tap.trace import TraceWriter
+from claude_tap.storage.trace import TraceWriter
 from tests.conftest import e2e_env, read_proxy_log, read_trace_records
 
 
 def _writer_for_dir(tmpdir: Path):
-    from claude_tap.trace_store import TraceStore
+    from claude_tap.storage.trace_store import TraceStore
 
     store = TraceStore(tmpdir / "forward.sqlite3")
     session_id = store.create_session()
@@ -1670,10 +1670,10 @@ async def test_async_main_live_viewer_default_opens_when_allowed(monkeypatch, tm
 
     migration_calls = []
     monkeypatch.setenv("TOKEN_FLOW_DB", str(tmp_path / "async-main.sqlite3"))
-    monkeypatch.setattr("claude_tap.cli.run_client", fake_run_client)
-    monkeypatch.setattr("claude_tap.cli._open_browser", opened_urls.append)
-    monkeypatch.setattr("claude_tap.cli.ensure_shared_dashboard", fake_ensure_shared_dashboard)
-    monkeypatch.setattr("claude_tap.cli.migrate_legacy_traces", migration_calls.append)
+    monkeypatch.setattr("claude_tap.commands.cli.run_client", fake_run_client)
+    monkeypatch.setattr("claude_tap.commands.cli._open_browser", opened_urls.append)
+    monkeypatch.setattr("claude_tap.commands.cli.ensure_shared_dashboard", fake_ensure_shared_dashboard)
+    monkeypatch.setattr("claude_tap.commands.cli.migrate_legacy_traces", migration_calls.append)
 
     args = parse_args(["--tap-output-dir", str(tmp_path)])
     try:
@@ -1702,8 +1702,8 @@ async def test_async_main_stop_hint_includes_custom_dashboard_address(monkeypatc
         return f"http://127.0.0.1:{port}", False
 
     monkeypatch.setenv("TOKEN_FLOW_DB", str(tmp_path / "async-main.sqlite3"))
-    monkeypatch.setattr("claude_tap.cli.run_client", fake_run_client)
-    monkeypatch.setattr("claude_tap.cli.ensure_shared_dashboard", fake_ensure_shared_dashboard)
+    monkeypatch.setattr("claude_tap.commands.cli.run_client", fake_run_client)
+    monkeypatch.setattr("claude_tap.commands.cli.ensure_shared_dashboard", fake_ensure_shared_dashboard)
 
     args = parse_args(
         [
@@ -1748,9 +1748,9 @@ async def test_async_main_reuses_existing_dashboard_without_reopening_browser(mo
         return f"http://{host}:{port}", False
 
     monkeypatch.setenv("TOKEN_FLOW_DB", str(tmp_path / "async-main-shared.sqlite3"))
-    monkeypatch.setattr("claude_tap.cli.run_client", fake_run_client)
-    monkeypatch.setattr("claude_tap.cli._open_browser", opened_urls.append)
-    monkeypatch.setattr("claude_tap.cli.ensure_shared_dashboard", fake_ensure_shared_dashboard)
+    monkeypatch.setattr("claude_tap.commands.cli.run_client", fake_run_client)
+    monkeypatch.setattr("claude_tap.commands.cli._open_browser", opened_urls.append)
+    monkeypatch.setattr("claude_tap.commands.cli.ensure_shared_dashboard", fake_ensure_shared_dashboard)
 
     args = parse_args(["--tap-output-dir", str(tmp_path)])
     try:
@@ -1778,8 +1778,8 @@ async def test_async_main_live_viewer_respects_tap_host(monkeypatch, tmp_path):
         return f"http://{host}:{port}", False
 
     monkeypatch.setenv("TOKEN_FLOW_DB", str(tmp_path / "async-main-host.sqlite3"))
-    monkeypatch.setattr("claude_tap.cli.run_client", fake_run_client)
-    monkeypatch.setattr("claude_tap.cli.ensure_shared_dashboard", fake_ensure_shared_dashboard)
+    monkeypatch.setattr("claude_tap.commands.cli.run_client", fake_run_client)
+    monkeypatch.setattr("claude_tap.commands.cli.ensure_shared_dashboard", fake_ensure_shared_dashboard)
 
     args = parse_args(
         [
@@ -1810,8 +1810,8 @@ async def test_async_main_continues_when_dashboard_migration_is_locked(monkeypat
         raise sqlite3.OperationalError("database is locked")
 
     monkeypatch.setenv("TOKEN_FLOW_DB", str(tmp_path / "async-main-dashboard-lock.sqlite3"))
-    monkeypatch.setattr("claude_tap.cli.run_client", fake_run_client)
-    monkeypatch.setattr("claude_tap.cli.ensure_shared_dashboard", fail_dashboard)
+    monkeypatch.setattr("claude_tap.commands.cli.run_client", fake_run_client)
+    monkeypatch.setattr("claude_tap.commands.cli.ensure_shared_dashboard", fail_dashboard)
 
     args = parse_args(["--tap-output-dir", str(tmp_path), "--tap-no-open"])
     code = await async_main(args)
@@ -1830,7 +1830,7 @@ async def test_async_main_finalizes_session_when_proxy_startup_fails(monkeypatch
         raise OSError("bind failed")
 
     monkeypatch.setenv("TOKEN_FLOW_DB", str(tmp_path / "startup-failure.sqlite3"))
-    monkeypatch.setattr("claude_tap.cli.web.TCPSite.start", fail_start)
+    monkeypatch.setattr("claude_tap.commands.cli.web.TCPSite.start", fail_start)
 
     args = parse_args(
         [
@@ -1863,11 +1863,11 @@ async def test_async_main_no_live_and_no_open_restore_non_browser_mode(monkeypat
     from unittest.mock import AsyncMock
 
     monkeypatch.setenv("TOKEN_FLOW_DB", str(tmp_path / "async-main-no-live.sqlite3"))
-    monkeypatch.setattr("claude_tap.cli.run_client", fake_run_client)
-    monkeypatch.setattr("claude_tap.cli._open_browser", opened_urls.append)
-    monkeypatch.setattr("claude_tap.cli.migrate_legacy_traces", migration_calls.append)
+    monkeypatch.setattr("claude_tap.commands.cli.run_client", fake_run_client)
+    monkeypatch.setattr("claude_tap.commands.cli._open_browser", opened_urls.append)
+    monkeypatch.setattr("claude_tap.commands.cli.migrate_legacy_traces", migration_calls.append)
     monkeypatch.setattr(
-        "claude_tap.cli.ensure_shared_dashboard",
+        "claude_tap.commands.cli.ensure_shared_dashboard",
         AsyncMock(side_effect=AssertionError("dashboard should stay disabled")),
     )
 
@@ -1894,8 +1894,8 @@ async def test_async_main_no_live_continues_when_legacy_migration_is_locked(monk
         raise sqlite3.OperationalError("database is locked")
 
     monkeypatch.setenv("TOKEN_FLOW_DB", str(tmp_path / "async-main-locked-migration.sqlite3"))
-    monkeypatch.setattr("claude_tap.cli.run_client", fake_run_client)
-    monkeypatch.setattr("claude_tap.cli.migrate_legacy_traces", fail_migration)
+    monkeypatch.setattr("claude_tap.commands.cli.run_client", fake_run_client)
+    monkeypatch.setattr("claude_tap.commands.cli.migrate_legacy_traces", fail_migration)
 
     args = parse_args(["--tap-output-dir", str(tmp_path), "--tap-no-live", "--tap-no-open"])
     code = await async_main(args)
@@ -1914,8 +1914,8 @@ async def test_async_main_export_prompt_preserves_client_failure(monkeypatch, tm
         return 7
 
     monkeypatch.setenv("TOKEN_FLOW_DB", str(tmp_path / "async-main-export-failure.sqlite3"))
-    monkeypatch.setattr("claude_tap.cli.run_client", fake_run_client)
-    monkeypatch.setattr("claude_tap.cli._export_prompt_from_session", lambda *_args: 0)
+    monkeypatch.setattr("claude_tap.commands.cli.run_client", fake_run_client)
+    monkeypatch.setattr("claude_tap.commands.cli._export_prompt_from_session", lambda *_args: 0)
 
     args = parse_args(
         [
@@ -3169,7 +3169,7 @@ async def test_reverse_proxy_ssl_error_returns_ca_diagnostics():
     import aiohttp
     from aiohttp import web
 
-    from claude_tap.proxy import proxy_handler
+    from claude_tap.capture.proxy import proxy_handler
 
     with tempfile.TemporaryDirectory() as tmpdir:
         tmpdir_path = Path(tmpdir)
@@ -3437,7 +3437,7 @@ def test_e2e_with_cleanup():
 
 def test_live_viewer_scroll_preservation():
     """Verify viewer.html contains preserveDetail parameter chain for scroll fix."""
-    from claude_tap.viewer import _read_viewer_template
+    from claude_tap.server.viewer import _read_viewer_template
 
     html = _read_viewer_template()
 
@@ -3459,7 +3459,7 @@ def test_live_viewer_scroll_preservation():
 
 def test_live_viewer_diff_nav_update():
     """Verify viewer.html contains dynamic diff nav button update logic."""
-    from claude_tap.viewer import _read_viewer_template
+    from claude_tap.server.viewer import _read_viewer_template
 
     html = _read_viewer_template()
 
@@ -3482,7 +3482,7 @@ async def test_live_viewer_sse_incremental():
 
     with tempfile.TemporaryDirectory() as tmpdir:
         os.environ["TOKEN_FLOW_DB"] = str(Path(tmpdir) / "live.sqlite3")
-        from claude_tap.trace_store import get_trace_store, reset_trace_store
+        from claude_tap.storage.trace_store import get_trace_store, reset_trace_store
 
         reset_trace_store()
         session_id = get_trace_store().create_session()
@@ -3579,7 +3579,7 @@ def test_parse_dashboard_args():
 
 def test_cert_generation():
     """Test CA and per-host certificate generation."""
-    from claude_tap.certs import CertificateAuthority, ensure_ca
+    from claude_tap.capture.certs import CertificateAuthority, ensure_ca
 
     with tempfile.TemporaryDirectory() as tmpdir:
         ca_dir = Path(tmpdir)
@@ -3727,7 +3727,7 @@ def test_codex_upstream_url_construction(monkeypatch, tmp_path):
 
 
 def test_forward_proxy_trace_skip_rules_are_narrow():
-    from claude_tap.forward_proxy import _should_skip_trace_record
+    from claude_tap.capture.forward_proxy import _should_skip_trace_record
 
     json_headers = {"Content-Type": "application/json"}
     binary_headers = {"Content-Type": "application/octet-stream"}
@@ -3774,7 +3774,7 @@ def test_forward_proxy_trace_skip_rules_are_narrow():
 
 @pytest.mark.asyncio
 async def test_forward_proxy_unrecorded_response_closes_upstream_on_client_disconnect():
-    from claude_tap.forward_proxy import ForwardProxyServer
+    from claude_tap.capture.forward_proxy import ForwardProxyServer
 
     class FakeContent:
         async def iter_chunked(self, size):
@@ -3816,7 +3816,7 @@ async def test_forward_proxy_unrecorded_response_closes_upstream_on_client_disco
 
 
 def test_forward_proxy_upstream_base_url_is_safe_and_supports_path_prefixes():
-    from claude_tap.forward_proxy import _upstream_base_url
+    from claude_tap.capture.forward_proxy import _upstream_base_url
 
     assert _upstream_base_url("/health", "/health") is None
     assert (
@@ -3843,8 +3843,8 @@ async def test_forward_proxy_connect():
 
     import aiohttp
 
-    from claude_tap.certs import CertificateAuthority, ensure_ca
-    from claude_tap.forward_proxy import ForwardProxyServer
+    from claude_tap.capture.certs import CertificateAuthority, ensure_ca
+    from claude_tap.capture.forward_proxy import ForwardProxyServer
 
     with tempfile.TemporaryDirectory() as tmpdir:
         tmpdir = Path(tmpdir)
@@ -3942,8 +3942,8 @@ async def test_forward_proxy_skips_package_noise_but_keeps_long_model_payloads(m
 
     import aiohttp
 
-    from claude_tap.certs import CertificateAuthority, ensure_ca
-    from claude_tap.forward_proxy import ForwardProxyServer
+    from claude_tap.capture.certs import CertificateAuthority, ensure_ca
+    from claude_tap.capture.forward_proxy import ForwardProxyServer
 
     with tempfile.TemporaryDirectory() as tmpdir:
         tmpdir_path = Path(tmpdir)
@@ -4049,8 +4049,8 @@ async def test_forward_proxy_client_filter_relays_noise_but_traces_codexapp_http
 
     import aiohttp
 
-    from claude_tap.certs import CertificateAuthority, ensure_ca
-    from claude_tap.forward_proxy import ForwardProxyServer
+    from claude_tap.capture.certs import CertificateAuthority, ensure_ca
+    from claude_tap.capture.forward_proxy import ForwardProxyServer
 
     with tempfile.TemporaryDirectory() as tmpdir:
         tmpdir_path = Path(tmpdir)
@@ -4130,9 +4130,9 @@ async def test_forward_proxy_client_filter_relays_noise_but_traces_codexapp_http
 
 
 def test_forward_proxy_client_filter_matches_methods_and_paths(tmp_path: Path) -> None:
-    from claude_tap.forward_proxy import ForwardProxyServer
-    from claude_tap.trace import TraceWriter
-    from claude_tap.trace_store import TraceStore
+    from claude_tap.capture.forward_proxy import ForwardProxyServer
+    from claude_tap.storage.trace import TraceWriter
+    from claude_tap.storage.trace_store import TraceStore
 
     store = TraceStore(tmp_path / "traces.sqlite3")
     session_id = store.create_session(client="codexapp", proxy_mode="forward")
@@ -4161,8 +4161,8 @@ async def test_forward_proxy_local_reverse_bridge():
 
     import aiohttp
 
-    from claude_tap.certs import CertificateAuthority, ensure_ca
-    from claude_tap.forward_proxy import ForwardProxyServer
+    from claude_tap.capture.certs import CertificateAuthority, ensure_ca
+    from claude_tap.capture.forward_proxy import ForwardProxyServer
 
     with tempfile.TemporaryDirectory() as tmpdir:
         tmpdir_path = Path(tmpdir)
@@ -4228,8 +4228,8 @@ async def test_forward_proxy_records_upstream_error():
 
     import aiohttp
 
-    from claude_tap.certs import CertificateAuthority, ensure_ca
-    from claude_tap.forward_proxy import ForwardProxyServer
+    from claude_tap.capture.certs import CertificateAuthority, ensure_ca
+    from claude_tap.capture.forward_proxy import ForwardProxyServer
 
     with tempfile.TemporaryDirectory() as tmpdir:
         tmpdir_path = Path(tmpdir)
@@ -4294,8 +4294,8 @@ async def test_forward_proxy_connect_websocket():
 
     import aiohttp
 
-    from claude_tap.certs import CertificateAuthority, ensure_ca
-    from claude_tap.forward_proxy import ForwardProxyServer
+    from claude_tap.capture.certs import CertificateAuthority, ensure_ca
+    from claude_tap.capture.forward_proxy import ForwardProxyServer
 
     with tempfile.TemporaryDirectory() as tmpdir:
         tmpdir = Path(tmpdir)
@@ -4390,8 +4390,8 @@ async def test_forward_proxy_client_filter_traces_codexapp_websocket_but_not_noi
 
     import aiohttp
 
-    from claude_tap.certs import CertificateAuthority, ensure_ca
-    from claude_tap.forward_proxy import ForwardProxyServer
+    from claude_tap.capture.certs import CertificateAuthority, ensure_ca
+    from claude_tap.capture.forward_proxy import ForwardProxyServer
 
     with tempfile.TemporaryDirectory() as tmpdir:
         tmpdir_path = Path(tmpdir)
@@ -4478,8 +4478,8 @@ async def test_forward_proxy_flushes_each_codexapp_websocket_response_before_clo
 
     import aiohttp
 
-    from claude_tap.certs import CertificateAuthority, ensure_ca
-    from claude_tap.forward_proxy import ForwardProxyServer
+    from claude_tap.capture.certs import CertificateAuthority, ensure_ca
+    from claude_tap.capture.forward_proxy import ForwardProxyServer
 
     with tempfile.TemporaryDirectory() as tmpdir:
         tmpdir_path = Path(tmpdir)
@@ -4554,9 +4554,9 @@ async def test_forward_proxy_flushes_each_codexapp_websocket_response_before_clo
 
 @pytest.mark.asyncio
 async def test_forward_proxy_client_filter_records_traced_websocket_connect_failure(tmp_path: Path) -> None:
-    from claude_tap.forward_proxy import ForwardProxyServer
-    from claude_tap.trace import TraceWriter
-    from claude_tap.trace_store import TraceStore
+    from claude_tap.capture.forward_proxy import ForwardProxyServer
+    from claude_tap.storage.trace import TraceWriter
+    from claude_tap.storage.trace_store import TraceStore
 
     class FailingSession:
         trust_env = False
@@ -4615,8 +4615,8 @@ async def test_forward_proxy_connect_websocket_capture_only(monkeypatch: pytest.
 
     import aiohttp
 
-    from claude_tap.certs import CertificateAuthority, ensure_ca
-    from claude_tap.forward_proxy import ForwardProxyServer
+    from claude_tap.capture.certs import CertificateAuthority, ensure_ca
+    from claude_tap.capture.forward_proxy import ForwardProxyServer
 
     with tempfile.TemporaryDirectory() as tmpdir:
         tmpdir = Path(tmpdir)
@@ -4708,8 +4708,8 @@ async def test_forward_proxy_connect_websocket_honors_env_proxy(monkeypatch):
 
     import aiohttp
 
-    from claude_tap.certs import CertificateAuthority, ensure_ca
-    from claude_tap.forward_proxy import ForwardProxyServer
+    from claude_tap.capture.certs import CertificateAuthority, ensure_ca
+    from claude_tap.capture.forward_proxy import ForwardProxyServer
 
     with tempfile.TemporaryDirectory() as tmpdir:
         tmpdir = Path(tmpdir)
@@ -4727,7 +4727,7 @@ async def test_forward_proxy_connect_websocket_honors_env_proxy(monkeypatch):
         session = aiohttp.ClientSession(connector=upstream_conn, auto_decompress=False, trust_env=True)
 
         monkeypatch.setattr(
-            "claude_tap.forward_proxy._get_ws_proxy_settings",
+            "claude_tap.capture.forward_proxy._get_ws_proxy_settings",
             lambda _url: (URL("http://proxy.local:8080"), aiohttp.BasicAuth("user", "pass")),
         )
 
@@ -5182,7 +5182,7 @@ async def test_live_viewer_server():
 
     with tempfile.TemporaryDirectory() as tmpdir:
         os.environ["TOKEN_FLOW_DB"] = str(Path(tmpdir) / "live.sqlite3")
-        from claude_tap.trace_store import get_trace_store, reset_trace_store
+        from claude_tap.storage.trace_store import get_trace_store, reset_trace_store
 
         reset_trace_store()
         session_id = get_trace_store().create_session()
@@ -5232,11 +5232,11 @@ async def test_dashboard_main_serves_viewer(monkeypatch, tmp_path):
     from claude_tap import dashboard_main, parse_dashboard_args
 
     opened_urls: list[str] = []
-    monkeypatch.setattr("claude_tap.cli._open_browser", opened_urls.append)
+    monkeypatch.setattr("claude_tap.commands.cli._open_browser", opened_urls.append)
     monkeypatch.setenv("TOKEN_FLOW_DB", str(tmp_path / "dashboard.sqlite3"))
-    monkeypatch.setattr("claude_tap.cli.is_dashboard_healthy", AsyncMock(return_value=False))
+    monkeypatch.setattr("claude_tap.commands.cli.is_dashboard_healthy", AsyncMock(return_value=False))
     monkeypatch.setattr(
-        "claude_tap.cli.migrate_legacy_traces",
+        "claude_tap.commands.cli.migrate_legacy_traces",
         lambda _output_dir: (_ for _ in ()).throw(AssertionError("dashboard_main should not pre-migrate")),
     )
 
@@ -5278,9 +5278,9 @@ async def test_dashboard_main_bind_all_opens_loopback_url(monkeypatch, tmp_path)
     from claude_tap import dashboard_main, parse_dashboard_args
 
     opened_urls: list[str] = []
-    monkeypatch.setattr("claude_tap.cli._open_browser", opened_urls.append)
+    monkeypatch.setattr("claude_tap.commands.cli._open_browser", opened_urls.append)
     monkeypatch.setenv("TOKEN_FLOW_DB", str(tmp_path / "dashboard.sqlite3"))
-    monkeypatch.setattr("claude_tap.cli.is_dashboard_healthy", AsyncMock(return_value=False))
+    monkeypatch.setattr("claude_tap.commands.cli.is_dashboard_healthy", AsyncMock(return_value=False))
 
     with socket.socket() as sock:
         sock.bind(("127.0.0.1", 0))
@@ -5322,10 +5322,10 @@ async def test_dashboard_main_opens_reused_dashboard(monkeypatch, tmp_path):
 
     opened_urls: list[str] = []
     migration_calls: list[Path] = []
-    monkeypatch.setattr("claude_tap.cli._open_browser", opened_urls.append)
+    monkeypatch.setattr("claude_tap.commands.cli._open_browser", opened_urls.append)
     monkeypatch.setenv("TOKEN_FLOW_DB", str(tmp_path / "dashboard.sqlite3"))
-    monkeypatch.setattr("claude_tap.cli.is_dashboard_healthy", AsyncMock(return_value=True))
-    monkeypatch.setattr("claude_tap.cli.migrate_legacy_traces", migration_calls.append)
+    monkeypatch.setattr("claude_tap.commands.cli.is_dashboard_healthy", AsyncMock(return_value=True))
+    monkeypatch.setattr("claude_tap.commands.cli.migrate_legacy_traces", migration_calls.append)
 
     args = parse_dashboard_args(["--tap-output-dir", str(tmp_path), "--tap-live-port", "23456"])
 
@@ -5343,7 +5343,7 @@ async def test_dashboard_main_stops_stale_dashboard_before_start(monkeypatch, tm
 
     calls: list[tuple[str, object]] = []
     monkeypatch.setenv("TOKEN_FLOW_DB", str(tmp_path / "dashboard.sqlite3"))
-    monkeypatch.setattr("claude_tap.cli._is_dashboard_reusable", AsyncMock(return_value=False))
+    monkeypatch.setattr("claude_tap.commands.cli._is_dashboard_reusable", AsyncMock(return_value=False))
 
     async def fake_stop_stale(host: str, port: int, url: str) -> None:
         calls.append(("stop_stale", (host, port, url)))
@@ -5364,8 +5364,8 @@ async def test_dashboard_main_stops_stale_dashboard_before_start(monkeypatch, tm
         async def stop(self) -> None:
             calls.append(("stop", None))
 
-    monkeypatch.setattr("claude_tap.cli.stop_incompatible_dashboard_if_running", fake_stop_stale)
-    monkeypatch.setattr("claude_tap.cli.LiveViewerServer", FakeServer)
+    monkeypatch.setattr("claude_tap.commands.cli.stop_incompatible_dashboard_if_running", fake_stop_stale)
+    monkeypatch.setattr("claude_tap.commands.cli.LiveViewerServer", FakeServer)
 
     args = parse_dashboard_args(["--tap-output-dir", str(tmp_path), "--tap-live-port", "23456", "--tap-no-open"])
 
@@ -5387,9 +5387,9 @@ async def test_dashboard_main_stops_running_dashboard(monkeypatch, tmp_path):
     from claude_tap import dashboard_main, parse_dashboard_args
 
     monkeypatch.setenv("TOKEN_FLOW_DB", str(tmp_path / "dashboard.sqlite3"))
-    monkeypatch.setattr("claude_tap.cli.is_dashboard_healthy", AsyncMock(return_value=True))
+    monkeypatch.setattr("claude_tap.commands.cli.is_dashboard_healthy", AsyncMock(return_value=True))
     stop_dashboard = AsyncMock(return_value=True)
-    monkeypatch.setattr("claude_tap.cli.stop_dashboard_service", stop_dashboard)
+    monkeypatch.setattr("claude_tap.commands.cli.stop_dashboard_service", stop_dashboard)
 
     args = parse_dashboard_args(["stop", "--tap-live-port", "23456"])
 
@@ -5405,9 +5405,9 @@ async def test_dashboard_main_quit_alias_stops_running_dashboard(monkeypatch, tm
     from claude_tap import dashboard_main, parse_dashboard_args
 
     monkeypatch.setenv("TOKEN_FLOW_DB", str(tmp_path / "dashboard.sqlite3"))
-    monkeypatch.setattr("claude_tap.cli.is_dashboard_healthy", AsyncMock(return_value=True))
+    monkeypatch.setattr("claude_tap.commands.cli.is_dashboard_healthy", AsyncMock(return_value=True))
     stop_dashboard = AsyncMock(return_value=True)
-    monkeypatch.setattr("claude_tap.cli.stop_dashboard_service", stop_dashboard)
+    monkeypatch.setattr("claude_tap.commands.cli.stop_dashboard_service", stop_dashboard)
 
     args = parse_dashboard_args(["quit", "--tap-live-port", "23456"])
 
@@ -5423,9 +5423,9 @@ async def test_dashboard_main_stop_reports_missing_dashboard(monkeypatch, tmp_pa
     from claude_tap import dashboard_main, parse_dashboard_args
 
     monkeypatch.setenv("TOKEN_FLOW_DB", str(tmp_path / "dashboard.sqlite3"))
-    monkeypatch.setattr("claude_tap.cli.is_dashboard_healthy", AsyncMock(return_value=False))
+    monkeypatch.setattr("claude_tap.commands.cli.is_dashboard_healthy", AsyncMock(return_value=False))
     stop_dashboard = AsyncMock(return_value=True)
-    monkeypatch.setattr("claude_tap.cli.stop_dashboard_service", stop_dashboard)
+    monkeypatch.setattr("claude_tap.commands.cli.stop_dashboard_service", stop_dashboard)
 
     args = parse_dashboard_args(["stop", "--tap-live-port", "23456"])
 
@@ -5441,9 +5441,9 @@ async def test_dashboard_main_stop_reports_stop_failure(monkeypatch, tmp_path):
     from claude_tap import dashboard_main, parse_dashboard_args
 
     monkeypatch.setenv("TOKEN_FLOW_DB", str(tmp_path / "dashboard.sqlite3"))
-    monkeypatch.setattr("claude_tap.cli.is_dashboard_healthy", AsyncMock(return_value=True))
+    monkeypatch.setattr("claude_tap.commands.cli.is_dashboard_healthy", AsyncMock(return_value=True))
     stop_dashboard = AsyncMock(return_value=False)
-    monkeypatch.setattr("claude_tap.cli.stop_dashboard_service", stop_dashboard)
+    monkeypatch.setattr("claude_tap.commands.cli.stop_dashboard_service", stop_dashboard)
 
     args = parse_dashboard_args(["stop", "--tap-live-port", "23456"])
 

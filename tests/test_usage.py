@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import pytest
 
-from claude_tap.trace import TraceWriter
-from claude_tap.usage import normalize_usage
+from claude_tap.core.usage import normalize_usage
+from claude_tap.storage.trace import TraceWriter
 
 
 def test_normalize_usage_maps_responses_cached_tokens() -> None:
@@ -139,7 +139,7 @@ def test_normalize_usage_drops_null_token_fields_before_alias_mapping() -> None:
 
 @pytest.mark.asyncio
 async def test_trace_writer_counts_responses_cached_tokens(trace_db) -> None:
-    from claude_tap.trace_store import get_trace_store
+    from claude_tap.storage.trace_store import get_trace_store
 
     session_id = get_trace_store().create_session()
     writer = TraceWriter(session_id)

@@ -9,7 +9,7 @@ JS; the assertions here are deliberately the mirror image of those.
 
 from __future__ import annotations
 
-from claude_tap.viewer import (
+from claude_tap.server.viewer import (
     _block_input_text,
     _classify_user_input_origin,
     _clean_session_user_text,
@@ -184,7 +184,7 @@ def test_an_import_is_payload_only_when_the_statement_ends_the_line() -> None:
         "import json, sys\n",
         "from collections import defaultdict\n",
         "from typing import (\n    Any,\n)",
-        "from claude_tap.viewer import *\n",
+        "from claude_tap.server.viewer import *\n",
         "from __future__ import annotations\n\nimport json",
     ):
         assert _classify_user_input_origin(pasted) == "payload", pasted

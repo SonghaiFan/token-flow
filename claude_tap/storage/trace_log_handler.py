@@ -6,7 +6,7 @@ import logging
 import sqlite3
 from datetime import datetime, timezone
 
-from claude_tap.trace_store import TraceStore, get_trace_store
+from claude_tap.storage.trace_store import TraceStore, get_trace_store
 
 
 class SQLiteLogHandler(logging.Handler):

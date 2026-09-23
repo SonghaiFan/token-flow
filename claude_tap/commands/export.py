@@ -8,10 +8,10 @@ import sys
 from pathlib import Path
 
 from claude_tap.analysis.records import _normalize_record_for_viewer
-from claude_tap.compact_trace import build_compact_trace_bundle, dump_compact_trace, is_compact_trace_bundle
-from claude_tap.prompt_snapshot import render_prompt_markdown, snapshot_from_records
-from claude_tap.usage import normalize_usage
-from claude_tap.viewer import _generate_html_viewer_from_compact_bundle
+from claude_tap.core.compact_trace import build_compact_trace_bundle, dump_compact_trace, is_compact_trace_bundle
+from claude_tap.core.prompt_snapshot import render_prompt_markdown, snapshot_from_records
+from claude_tap.core.usage import normalize_usage
+from claude_tap.server.viewer import _generate_html_viewer_from_compact_bundle
 
 
 def _as_dict(value: object) -> dict:
@@ -60,7 +60,7 @@ def _load_records_from_text(text: str) -> tuple[list[dict], dict | None]:
     except json.JSONDecodeError:
         parsed = None
     if is_compact_trace_bundle(parsed):
-        from claude_tap.compact_trace import materialize_compact_trace_bundle
+        from claude_tap.core.compact_trace import materialize_compact_trace_bundle
 
         return materialize_compact_trace_bundle(parsed), parsed
 
@@ -114,14 +114,14 @@ def export_main(argv: list[str] | None = None) -> int:
     if source_session_id is None and args.source:
         trace_file = Path(args.source)
         if not trace_file.exists():
-            from claude_tap.trace_store import get_trace_store
+            from claude_tap.storage.trace_store import get_trace_store
 
             store = get_trace_store()
             if store.load_session_row(args.source) is not None:
                 source_session_id = args.source
 
     if source_session_id:
-        from claude_tap.trace_store import get_trace_store
+        from claude_tap.storage.trace_store import get_trace_store
 
         if store is None:
             store = get_trace_store()

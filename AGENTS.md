@@ -41,6 +41,10 @@ composition without requiring users to understand provider protocols.
   inherited module name is a compatibility boundary, not the Token Flow product
   name. Do not rename it casually: stored traces, subprocess startup, exports,
   and tests still depend on it.
+- Keep backend modules grouped by responsibility: `capture/`, `core/`,
+  `storage/`, `analysis/`, `server/`, `commands/`, and generated `static_ui/`.
+  Package resources such as the HTML viewer templates and `model_prices.json`
+  remain at the `claude_tap/` root.
 - `.agents/docs/standards/product-design-system.md` is the product and
   interaction contract for every user-facing surface.
 - `/Users/songhaifan/Documents/Token Flow/claude-tap` is a read-only upstream

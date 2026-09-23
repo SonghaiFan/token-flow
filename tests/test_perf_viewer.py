@@ -49,7 +49,7 @@ def _make_entry(turn: int, messages: list[dict]) -> dict:
 
 def _build_small_trace_html() -> str:
     """Generate viewer HTML with 4 inline entries (small trace, no lazy mode)."""
-    from claude_tap.viewer import _generate_html_viewer
+    from claude_tap.server.viewer import _generate_html_viewer
 
     entries = [
         _make_entry(1, [{"role": "user", "content": "hello"}]),
@@ -119,7 +119,7 @@ def large_html_file():
     if not LARGE_TRACE.exists():
         pytest.skip(f"Large trace not found: {LARGE_TRACE}")
 
-    from claude_tap.viewer import _generate_html_viewer
+    from claude_tap.server.viewer import _generate_html_viewer
 
     html_path = Path(tempfile.mktemp(suffix=".html"))
     _generate_html_viewer(LARGE_TRACE, html_path)

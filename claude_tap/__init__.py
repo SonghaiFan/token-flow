@@ -6,8 +6,10 @@ compatibility while the product and command-line interface use Token Flow.
 
 from __future__ import annotations
 
-from claude_tap.certs import CertificateAuthority, ensure_ca
-from claude_tap.cli import (
+from claude_tap.capture.certs import CertificateAuthority, ensure_ca
+from claude_tap.capture.forward_proxy import ForwardProxyServer
+from claude_tap.capture.proxy import filter_headers
+from claude_tap.commands.cli import (
     __version__,
     async_main,
     dashboard_main,
@@ -17,14 +19,12 @@ from claude_tap.cli import (
     parse_trust_ca_args,
     trust_ca_main,
 )
-from claude_tap.forward_proxy import ForwardProxyServer
-from claude_tap.history import cleanup_trace_sessions, delete_trace_history, migrate_legacy_traces
-from claude_tap.proxy import filter_headers
+from claude_tap.core.sse import SSEReassembler
 from claude_tap.server.app import LiveViewerServer
-from claude_tap.sse import SSEReassembler
-from claude_tap.trace import TraceWriter
-from claude_tap.trace_store import get_trace_store, reset_trace_store, resolve_db_path
-from claude_tap.viewer import _generate_html_viewer
+from claude_tap.server.viewer import _generate_html_viewer
+from claude_tap.storage.history import cleanup_trace_sessions, delete_trace_history, migrate_legacy_traces
+from claude_tap.storage.trace import TraceWriter
+from claude_tap.storage.trace_store import get_trace_store, reset_trace_store, resolve_db_path
 
 __all__ = [
     "__version__",

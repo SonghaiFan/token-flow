@@ -32,14 +32,14 @@ Repository = "https://github.com/SonghaiFan/token-flow"
 Issues = "https://github.com/SonghaiFan/token-flow/issues"
 
 [project.scripts]
-token-flow = "claude_tap.cli:main_entry"
+token-flow = "claude_tap.commands.cli:main_entry"
 
 [build-system]
 requires = ["setuptools>=68.0", "setuptools-scm[toml]>=8.0"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools]
-packages = ["claude_tap", "claude_tap.analysis", "claude_tap.capture", "claude_tap.server", "claude_tap.viewer_assets"]
+packages = ["claude_tap", "claude_tap.analysis", "claude_tap.capture", "claude_tap.commands", "claude_tap.core", "claude_tap.server", "claude_tap.storage", "claude_tap.viewer_assets"]
 
 [tool.setuptools_scm]
 version_scheme = "guess-next-dev"

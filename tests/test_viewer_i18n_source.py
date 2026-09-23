@@ -3,7 +3,7 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-from claude_tap.viewer import VIEWER_JS_PATHS, _generate_html_viewer, _load_viewer_i18n, _read_viewer_template
+from claude_tap.server.viewer import VIEWER_JS_PATHS, _generate_html_viewer, _load_viewer_i18n, _read_viewer_template
 
 EXPECTED_LANGUAGES = ["en", "zh-CN", "ja", "ko", "fr", "ar", "de", "ru"]
 CRITICAL_KEYS = [

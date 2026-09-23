@@ -20,8 +20,8 @@ from pathlib import Path
 
 import aiohttp
 
-from claude_tap.process_utils import windows_no_console_subprocess_kwargs
-from claude_tap.trace_store import resolve_db_path
+from claude_tap.core.process_utils import windows_no_console_subprocess_kwargs
+from claude_tap.storage.trace_store import resolve_db_path
 
 DEFAULT_DASHBOARD_PORT = 19527
 _DASHBOARD_HEALTH_TIMEOUT = 1.5
@@ -179,7 +179,7 @@ def _spawn_dashboard_subprocess_if_needed(host: str, port: int, output_dir: Path
 
 
 def _migrate_legacy_traces(output_dir: Path) -> None:
-    from claude_tap.history import migrate_legacy_traces
+    from claude_tap.storage.history import migrate_legacy_traces
 
     migrate_legacy_traces(output_dir)
 

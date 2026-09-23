@@ -26,12 +26,10 @@ from claude_tap.analysis.sessions import (
     redact_dashboard_summary,
     select_trace_turn_records,
 )
-from claude_tap.compact_trace import build_compact_trace_bundle
-from claude_tap.dashboard import read_dashboard_template
-from claude_tap.history import delete_trace_history
-from claude_tap.shared_dashboard import CLAUDE_TAP_VERSION
-from claude_tap.trace_store import get_trace_store, resolve_db_path
-from claude_tap.viewer import (
+from claude_tap.core.compact_trace import build_compact_trace_bundle
+from claude_tap.server.dashboard import read_dashboard_template
+from claude_tap.server.shared_dashboard import CLAUDE_TAP_VERSION
+from claude_tap.server.viewer import (
     VIEWER_SCRIPT_ANCHOR,
     VIEWER_TEMPLATE_PATH,
     _generate_html_viewer_from_compact_bundle,
@@ -39,6 +37,8 @@ from claude_tap.viewer import (
     _pricing_data_js,
     _read_viewer_template,
 )
+from claude_tap.storage.history import delete_trace_history
+from claude_tap.storage.trace_store import get_trace_store, resolve_db_path
 
 _DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 DEFAULT_SESSION_PAGE_LIMIT = 100

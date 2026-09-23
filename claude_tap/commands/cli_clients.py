@@ -19,7 +19,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable, Sequence
 
-from claude_tap.cli_output import print_status as _print
+from claude_tap.commands.cli_output import print_status as _print
 
 _BEDROCK_HOST_RE = re.compile(
     r"(^|\.)("

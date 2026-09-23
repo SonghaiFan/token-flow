@@ -20,7 +20,7 @@ _pw_skip = playwright_skip_reason()
 def test_opencode_prompt_is_labelled_opencode_not_claude_code(tmp_path) -> None:
     from playwright.sync_api import sync_playwright
 
-    from claude_tap.viewer import _generate_html_viewer
+    from claude_tap.server.viewer import _generate_html_viewer
 
     # Mirror the real opencode system prompt shape: opens with the
     # "You are opencode" self-id, then mentions "Claude Code" deep inside

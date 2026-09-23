@@ -10,7 +10,7 @@ showed `resp.body=None` and `sse_events=[]` for any non-Anthropic provider.
 
 from __future__ import annotations
 
-from claude_tap.sse import SSEReassembler
+from claude_tap.core.sse import SSEReassembler
 
 
 def test_chat_completions_stream_events_are_captured() -> None:

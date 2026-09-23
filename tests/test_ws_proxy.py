@@ -13,11 +13,11 @@ import pytest
 from aiohttp import web
 from yarl import URL
 
-from claude_tap.cli_clients import _extend_no_proxy
-from claude_tap.proxy import proxy_handler
-from claude_tap.trace import TraceWriter
-from claude_tap.trace_store import get_trace_store, reset_trace_store
-from claude_tap.ws_proxy import _build_ws_record, _get_ws_proxy_settings
+from claude_tap.capture.proxy import proxy_handler
+from claude_tap.capture.ws_proxy import _build_ws_record, _get_ws_proxy_settings
+from claude_tap.commands.cli_clients import _extend_no_proxy
+from claude_tap.storage.trace import TraceWriter
+from claude_tap.storage.trace_store import get_trace_store, reset_trace_store
 
 
 @pytest.fixture
@@ -1333,7 +1333,7 @@ class TestGetWsProxySettings:
         # Mock get_env_proxy_for_url to raise LookupError (no proxy configured).
         # Necessary because macOS system proxy settings bypass env vars.
         monkeypatch.setattr(
-            "claude_tap.ws_proxy.get_env_proxy_for_url",
+            "claude_tap.capture.ws_proxy.get_env_proxy_for_url",
             lambda url: (_ for _ in ()).throw(LookupError("no proxy")),
         )
         result = _get_ws_proxy_settings("wss://api.openai.com/v1/responses")

@@ -7,8 +7,8 @@ from pathlib import Path
 
 import pytest
 
-from claude_tap.cli_clients import _extend_no_proxy
-from claude_tap.trace_store import get_trace_store, reset_trace_store
+from claude_tap.commands.cli_clients import _extend_no_proxy
+from claude_tap.storage.trace_store import get_trace_store, reset_trace_store
 
 
 def playwright_skip_reason() -> str | None:

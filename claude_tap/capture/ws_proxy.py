@@ -15,9 +15,9 @@ from aiohttp import web
 from aiohttp.helpers import get_env_proxy_for_url
 from yarl import URL
 
-from claude_tap.proxy import capture_only_response, filter_headers, is_capture_only_request
-from claude_tap.trace import TraceWriter
-from claude_tap.upstream import build_upstream_url, format_upstream_error
+from claude_tap.capture.proxy import capture_only_response, filter_headers, is_capture_only_request
+from claude_tap.capture.upstream import build_upstream_url, format_upstream_error
+from claude_tap.storage.trace import TraceWriter
 
 log = logging.getLogger("token-flow")
 

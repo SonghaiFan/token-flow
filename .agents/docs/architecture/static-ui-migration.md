@@ -94,9 +94,9 @@ than duplicate it.
   established before any route is removed.
 
 The dashboard session query, summary, redaction, and display-turn logic now
-lives in `claude_tap/analysis/sessions.py`. `claude_tap/dashboard.py` remains a
-compatibility import surface for existing callers and owns dashboard HTML
-template loading. HTTP handlers call the analysis module directly.
+lives in `claude_tap/analysis/sessions.py`. Dashboard HTML template loading is
+in `claude_tap/server/dashboard.py`. HTTP handlers call the analysis module
+directly.
 
 FastAPI now owns the public HTTP route table and SSE streaming responses.
 Endpoint handlers live in `claude_tap/server/api.py`, SSE connections and
@@ -113,10 +113,11 @@ stored conversations disappear.
 
 Provider record parsing, metadata extraction, user-text analysis, cost-index
 attachment, and export normalization live in `claude_tap/analysis/records.py`.
-Pricing and subscription-cost decisions live in `claude_tap/analysis/costs.py`.
-Bedrock EventStream decoding is shared through `claude_tap/trace_encoding.py`,
-so the capture proxies and session analysis no longer import private parser code
-from `viewer.py`. `viewer.py` now owns template/assets, pricing metadata
+Model pricing lives in `claude_tap/analysis/pricing.py`, while subscription-cost
+decisions live in `claude_tap/analysis/costs.py`. Bedrock EventStream decoding
+is shared through `claude_tap/core/trace_encoding.py`, so the capture proxies
+and session analysis no longer import private parser code from the viewer.
+`claude_tap/server/viewer.py` owns template/assets, pricing metadata
 serialization, and legacy HTML generation; it re-exports record-analysis
 helpers for compatibility with existing imports.
 

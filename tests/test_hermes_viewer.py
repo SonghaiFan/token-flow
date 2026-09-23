@@ -26,7 +26,7 @@ HERMES_SOUL_WITH_BRAND_MENTIONS = (
 
 
 def _build_hermes_trace_html() -> Path:
-    from claude_tap.viewer import _generate_html_viewer
+    from claude_tap.server.viewer import _generate_html_viewer
 
     entry = {
         "timestamp": "2026-05-02T10:00:00",

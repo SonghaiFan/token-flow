@@ -67,7 +67,7 @@ def claude_env(installed_packlite, monkeypatch):
 
     # Also set in current process so the test can load records from the same database
     monkeypatch.setenv("TOKEN_FLOW_DB", db_path)
-    from claude_tap import trace_store
+    from claude_tap.storage import trace_store
 
     trace_store._store = None
     # Remove nesting detection vars

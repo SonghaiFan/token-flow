@@ -5,8 +5,8 @@ import asyncio
 import pytest
 
 from claude_tap import parse_args
-from claude_tap.cli import CLIENT_CONFIGS, _reverse_proxy_trace_options, run_client
-from claude_tap.cli_clients import _detect_dsh_target, _node_supports_env_proxy
+from claude_tap.commands.cli import CLIENT_CONFIGS, _reverse_proxy_trace_options, run_client
+from claude_tap.commands.cli_clients import _detect_dsh_target, _node_supports_env_proxy
 
 
 class _DummyProc:
@@ -75,8 +75,8 @@ async def test_run_client_dsh_forward_enables_node_proxy_and_preserves_args(
     monkeypatch.delenv("DEEPSEEK_BASE_URL", raising=False)
     monkeypatch.setenv("NO_PROXY", "localhost,corp.example")
     monkeypatch.setenv("no_proxy", "127.0.0.1")
-    monkeypatch.setattr("claude_tap.cli.shutil.which", lambda _: "/tmp/dsh")
-    monkeypatch.setattr("claude_tap.cli_clients._node_supports_env_proxy", lambda _: True)
+    monkeypatch.setattr("claude_tap.commands.cli.shutil.which", lambda _: "/tmp/dsh")
+    monkeypatch.setattr("claude_tap.commands.cli_clients._node_supports_env_proxy", lambda _: True)
     monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_create_subprocess_exec)
     monkeypatch.setattr("sys.stdin.isatty", lambda: False)
 
@@ -102,8 +102,8 @@ async def test_run_client_dsh_forward_rejects_node_without_env_proxy_support(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    monkeypatch.setattr("claude_tap.cli.shutil.which", lambda _: "/tmp/dsh")
-    monkeypatch.setattr("claude_tap.cli_clients._node_supports_env_proxy", lambda _: False)
+    monkeypatch.setattr("claude_tap.commands.cli.shutil.which", lambda _: "/tmp/dsh")
+    monkeypatch.setattr("claude_tap.commands.cli_clients._node_supports_env_proxy", lambda _: False)
 
     code = await run_client(43123, [], client="dsh", proxy_mode="forward")
 
@@ -121,8 +121,8 @@ def test_node_supports_env_proxy_probes_node_on_path(monkeypatch: pytest.MonkeyP
         captured["env"] = kwargs["env"]
         return type("Result", (), {"returncode": 0})()
 
-    monkeypatch.setattr("claude_tap.cli_clients.shutil.which", lambda cmd, path=None: "/opt/node")
-    monkeypatch.setattr("claude_tap.cli_clients.subprocess.run", fake_run)
+    monkeypatch.setattr("claude_tap.commands.cli_clients.shutil.which", lambda cmd, path=None: "/opt/node")
+    monkeypatch.setattr("claude_tap.commands.cli_clients.subprocess.run", fake_run)
 
     assert _node_supports_env_proxy({"PATH": "/opt/bin", "NODE_OPTIONS": "--inspect"})
     assert captured["cmd"] == ["/opt/node", "--use-env-proxy", "--version"]
@@ -140,7 +140,7 @@ async def test_run_client_dsh_reverse_sets_base_url_and_preserves_args(
         captured["env"] = kwargs["env"]
         return _DummyProc()
 
-    monkeypatch.setattr("claude_tap.cli.shutil.which", lambda _: "/tmp/dsh")
+    monkeypatch.setattr("claude_tap.commands.cli.shutil.which", lambda _: "/tmp/dsh")
     monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_create_subprocess_exec)
     monkeypatch.setattr("sys.stdin.isatty", lambda: False)
 

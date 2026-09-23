@@ -40,9 +40,8 @@ try:
 except ImportError:
     import backports.zstd as zstd
 
-from claude_tap.bedrock import attach_bedrock_errors, is_bedrock_eventstream_path
-from claude_tap.certs import CertificateAuthority
-from claude_tap.proxy import (
+from claude_tap.capture.certs import CertificateAuthority
+from claude_tap.capture.proxy import (
     HOP_BY_HOP,
     _build_record,
     _parse_request_body_for_trace,
@@ -53,12 +52,8 @@ from claude_tap.proxy import (
     is_capture_only_request,
     is_capture_only_streaming_request,
 )
-from claude_tap.sse import SSEReassembler
-from claude_tap.trace import TraceWriter
-from claude_tap.trace_encoding import _decode_bedrock_eventstream_events
-from claude_tap.upstream import build_upstream_url, format_upstream_error
-from claude_tap.usage import normalize_usage
-from claude_tap.ws_proxy import (
+from claude_tap.capture.upstream import build_upstream_url, format_upstream_error
+from claude_tap.capture.ws_proxy import (
     _COMPLETED_RESPONSE_KEY_CACHE_SIZE,
     _build_ws_record,
     _get_ws_proxy_settings,
@@ -66,6 +61,11 @@ from claude_tap.ws_proxy import (
     is_prompt_bearing_ws_request_body,
     reconstruct_ws_request_body,
 )
+from claude_tap.core.bedrock import attach_bedrock_errors, is_bedrock_eventstream_path
+from claude_tap.core.sse import SSEReassembler
+from claude_tap.core.trace_encoding import _decode_bedrock_eventstream_events
+from claude_tap.core.usage import normalize_usage
+from claude_tap.storage.trace import TraceWriter
 
 log = logging.getLogger("token-flow")
 

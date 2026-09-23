@@ -9,7 +9,7 @@ import logging
 import os
 import shlex
 
-# Keep the stdlib module object available as claude_tap.cli.shutil for
+# Keep the stdlib module object available as claude_tap.commands.cli.shutil for
 # existing tests and private integrations that monkeypatch shutil.which there.
 import shutil
 import sqlite3
@@ -23,8 +23,10 @@ from urllib.parse import urlparse
 import aiohttp
 from aiohttp import web
 
-from claude_tap.certs import CertificateAuthority, ensure_ca, is_macos_ca_trusted, trust_macos_ca
-from claude_tap.cli_clients import (
+from claude_tap.capture.certs import CertificateAuthority, ensure_ca, is_macos_ca_trusted, trust_macos_ca
+from claude_tap.capture.forward_proxy import ForwardProxyServer
+from claude_tap.capture.proxy import proxy_handler
+from claude_tap.commands.cli_clients import (
     _CODEX_CHATGPT_TARGET,
     CLIENT_CONFIGS,
     TARGET_DETECTORS,
@@ -50,12 +52,9 @@ from claude_tap.cli_clients import (
     _toml_dotted_key_segment,
     run_client,
 )
-from claude_tap.cli_output import print_status as _print
-from claude_tap.forward_proxy import ForwardProxyServer
-from claude_tap.history import cleanup_trace_sessions, migrate_legacy_traces
-from claude_tap.proxy import proxy_handler
+from claude_tap.commands.cli_output import print_status as _print
 from claude_tap.server.app import LiveViewerServer
-from claude_tap.shared_dashboard import (
+from claude_tap.server.shared_dashboard import (
     DEFAULT_DASHBOARD_PORT,
     dashboard_url,
     ensure_shared_dashboard,
@@ -64,9 +63,10 @@ from claude_tap.shared_dashboard import (
     stop_dashboard_service,
     stop_incompatible_dashboard_if_running,
 )
-from claude_tap.trace import TraceWriter, create_trace_writer
-from claude_tap.trace_log_handler import SQLiteLogHandler
-from claude_tap.trace_store import TraceStore, get_trace_store, resolve_db_path
+from claude_tap.storage.history import cleanup_trace_sessions, migrate_legacy_traces
+from claude_tap.storage.trace import TraceWriter, create_trace_writer
+from claude_tap.storage.trace_log_handler import SQLiteLogHandler
+from claude_tap.storage.trace_store import TraceStore, get_trace_store, resolve_db_path
 
 _COMMAND_STDOUT = ContextVar("command_stdout", default=None)
 
@@ -507,7 +507,7 @@ async def _async_main(args: argparse.Namespace) -> int:
 
 
 def _export_prompt_from_session(store, session_id: str, output: str) -> int:
-    from claude_tap.prompt_snapshot import render_prompt_markdown, snapshot_from_records
+    from claude_tap.core.prompt_snapshot import render_prompt_markdown, snapshot_from_records
 
     try:
         text = render_prompt_markdown(snapshot_from_records(store.load_records(session_id)))
@@ -985,7 +985,7 @@ def main_entry() -> None:
     """Entry point for the token-flow CLI."""
     # Check if first argument is "export" subcommand
     if len(sys.argv) > 1 and sys.argv[1] == "export":
-        from claude_tap.export import export_main
+        from claude_tap.commands.export import export_main
 
         sys.exit(export_main(sys.argv[2:]))
 

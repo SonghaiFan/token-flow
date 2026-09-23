@@ -18,13 +18,13 @@ import aiohttp
 from aiohttp import web
 from yarl import URL
 
-from claude_tap.bedrock import attach_bedrock_errors, bedrock_model_from_path, is_bedrock_eventstream_path
-from claude_tap.sse import SSEReassembler
-from claude_tap.trace import TraceWriter
-from claude_tap.trace_encoding import _decode_bedrock_eventstream_events
-from claude_tap.trace_encoding import parse_request_body_for_trace as _parse_request_body_for_trace
-from claude_tap.upstream import build_upstream_url, format_upstream_error
-from claude_tap.usage import normalize_usage
+from claude_tap.capture.upstream import build_upstream_url, format_upstream_error
+from claude_tap.core.bedrock import attach_bedrock_errors, bedrock_model_from_path, is_bedrock_eventstream_path
+from claude_tap.core.sse import SSEReassembler
+from claude_tap.core.trace_encoding import _decode_bedrock_eventstream_events
+from claude_tap.core.trace_encoding import parse_request_body_for_trace as _parse_request_body_for_trace
+from claude_tap.core.usage import normalize_usage
+from claude_tap.storage.trace import TraceWriter
 
 log = logging.getLogger("token-flow")
 
@@ -559,7 +559,7 @@ async def proxy_handler(request: web.Request) -> web.StreamResponse:
         if ctx.get("force_http"):
             log.info(f"Rejecting WebSocket upgrade on {request.path} (force_http); client will fallback to HTTP")
             return web.Response(status=426, text="Upgrade Required")
-        from claude_tap.ws_proxy import _handle_websocket
+        from claude_tap.capture.ws_proxy import _handle_websocket
 
         return await _handle_websocket(request)
 

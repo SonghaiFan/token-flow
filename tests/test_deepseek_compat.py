@@ -1,6 +1,6 @@
 import re
 
-from claude_tap.proxy import _normalize_request_body_for_upstream
+from claude_tap.capture.proxy import _normalize_request_body_for_upstream
 
 
 def test_deepseek_metadata_user_id_is_normalized_for_anthropic_target() -> None:

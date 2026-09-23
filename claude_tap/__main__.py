@@ -1,6 +1,6 @@
-"""Run Token Flow through the compatibility backend module."""
+"""Run Token Flow through the commands package."""
 
-from claude_tap.cli import main_entry
+from claude_tap.commands.cli import main_entry
 
 
 def main() -> None:

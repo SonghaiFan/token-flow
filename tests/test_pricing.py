@@ -7,9 +7,9 @@ from pathlib import Path
 
 import pytest
 
-from claude_tap import pricing
-from claude_tap.pricing import LONG_CONTEXT_THRESHOLD, entry_cost, resolve_rates
-from claude_tap.usage import normalize_usage
+from claude_tap.analysis import pricing
+from claude_tap.analysis.pricing import LONG_CONTEXT_THRESHOLD, entry_cost, resolve_rates
+from claude_tap.core.usage import normalize_usage
 
 _REFRESH_SPEC = importlib.util.spec_from_file_location(
     "refresh_model_prices", Path(__file__).resolve().parents[1] / "scripts" / "refresh_model_prices.py"

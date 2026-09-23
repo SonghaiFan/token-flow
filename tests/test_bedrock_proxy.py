@@ -13,8 +13,8 @@ import aiohttp
 import pytest
 from aiohttp import web
 
-from claude_tap.forward_proxy import ForwardProxyServer
-from claude_tap.proxy import (
+from claude_tap.capture.forward_proxy import ForwardProxyServer
+from claude_tap.capture.proxy import (
     capture_only_content_type,
     capture_only_response,
     capture_only_stream_bytes,
@@ -22,8 +22,8 @@ from claude_tap.proxy import (
     is_capture_only_streaming_request,
     proxy_handler,
 )
-from claude_tap.trace import TraceWriter
-from claude_tap.trace_store import get_trace_store, reset_trace_store
+from claude_tap.storage.trace import TraceWriter
+from claude_tap.storage.trace_store import get_trace_store, reset_trace_store
 
 
 def _bedrock_frame(payload: dict[str, Any]) -> bytes:

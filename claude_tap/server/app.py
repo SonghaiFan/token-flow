@@ -17,10 +17,10 @@ from starlette.responses import FileResponse, Response, StreamingResponse
 from claude_tap.analysis.records import attach_cost_to_record
 from claude_tap.analysis.sessions import dashboard_trace_snapshot
 from claude_tap.capture.manager import CaptureManager
-from claude_tap.history import migrate_legacy_traces
 from claude_tap.server.api import ServerAPI
 from claude_tap.server.events import ServerEvents
-from claude_tap.shared_dashboard import dashboard_url
+from claude_tap.server.shared_dashboard import dashboard_url
+from claude_tap.storage.history import migrate_legacy_traces
 
 
 class LiveViewerServer(ServerAPI, ServerEvents):

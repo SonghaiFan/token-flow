@@ -7,7 +7,7 @@ import json
 
 import pytest
 
-from claude_tap.viewer import _normalize_record_for_viewer
+from claude_tap.server.viewer import _normalize_record_for_viewer
 from tests.conftest import playwright_skip_reason
 
 _pw_skip = playwright_skip_reason()
@@ -182,7 +182,7 @@ def test_normalize_record_for_viewer_preserves_bedrock_reasoning_signature() -> 
 def test_bedrock_invoke_path_is_primary_filter(tmp_path) -> None:
     from playwright.sync_api import sync_playwright
 
-    from claude_tap.viewer import _generate_html_viewer
+    from claude_tap.server.viewer import _generate_html_viewer
 
     bedrock_path = "/model/global.anthropic.claude-opus-4-6-v1/invoke-with-response-stream"
     paths = [
@@ -237,7 +237,7 @@ def test_bedrock_invoke_path_is_primary_filter(tmp_path) -> None:
 def test_bedrock_billing_header_does_not_become_task_label(tmp_path) -> None:
     from playwright.sync_api import sync_playwright
 
-    from claude_tap.viewer import _generate_html_viewer
+    from claude_tap.server.viewer import _generate_html_viewer
 
     trace_path = tmp_path / "trace.jsonl"
     _write_trace(
@@ -288,7 +288,7 @@ def test_bedrock_billing_header_does_not_become_task_label(tmp_path) -> None:
 def test_bedrock_converse_response_output_and_usage_render(tmp_path) -> None:
     from playwright.sync_api import sync_playwright
 
-    from claude_tap.viewer import _generate_html_viewer
+    from claude_tap.server.viewer import _generate_html_viewer
 
     trace_path = tmp_path / "trace.jsonl"
     _write_trace(

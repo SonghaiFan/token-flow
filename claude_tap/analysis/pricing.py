@@ -27,9 +27,9 @@ from pathlib import Path
 from typing import Any, NamedTuple
 from urllib.parse import unquote
 
-from claude_tap.bedrock import bedrock_model_from_path
+from claude_tap.core.bedrock import bedrock_model_from_path
 
-PRICES_PATH = Path(__file__).parent / "model_prices.json"
+PRICES_PATH = Path(__file__).parents[1] / "model_prices.json"
 
 # The tier boundary LiteLLM encodes in its *_above_200k_tokens field names.
 LONG_CONTEXT_THRESHOLD = 200_000
@@ -598,7 +598,7 @@ def entry_cost(
 ) -> EntryCost | None:
     """Price one traced request, or return None when it cannot be priced.
 
-    ``usage`` must already be normalized by :func:`claude_tap.usage.normalize_usage`,
+    ``usage`` must already be normalized by :func:`claude_tap.core.usage.normalize_usage`,
     which records whether the cache-read count sits inside ``input_tokens`` via
     ``cache_read_in_input``. When it does, those tokens are subtracted from the
     uncached input before billing, so they are charged at the cache-read rate

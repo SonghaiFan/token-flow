@@ -5,7 +5,7 @@ from __future__ import annotations
 import copy
 import json
 
-from claude_tap.usage import normalize_usage
+from claude_tap.core.usage import normalize_usage
 
 
 class SSEReassembler:

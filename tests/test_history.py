@@ -7,8 +7,8 @@ from pathlib import Path
 
 import pytest
 
-from claude_tap.history import cleanup_trace_sessions, delete_trace_history, migrate_legacy_traces
-from claude_tap.trace_store import TraceStore, get_trace_store, reset_trace_store, resolve_db_path
+from claude_tap.storage.history import cleanup_trace_sessions, delete_trace_history, migrate_legacy_traces
+from claude_tap.storage.trace_store import TraceStore, get_trace_store, reset_trace_store, resolve_db_path
 
 
 def test_token_flow_db_override_takes_precedence(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:

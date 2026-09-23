@@ -10,14 +10,14 @@ from pathlib import Path
 
 from claude_tap.analysis import costs as _cost_analysis
 from claude_tap.analysis import records as _record_analysis
+from claude_tap.analysis.pricing import pricing_metadata
 from claude_tap.analysis.records import _build_cost_index, _extract_metadata, _normalize_record_for_viewer
-from claude_tap.compact_trace import (
+from claude_tap.core.compact_trace import (
     COMPACT_TRACE_MARKER,
     build_compact_trace_bundle,
     is_compact_trace_bundle,
     materialize_compact_trace_bundle,
 )
-from claude_tap.pricing import pricing_metadata
 
 try:
     CLAUDE_TAP_VERSION = _pkg_version("token-flow")
@@ -25,8 +25,8 @@ except Exception:
     CLAUDE_TAP_VERSION = "0.0.0"
 
 LAZY_THRESHOLD = 50
-VIEWER_TEMPLATE_PATH = Path(__file__).parent / "viewer.html"
-VIEWER_ASSETS_DIR = Path(__file__).parent / "viewer_assets"
+VIEWER_TEMPLATE_PATH = Path(__file__).parents[1] / "viewer.html"
+VIEWER_ASSETS_DIR = Path(__file__).parents[1] / "viewer_assets"
 VIEWER_CSS_PATH = VIEWER_ASSETS_DIR / "viewer.css"
 VIEWER_JS_PATHS = (
     VIEWER_ASSETS_DIR / "token_flow_d3_layouts.min.js",
@@ -43,7 +43,7 @@ VIEWER_JS_PATHS = (
     VIEWER_ASSETS_DIR / "diff.js",
     VIEWER_ASSETS_DIR / "utilities_mobile.js",
 )
-VIEWER_I18N_PATH = Path(__file__).parent / "viewer_i18n.json"
+VIEWER_I18N_PATH = Path(__file__).parents[1] / "viewer_i18n.json"
 VIEWER_STYLE_TEMPLATE_ANCHOR = "<!-- CLAUDE_TAP_VIEWER_STYLE -->"
 VIEWER_SCRIPT_TEMPLATE_ANCHOR = "<!-- CLAUDE_TAP_VIEWER_SCRIPT -->"
 VIEWER_SCRIPT_ANCHOR = "<script>\nconst $ = s =>"

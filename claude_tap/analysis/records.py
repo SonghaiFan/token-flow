@@ -13,10 +13,10 @@ from claude_tap.analysis.costs import (
     _model_from_path,
     _sum_usage,
 )
-from claude_tap.pricing import provider_namespace
-from claude_tap.sse import SSEReassembler
-from claude_tap.trace_encoding import _decode_bedrock_eventstream_events
-from claude_tap.usage import normalize_usage
+from claude_tap.analysis.pricing import provider_namespace
+from claude_tap.core.sse import SSEReassembler
+from claude_tap.core.trace_encoding import _decode_bedrock_eventstream_events
+from claude_tap.core.usage import normalize_usage
 
 
 def _iter_response_events(resp: dict) -> list[dict]:

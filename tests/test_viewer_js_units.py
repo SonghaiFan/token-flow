@@ -1122,7 +1122,7 @@ def test_viewer_split_js_core_units_run_without_playwright() -> None:
             'import json, sys\\n',
             'from collections import defaultdict\\n',
             'from typing import (\\n    Any,\\n)',
-            'from claude_tap.viewer import *\\n',
+            'from claude_tap.server.viewer import *\\n',
           ];
           for (const text of pastedImports) {
             assert.equal(classifyUserInputOrigin(text).origin, 'payload', text.slice(0, 32));

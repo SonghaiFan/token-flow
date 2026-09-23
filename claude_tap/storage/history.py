@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from claude_tap.trace_store import get_trace_store
+from claude_tap.storage.trace_store import get_trace_store
 
 
 def delete_trace_history(

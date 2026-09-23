@@ -48,7 +48,7 @@ from claude_tap.analysis.sessions import (
     sum_trace_session_records,
 )
 
-DASHBOARD_TEMPLATE_PATH = Path(__file__).parent / "dashboard.html"
+DASHBOARD_TEMPLATE_PATH = Path(__file__).parents[1] / "dashboard.html"
 
 
 def read_dashboard_template() -> str:
