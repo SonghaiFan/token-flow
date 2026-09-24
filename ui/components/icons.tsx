@@ -35,3 +35,15 @@ export function ChevronRightIcon(props: IconProps) {
 export function TrashIcon(props: IconProps) {
   return <svg {...defaults} {...props}><path d="M4 7h16M9 7V4h6v3m3 0-1 13H7L6 7m4 4v5m4-5v5"/></svg>;
 }
+
+export function PlusIcon(props: IconProps) {
+  return <svg {...defaults} {...props}><path d="M12 5v14M5 12h14"/></svg>;
+}
+
+export function CloseIcon(props: IconProps) {
+  return <svg {...defaults} {...props}><path d="m6 6 12 12M18 6 6 18"/></svg>;
+}
+
+export function MoreIcon(props: IconProps) {
+  return <svg {...defaults} {...props}><circle cx="5" cy="12" r="1.2" fill="currentColor"/><circle cx="12" cy="12" r="1.2" fill="currentColor"/><circle cx="19" cy="12" r="1.2" fill="currentColor"/></svg>;
+}

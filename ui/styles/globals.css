@@ -186,6 +186,11 @@ input[type="search"]::-webkit-search-cancel-button {
   --panel-translate-y: 100px;
   --panel-blur: 2px;
   --panel-ease: cubic-bezier(0.22, 1, 0.36, 1);
+  /* Row enter */
+  --row-move-dur: 300ms;
+  --row-enter-dur: 900ms;
+  --row-enter-tint: color-mix(in srgb, var(--success) 12%, transparent);
+  --row-ease: cubic-bezier(0.22, 1, 0.36, 1);
   /* Menu dropdown */
   --dropdown-open-dur: 250ms;
   --dropdown-pre-scale: 0.97;
@@ -341,7 +346,29 @@ input[type="search"]::-webkit-search-cancel-button {
     background-color var(--duration-fast) var(--ease-smooth-out);
 }
 
+/* Row enter: stepping to another turn updates the request in place. Rows that
+   persist keep their place; rows the new turn brings in settle into place and
+   hold a brief tint, so what changed reads at a glance. The container sets
+   data-row-motion only while a turn change settles, so opening a row or
+   switching views never replays it. */
+.t-row {
+  transition:
+    opacity          var(--row-move-dur)  var(--row-ease),
+    transform        var(--row-move-dur)  var(--row-ease),
+    filter           var(--row-move-dur)  var(--row-ease),
+    background-color var(--row-enter-dur) var(--row-ease);
+}
+@starting-style {
+  [data-row-motion="enter"] .t-row {
+    opacity: 0;
+    transform: translateY(calc(var(--distance-micro) * -1));
+    filter: blur(var(--blur-small));
+    background-color: var(--row-enter-tint);
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
+  .t-row,
   .t-tabs-pill, .t-tab,
   .t-acc > .t-acc-panel, .t-acc > .t-acc-panel > .t-acc-panel-inner, .t-acc > .t-acc-head .t-acc-chevron,
   .t-page-enter, .t-dropdown-enter, .t-modal, .t-modal-backdrop, .t-fade {

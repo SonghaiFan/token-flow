@@ -7,6 +7,7 @@ from pathlib import Path
 import pytest
 
 from token_tap import parse_args
+from token_tap.agents.codexapp import CodexAppLaunchPlan
 from token_tap.capture.certs import (
     build_macos_trust_ca_command,
     build_macos_verify_ca_command,
@@ -19,7 +20,6 @@ from token_tap.commands.cli import (
     async_main,
     trust_ca_main,
 )
-from token_tap.commands.cli_clients import CodexAppLaunchPlan
 from token_tap.storage.trace_store import get_trace_store, reset_trace_store
 
 
@@ -320,7 +320,7 @@ async def test_async_main_preflights_codex_app_before_creating_or_trusting_ca(
     async def reject_launch() -> CodexAppLaunchPlan:
         return CodexAppLaunchPlan(proceed=False)
 
-    monkeypatch.setattr("token_tap.commands.cli._prepare_codex_app_forward_launch", reject_launch)
+    monkeypatch.setattr("token_tap.agents.codexapp._prepare_codex_app_forward_launch", reject_launch)
     monkeypatch.setattr(
         "token_tap.commands.cli.ensure_ca",
         lambda: (_ for _ in ()).throw(AssertionError("CA must not be created before Codex App preflight")),

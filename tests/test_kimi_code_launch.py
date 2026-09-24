@@ -9,9 +9,8 @@ from pathlib import Path
 import pytest
 
 from token_tap import parse_args
-from token_tap.commands.cli_clients import (
+from token_tap.agents.kimi_code import (
     _KIMI_CODE_SKIP_MIGRATION_MARKER,
-    CLIENT_CONFIGS,
     _detect_kimi_code_target,
     _kimi_code_migration_already_handled,
     _materialize_kimi_code_session_index,
@@ -21,9 +20,8 @@ from token_tap.commands.cli_clients import (
     _persist_kimi_code_sandbox,
     _prepare_kimi_code_reverse_sandbox,
     _remap_kimi_code_sandbox_paths,
-    _reverse_proxy_trace_options,
-    run_client,
 )
+from token_tap.commands.cli_clients import CLIENT_CONFIGS, _reverse_proxy_trace_options, run_client
 
 
 class _DummyProc:
@@ -303,7 +301,7 @@ api_key = "sk-test"
     monkeypatch.setattr("token_tap.commands.cli.shutil.which", lambda _: "/tmp/kimi")
     monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_create_subprocess_exec)
     monkeypatch.setattr("sys.stdin.isatty", lambda: False)
-    monkeypatch.setattr("token_tap.commands.cli_clients.shutil.rmtree", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr("token_tap.agents.kimi_code.shutil.rmtree", lambda *_args, **_kwargs: None)
 
     code = await run_client(43123, ["--thinking"], client="kimi-code", proxy_mode="reverse")
 
@@ -346,7 +344,7 @@ api_key = "sk-test"
     monkeypatch.setattr("token_tap.commands.cli.shutil.which", lambda _: "/tmp/kimi")
     monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_create_subprocess_exec)
     monkeypatch.setattr("sys.stdin.isatty", lambda: False)
-    monkeypatch.setattr("token_tap.commands.cli_clients.shutil.rmtree", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr("token_tap.agents.kimi_code.shutil.rmtree", lambda *_args, **_kwargs: None)
 
     code = await run_client(
         43123,
@@ -496,7 +494,7 @@ def test_kimi_code_migration_already_handled_reads_legacy_marker(
         json.dumps({"target_path": str(real_home)}),
         encoding="utf-8",
     )
-    monkeypatch.setattr("token_tap.commands.cli_clients.Path.home", lambda: tmp_path)
+    monkeypatch.setattr("token_tap.agents.kimi_code.Path.home", lambda: tmp_path)
 
     assert _kimi_code_migration_already_handled(real_home) is True
     assert _kimi_code_migration_already_handled(tmp_path / "other-home") is False
@@ -517,7 +515,7 @@ def test_prepare_kimi_code_reverse_sandbox_writes_skip_marker_when_migrated(
         '[providers."managed:kimi-code"]\ntype = "kimi"\nbase_url = "https://api.kimi.com/coding/v1"\n',
         encoding="utf-8",
     )
-    monkeypatch.setattr("token_tap.commands.cli_clients.Path.home", lambda: tmp_path)
+    monkeypatch.setattr("token_tap.agents.kimi_code.Path.home", lambda: tmp_path)
     monkeypatch.setenv("KIMI_CODE_HOME", str(real_home))
 
     sandbox, _, _, _ = _prepare_kimi_code_reverse_sandbox(43123)

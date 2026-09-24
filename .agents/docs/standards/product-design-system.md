@@ -69,20 +69,30 @@ may retain legacy names when changing them would add unnecessary risk.
 
 ## Entry dashboard
 
-The dashboard answers one question: **Which conversation should I open?**
+The dashboard answers one question: **Which conversation should I open?** Its
+only other action is starting a new one. Show what the user can do now, never
+everything the system supports.
 
-- The app toolbar owns service-wide controls: agent filters, watching state,
-  theme, language, and service actions.
-- The conversation collection owns search, date and status filters, selection,
-  and refresh.
-- Collection metrics provide orientation. They must not overpower the list or
-  repeat information without adding meaning.
-- A conversation row is the primary navigation target and should be clickable
-  as one object. Agent, start time, turns, tokens, and status help identify it.
-- Status meanings are stable across the product. `Active`, `Complete`, `Empty`,
-  `Error`, and `Unknown` must not be collapsed into a color-only distinction.
-- On narrow screens, the table becomes stacked conversation cards. Do not
-  squeeze every desktop column into a horizontally overflowing page.
+- The page is: title with a one-line purpose and a **Capture** button; a quiet
+  line of counts (conversations, turns, tokens); one toolbar with search, Agent,
+  and Status; the conversation list. Nothing else is permanently visible.
+- **Capture** opens a menu: *Capture with* lists the agents installed on this
+  computer; *More agents…* reveals supported agents that are not installed,
+  with install links. While a capture runs the button shows it, and the menu
+  offers Stop.
+- Issues appear only when there are some (`⚠ N issues`, which filters to
+  them); zero counts are not shown.
+- Rows show conversation, agent, started, turns, and tokens. Mark only
+  exceptions: a green dot for Active, `Empty` and `Error` badges. Complete is
+  the default and stays unmarked. A row opens as one object; per-row actions,
+  such as delete, live in its `•••` menu.
+- Start times read as people scan: the time today, `Yesterday`, then the date;
+  the exact timestamp is in the title.
+- The app toolbar holds identity, watching state, theme, and a `•••` menu for
+  rare service actions (refresh, clear all). Destructive actions are never
+  first-level buttons.
+- On narrow screens, rows become two-line cards: title, then agent, time, and
+  tokens. Do not squeeze desktop columns into a horizontally overflowing page.
 
 ## Conversation workspace
 
@@ -100,13 +110,37 @@ The workspace answers a second question: **What happened in this conversation?**
 - Structured and raw representations, search, and the comparison with the
   previous turn, belong inside the turn inspector.
 - Do not render a second turn navigator, lens tabs, or parallel selection state.
+- Keep the workspace as quiet as the dashboard. The toolbar shows the
+  conversation title and watching state; Export and Delete live in its `•••`
+  menu, never as first-level buttons.
+- The flow's header is one line: the turn count (which returns to the
+  overview), a search icon that reveals turn search (`/`), and Layers or
+  Categories. The legend is one line; explanations live in tooltips. Each turn
+  row is two lines, its label and tokens, then what it added; cache share,
+  duration, and time are in its tooltip.
+- The overview states counts as one quiet line, then where the input went:
+  the unit treemap (one square per fixed token amount, grouped by layer) above
+  the ranked categories (the largest six and the rest), and the few turns
+  worth opening. Selecting a square or a category follows it through the flow.
+  Do not add instructions for obvious controls.
+- The turn inspector has one toolbar: back, `Turn N of M` with previous and
+  next, one view switch (Structured, Raw, Changes), and a search icon that
+  reveals search. Layer sections show their name and tokens; their
+  descriptions are tooltips.
+- Stepping between turns updates the inspector in place; it is never replaced
+  or slid out. Rows keep their identity (captured item id, else position), so
+  what persists stays put with its open state, and only rows the new turn
+  brings in enter with the *Row enter* motion recipe (settle and a brief
+  tint). Rows a turn adds or changes while carrying earlier items open by
+  default; tool definitions stay closed. Opening a turn from the overview
+  keeps the page-side-by-side entrance.
 
 ## Control scope
 
 | Scope | Controls and state |
 | --- | --- |
-| Service | Agent filter, watching state, theme, language, service actions |
-| Conversation collection | Search, date, status, bulk selection, refresh |
+| Service | Watching state, theme, language, `•••` service actions, running-capture Stop on workspace pages |
+| Dashboard | Capture menu, counts, search, agent and status filters, pagination |
 | Conversation | Selected turn or overview, selected layer or block, turn search |
 | Turn inspector | Structured/raw, search, selection stepping, this turn versus changes, previous/next turn |
 

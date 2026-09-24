@@ -6,7 +6,9 @@ from pathlib import Path
 
 import pytest
 
-from token_tap.commands.cli import _reverse_proxy_trace_options, _toml_dotted_key_segment, parse_args, run_client
+from token_tap.agents.codex import _toml_dotted_key_segment
+from token_tap.commands.cli import parse_args
+from token_tap.commands.cli_clients import _reverse_proxy_trace_options, run_client
 
 
 class _DummyProc:
@@ -159,7 +161,7 @@ async def test_run_client_codex_reverse_forces_builtin_provider_to_http(monkeypa
     monkeypatch.setattr("token_tap.commands.cli.shutil.which", lambda _: "/tmp/codex")
     monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_create_subprocess_exec)
     monkeypatch.setattr("sys.stdin.isatty", lambda: False)
-    monkeypatch.setattr("token_tap.commands.cli_clients._codex_selected_provider_base_url_key", lambda _: None)
+    monkeypatch.setattr("token_tap.agents.codex._codex_selected_provider_base_url_key", lambda _: None)
 
     code = await run_client(43123, ["exec", "hello"], client="codex", proxy_mode="reverse")
 
@@ -179,7 +181,7 @@ async def test_run_client_codex_reverse_isolates_legacy_openai_base_override(mon
     monkeypatch.setattr("token_tap.commands.cli.shutil.which", lambda _: "/tmp/codex")
     monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_create_subprocess_exec)
     monkeypatch.setattr("sys.stdin.isatty", lambda: False)
-    monkeypatch.setattr("token_tap.commands.cli_clients._codex_selected_provider_base_url_key", lambda _: None)
+    monkeypatch.setattr("token_tap.agents.codex._codex_selected_provider_base_url_key", lambda _: None)
 
     code = await run_client(
         43123,
@@ -208,7 +210,7 @@ async def test_run_client_codex_reverse_replaces_builtin_provider_override(monke
     monkeypatch.setattr("token_tap.commands.cli.shutil.which", lambda _: "/tmp/codex")
     monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_create_subprocess_exec)
     monkeypatch.setattr("sys.stdin.isatty", lambda: False)
-    monkeypatch.setattr("token_tap.commands.cli_clients._codex_selected_provider_base_url_key", lambda _: None)
+    monkeypatch.setattr("token_tap.agents.codex._codex_selected_provider_base_url_key", lambda _: None)
 
     code = await run_client(
         43123,

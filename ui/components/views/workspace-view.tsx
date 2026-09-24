@@ -1,13 +1,12 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { deleteSession, fetchSessionRecords } from "@/lib/api";
-import { formatCompact } from "@/lib/format";
-import { buildTurns } from "@/lib/token-model";
+import { deleteSession, fetchSessionRecords, fetchTokenEstimates } from "@/lib/api";
+import { buildTurns, estimateTexts, type TokenEstimates } from "@/lib/token-model";
 import type { SessionRecordsPayload, TokenSelection } from "@/lib/types";
 import { AppShell } from "../app-shell";
 import { DeleteDialog } from "../delete-dialog";
-import { DownloadIcon, TrashIcon } from "../icons";
+import { MenuItem } from "../menu";
 import { ConversationOverview } from "../workspace/conversation-overview";
 import type { CategoryFocus } from "../workspace/input-units";
 import { RequestView } from "../workspace/request-view";
@@ -83,7 +82,23 @@ export function WorkspaceView({ sessionId, onBack }: { sessionId: string; onBack
     };
   }, [sessionId]);
 
-  const turns = useMemo(() => buildTurns(data?.records || []), [data?.records]);
+  // Categories render from measured counts first; local estimates for blocks the
+  // provider did not count arrive afterwards and refine them.
+  const measuredTurns = useMemo(() => buildTurns(data?.records || []), [data?.records]);
+  const [estimates, setEstimates] = useState<TokenEstimates>(() => new Map());
+  const [estimatesUnavailable, setEstimatesUnavailable] = useState(false);
+  const pendingTexts = useMemo(() => (estimatesUnavailable ? [] : estimateTexts(measuredTurns).filter((text) => !estimates.has(text))), [estimates, estimatesUnavailable, measuredTurns]);
+  useEffect(() => {
+    if (!pendingTexts.length) return;
+    const controller = new AbortController();
+    fetchTokenEstimates(pendingTexts, controller.signal)
+      .then((counts) => setEstimates((current) => new Map([...current, ...pendingTexts.map((text, index) => [text, counts[index]] as const)])))
+      .catch((reason: Error) => {
+        if (reason.name !== "AbortError") setEstimatesUnavailable(true);
+      });
+    return () => controller.abort();
+  }, [pendingTexts]);
+  const turns = useMemo(() => (estimates.size ? buildTurns(data?.records || [], estimates) : measuredTurns), [data?.records, estimates, measuredTurns]);
   const selected = useMemo(() => {
     const index = turns.findIndex((item) => item.id === selectedId);
     return index >= 0 ? index : null;
@@ -123,9 +138,13 @@ export function WorkspaceView({ sessionId, onBack }: { sessionId: string; onBack
 
   const liveLabel = liveState === "watching" ? "Watching" : liveState === "stale" ? "Updates paused" : liveState === "reconnecting" ? "Reconnecting" : "Connecting";
   const active = data.session.live || data.session.status === "active";
-  const meta = <><span>{turns.length} turns</span><span>{formatCompact(data.session.total_tokens || turns.reduce((sum, item) => sum + item.input + item.output, 0))} tokens</span><span className={liveState === "watching" ? "text-success" : "text-warning"}>● {liveLabel}</span><a className="tf-control inline-flex items-center gap-1.5 rounded-control border border-line px-3 text-sm text-ink hover:bg-canvas" href={`/api/sessions/${encodeURIComponent(sessionId)}/export/compact`}><DownloadIcon className="size-4"/> Export</a><button className="tf-control inline-flex items-center gap-1.5 rounded-control border border-red-200 px-3 text-sm text-red-700 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-40 dark:border-red-900 dark:text-red-300 dark:hover:bg-red-950" disabled={active} onClick={() => setDeleteOpen(true)} title={active ? "Active conversations cannot be deleted" : "Delete conversation"} type="button"><TrashIcon className="size-4"/> Delete</button></>;
+  const meta = <span className="inline-flex items-center gap-2"><i className={`size-2 rounded-full ${liveState === "watching" ? "bg-emerald-500" : "bg-amber-500"}`}/>{liveLabel}</span>;
+  const menu = (close: () => void) => <>
+    <MenuItem onSelect={() => { close(); window.location.href = `/api/sessions/${encodeURIComponent(sessionId)}/export/compact`; }}>Export conversation</MenuItem>
+    <MenuItem danger disabled={active} onSelect={() => { close(); setDeleteOpen(true); }}>{active ? "Active conversations can't be deleted" : "Delete conversation…"}</MenuItem>
+  </>;
 
-  return <AppShell meta={meta} onBack={onBack} title={title}>
+  return <AppShell menu={menu} meta={meta} onBack={onBack} title={title}>
     <main className="mx-auto grid min-w-0 w-full max-w-[1600px] gap-3 py-3 lg:grid-cols-[minmax(24rem,32rem)_minmax(0,1fr)] lg:px-4">
       <TurnFlow focus={turn ? null : focusCategory} onSelectNode={selectNode} onSelectTurn={selectTurn} selected={selected} selection={tokenSelection} turns={turns}/>
       {/* On narrow screens the selected turn opens over the flow; closing it returns to the same place. */}

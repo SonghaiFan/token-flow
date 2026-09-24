@@ -6,8 +6,11 @@ from pathlib import Path
 
 import pytest
 
-from token_tap.commands import cli_clients
-from token_tap.commands.cli import CLIENT_CONFIGS, ClientConfig, parse_args, run_client
+from token_tap.agents import AGENTS
+from token_tap.agents import openclaw as openclaw_agent
+from token_tap.agents.base import AgentPlugin, ClientConfig
+from token_tap.commands.cli import parse_args
+from token_tap.commands.cli_clients import CLIENT_CONFIGS, run_client
 
 SUPPORTED_CLIENTS = {
     "agy",
@@ -220,7 +223,9 @@ async def test_run_client_reverse_sets_all_base_url_envs_and_settings(
         captured["env"] = kwargs["env"]
         return _DummyProc()
 
-    monkeypatch.setitem(CLIENT_CONFIGS, "multi-env", cfg)
+    plugin = AgentPlugin("multi-env")
+    plugin.config = cfg
+    monkeypatch.setitem(AGENTS, "multi-env", plugin)
     monkeypatch.setattr("token_tap.commands.cli.shutil.which", lambda name: f"/tmp/{name}")
     monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_create_subprocess_exec)
     monkeypatch.setattr("sys.stdin.isatty", lambda: False)
@@ -398,47 +403,47 @@ def test_openclaw_config_helpers_cover_paths_and_invalid_files(
     invalid = tmp_path / "invalid.json"
     invalid.write_text("{", encoding="utf-8")
 
-    assert cli_clients._read_openclaw_config(missing) is None
-    assert cli_clients._read_openclaw_config(invalid) is None
+    assert openclaw_agent._read_openclaw_config(missing) is None
+    assert openclaw_agent._read_openclaw_config(invalid) is None
 
     explicit = tmp_path / "explicit.json"
     monkeypatch.setenv("OPENCLAW_CONFIG_PATH", str(explicit))
-    assert cli_clients._openclaw_config_path() == explicit
+    assert openclaw_agent._openclaw_config_path() == explicit
 
     monkeypatch.delenv("OPENCLAW_CONFIG_PATH")
     monkeypatch.setenv("OPENCLAW_STATE_DIR", str(tmp_path / "state"))
-    assert cli_clients._openclaw_config_path() == tmp_path / "state" / "openclaw.json"
+    assert openclaw_agent._openclaw_config_path() == tmp_path / "state" / "openclaw.json"
 
 
 def test_openclaw_model_and_provider_helpers_cover_fallback_shapes() -> None:
-    assert cli_clients._openclaw_primary_model({}) is None
-    assert cli_clients._openclaw_primary_model({}, ["--model=anthropic/claude"]) == "anthropic/claude"
-    assert cli_clients._openclaw_primary_model({}, ["-m", "openai/gpt-5"]) == "openai/gpt-5"
-    assert cli_clients._openclaw_primary_model({"agents": {"defaults": {"model": "openai/gpt-5"}}}) == "openai/gpt-5"
+    assert openclaw_agent._openclaw_primary_model({}) is None
+    assert openclaw_agent._openclaw_primary_model({}, ["--model=anthropic/claude"]) == "anthropic/claude"
+    assert openclaw_agent._openclaw_primary_model({}, ["-m", "openai/gpt-5"]) == "openai/gpt-5"
+    assert openclaw_agent._openclaw_primary_model({"agents": {"defaults": {"model": "openai/gpt-5"}}}) == "openai/gpt-5"
     assert (
-        cli_clients._openclaw_primary_model({"agents": {"defaults": {"models": {"anthropic/claude": {}}}}})
+        openclaw_agent._openclaw_primary_model({"agents": {"defaults": {"models": {"anthropic/claude": {}}}}})
         == "anthropic/claude"
     )
     assert (
-        cli_clients._openclaw_primary_model({"agents": {"defaults": {"model": {"primary": "openrouter/auto"}}}})
+        openclaw_agent._openclaw_primary_model({"agents": {"defaults": {"model": {"primary": "openrouter/auto"}}}})
         == "openrouter/auto"
     )
 
-    assert cli_clients._openclaw_provider_proxy_url({}, "http://127.0.0.1:43123") == "http://127.0.0.1:43123/v1"
+    assert openclaw_agent._openclaw_provider_proxy_url({}, "http://127.0.0.1:43123") == "http://127.0.0.1:43123/v1"
     assert (
-        cli_clients._openclaw_provider_proxy_url({"api": "openai-responses"}, "http://127.0.0.1:43123")
+        openclaw_agent._openclaw_provider_proxy_url({"api": "openai-responses"}, "http://127.0.0.1:43123")
         == "http://127.0.0.1:43123/v1"
     )
     assert (
-        cli_clients._openclaw_provider_proxy_url({"api": "anthropic"}, "http://127.0.0.1:43123")
+        openclaw_agent._openclaw_provider_proxy_url({"api": "anthropic"}, "http://127.0.0.1:43123")
         == "http://127.0.0.1:43123"
     )
     assert (
-        cli_clients._openclaw_provider_target_url({"api": "openai-responses"}, "https://relay.example.com/v1/")
+        openclaw_agent._openclaw_provider_target_url({"api": "openai-responses"}, "https://relay.example.com/v1/")
         == "https://relay.example.com"
     )
     assert (
-        cli_clients._openclaw_provider_target_url({"api": "anthropic"}, "https://relay.example.com/anthropic/")
+        openclaw_agent._openclaw_provider_target_url({"api": "anthropic"}, "https://relay.example.com/anthropic/")
         == "https://relay.example.com/anthropic"
     )
 
@@ -446,11 +451,13 @@ def test_openclaw_model_and_provider_helpers_cover_fallback_shapes() -> None:
 def test_openclaw_config_patch_rejects_incomplete_configs() -> None:
     proxy_url = "http://127.0.0.1:43123"
 
-    assert cli_clients._openclaw_config_with_proxy({}, proxy_url) is None
-    assert cli_clients._openclaw_config_with_proxy({"agents": {"defaults": {"model": "claude"}}}, proxy_url) is None
-    assert cli_clients._openclaw_config_with_proxy({"agents": {"defaults": {"model": "openai/gpt"}}}, proxy_url) is None
+    assert openclaw_agent._openclaw_config_with_proxy({}, proxy_url) is None
+    assert openclaw_agent._openclaw_config_with_proxy({"agents": {"defaults": {"model": "claude"}}}, proxy_url) is None
     assert (
-        cli_clients._openclaw_config_with_proxy(
+        openclaw_agent._openclaw_config_with_proxy({"agents": {"defaults": {"model": "openai/gpt"}}}, proxy_url) is None
+    )
+    assert (
+        openclaw_agent._openclaw_config_with_proxy(
             {"agents": {"defaults": {"model": "openai/gpt"}}, "models": {"providers": {}}},
             proxy_url,
         )
@@ -464,20 +471,20 @@ def test_openclaw_reverse_env_falls_back_without_patchable_config(
 ) -> None:
     monkeypatch.setenv("OPENCLAW_CONFIG_PATH", str(tmp_path / "missing.json"))
 
-    env = cli_clients._openclaw_reverse_env(43123)
+    env = openclaw_agent._openclaw_reverse_env(43123)
 
     assert env == {"OPENAI_BASE_URL": "http://127.0.0.1:43123/v1"}
 
-    assert cli_clients._openclaw_reverse_env(43123, ["--model", "anthropic/claude"]) == {
+    assert openclaw_agent._openclaw_reverse_env(43123, ["--model", "anthropic/claude"]) == {
         "ANTHROPIC_BASE_URL": "http://127.0.0.1:43123"
     }
 
     monkeypatch.setenv("OPENAI_API_KEY", "openai-token")
     monkeypatch.setenv("ANTHROPIC_API_KEY", "anthropic-token")
-    assert cli_clients._openclaw_reverse_env(43123) == {"OPENAI_BASE_URL": "http://127.0.0.1:43123/v1"}
+    assert openclaw_agent._openclaw_reverse_env(43123) == {"OPENAI_BASE_URL": "http://127.0.0.1:43123/v1"}
 
     monkeypatch.delenv("OPENAI_API_KEY")
-    assert cli_clients._openclaw_reverse_env(43123) == {"ANTHROPIC_BASE_URL": "http://127.0.0.1:43123"}
+    assert openclaw_agent._openclaw_reverse_env(43123) == {"ANTHROPIC_BASE_URL": "http://127.0.0.1:43123"}
 
 
 def test_detect_openclaw_target_uses_config_then_env(
@@ -496,12 +503,12 @@ def test_detect_openclaw_target_uses_config_then_env(
     )
     monkeypatch.setenv("OPENCLAW_CONFIG_PATH", str(config))
 
-    assert cli_clients._detect_openclaw_target() == "https://relay.example.com"
+    assert openclaw_agent._detect_openclaw_target() == "https://relay.example.com"
 
     config.write_text("{}", encoding="utf-8")
     monkeypatch.setenv("OPENROUTER_API_KEY", "token")
 
-    assert cli_clients._detect_openclaw_target() == "https://openrouter.ai/api/v1"
+    assert openclaw_agent._detect_openclaw_target() == "https://openrouter.ai/api/v1"
 
 
 def test_detect_openclaw_target_uses_model_arg_provider(
@@ -525,7 +532,7 @@ def test_detect_openclaw_target_uses_model_arg_provider(
     )
     monkeypatch.setenv("OPENCLAW_CONFIG_PATH", str(config))
 
-    assert cli_clients._detect_openclaw_target(["--model", "anthropic/claude-opus-4-6"]) == (
+    assert openclaw_agent._detect_openclaw_target(["--model", "anthropic/claude-opus-4-6"]) == (
         "https://anthropic.example.com"
     )
 

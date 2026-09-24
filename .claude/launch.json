@@ -1,0 +1,44 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "ui-dev",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": [
+        "--prefix",
+        "ui",
+        "run",
+        "dev",
+        "--",
+        "--port",
+        "5173",
+        "--strictPort"
+      ],
+      "port": 5173
+    },
+    {
+      "name": "dashboard",
+      "runtimeExecutable": "uv",
+      "runtimeArgs": [
+        "run",
+        "token-flow",
+        "dashboard",
+        "--tap-no-open"
+      ],
+      "port": 19527
+    },
+    {
+      "name": "dashboard-alt",
+      "runtimeExecutable": "uv",
+      "runtimeArgs": [
+        "run",
+        "token-flow",
+        "dashboard",
+        "--tap-no-open",
+        "--tap-live-port",
+        "19528"
+      ],
+      "port": 19528
+    }
+  ]
+}

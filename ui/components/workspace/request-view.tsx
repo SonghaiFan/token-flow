@@ -1,42 +1,21 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { Streamdown, type Components } from "streamdown";
 import { formatDuration, formatNumber } from "@/lib/format";
-import { classifyInput, LAYER_META, LAYER_ORDER } from "@/lib/token-model";
+import type { SectionView } from "@/lib/agents";
+import { classifyInput, LAYER_META, LAYER_ORDER, turnPlugins } from "@/lib/token-model";
 import type { InputClass, InputLayer, ItemState, TokenSelection, TraceRecord, TurnModel } from "@/lib/types";
 import { categoryColor } from "@/lib/category-palette";
 import { CategorySwatch } from "../charts/category-legend";
 import { SearchIcon } from "../icons";
-import { activateOnKey, Segmented, useAccordion } from "../motion";
+import { activateOnKey, motionMs, Segmented, useAccordion } from "../motion";
 import { RawJsonTree } from "./raw-json-tree";
+import { humanizeField, Pill, previewText, ReadableText, RichText, stableValue } from "./section-views";
 import { clearCurrentMatch, clearHighlights, focusMatch, highlightMatches, MIN_QUERY, SEARCH_HIT_LIMIT, searchRecord, type JsonPathPart, type SearchHit } from "./request-search";
 
 type UnknownRecord = Record<string, unknown>;
 type RequestMode = "structured" | "raw";
 type RequestScope = "turn" | "changes";
-
-const markdownComponents: Components = {
-  h1: ({ children }) => <h1 className="mb-3 mt-5 text-xl font-semibold tracking-[-0.03em] first:mt-0">{children}</h1>,
-  h2: ({ children }) => <h2 className="mb-2 mt-5 text-lg font-semibold tracking-[-0.02em] first:mt-0">{children}</h2>,
-  h3: ({ children }) => <h3 className="mb-2 mt-4 text-base font-semibold first:mt-0">{children}</h3>,
-  p: ({ children }) => <p className="my-2 whitespace-pre-wrap leading-6 first:mt-0 last:mb-0">{children}</p>,
-  ul: ({ children }) => <ul className="my-3 list-disc space-y-1 pl-5">{children}</ul>,
-  ol: ({ children }) => <ol className="my-3 list-decimal space-y-1 pl-5">{children}</ol>,
-  li: ({ children }) => <li className="pl-0.5">{children}</li>,
-  blockquote: ({ children }) => <blockquote className="my-3 border-l-2 border-line pl-4 text-muted">{children}</blockquote>,
-  a: ({ children, href }) => <a className="font-medium underline decoration-line underline-offset-4 hover:decoration-ink" href={href} rel="noreferrer" target="_blank">{children}</a>,
-  code: ({ children }) => <code className="rounded bg-canvas px-1 py-0.5 font-mono text-[0.9em]">{children}</code>,
-  pre: ({ children }) => <pre className="tf-code my-3 max-h-[32rem] overflow-auto rounded-lg border border-line bg-canvas p-3">{children}</pre>,
-  // Captured markdown tables are evidence to read, so render a plain table without
-  // Streamdown's copy, download, and fullscreen chrome. Only wide tables scroll.
-  table: ({ children }) => <div className="my-3 overflow-x-auto"><table className="w-full border-collapse text-left text-[12px] leading-5">{children}</table></div>,
-  thead: ({ children }) => <thead className="border-b border-line">{children}</thead>,
-  tbody: ({ children }) => <tbody className="divide-y divide-line">{children}</tbody>,
-  tr: ({ children }) => <tr>{children}</tr>,
-  th: ({ children, style }) => <th className="whitespace-nowrap px-3 py-1.5 font-medium text-muted first:pl-0" style={style}>{children}</th>,
-  td: ({ children, style }) => <td className="px-3 py-1.5 align-top first:pl-0 [&_code]:whitespace-nowrap" style={style}>{children}</td>,
-};
 
 function asRecord(value: unknown): UnknownRecord {
   return value && typeof value === "object" && !Array.isArray(value) ? value as UnknownRecord : {};
@@ -50,49 +29,12 @@ function textValue(value: unknown): string {
   return typeof value === "string" ? value : typeof value === "number" || typeof value === "boolean" ? String(value) : "";
 }
 
-function escapeCapturedTags(value: string): string {
-  let fenced = false;
-  return value.split("\n").map((line) => {
-    if (/^\s*(?:```|~~~)/.test(line)) {
-      fenced = !fenced;
-      return line;
-    }
-    if (fenced) return line;
-    return line.split(/(`[^`]*`)/g).map((part, index) => index % 2 ? part : part.replace(/<(\/?[A-Za-z][^>\n]*)>/g, "&lt;$1&gt;")).join("");
-  }).join("\n");
-}
-
-function previewText(value: unknown): string {
-  if (typeof value === "string") return value.replace(/\s+/g, " ").trim();
-  if (Array.isArray(value)) {
-    for (const part of value) {
-      const record = asRecord(part);
-      const preview = previewText(record.text ?? record.output ?? record.input_text ?? part);
-      if (preview) return preview;
-    }
-  }
-  const record = asRecord(value);
-  const nested = record.text ?? record.content ?? record.output ?? record.input_text;
-  return nested === undefined || nested === value ? "" : previewText(nested);
-}
-
 function capturedText(value: unknown): string {
   if (typeof value === "string") return value;
   if (Array.isArray(value)) return value.map(capturedText).filter(Boolean).join("");
   const record = asRecord(value);
   const nested = record.text ?? record.content ?? record.output ?? record.input_text ?? record.output_text;
   return nested === undefined || nested === value ? "" : capturedText(nested);
-}
-
-function Pill({ children, tone = "neutral" }: { children: ReactNode; tone?: "neutral" | "system" | "user" | "assistant" | "danger" }) {
-  const tones = {
-    neutral: "border-line bg-canvas text-muted",
-    system: "border-amber-200 bg-amber-50 text-amber-800 dark:border-amber-900 dark:bg-amber-950 dark:text-amber-300",
-    user: "border-blue-200 bg-blue-50 text-blue-700 dark:border-blue-900 dark:bg-blue-950 dark:text-blue-300",
-    assistant: "border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-900 dark:bg-emerald-950 dark:text-emerald-300",
-    danger: "border-red-200 bg-red-50 text-danger dark:border-red-900 dark:bg-red-950",
-  };
-  return <span className={`inline-flex max-w-full items-center whitespace-nowrap rounded-full border px-2 py-0.5 font-mono text-xs font-medium ${tones[tone]}`}>{children}</span>;
 }
 
 function inputPreview(message: UnknownRecord, content: unknown, index: number): string {
@@ -110,10 +52,6 @@ function inputItemParts(message: UnknownRecord): unknown[] {
   const source = message.content ?? message.parts ?? message.text ?? message.output;
   if (Array.isArray(source)) return source;
   return [source === undefined ? message : source];
-}
-
-function RichText({ children }: { children: string }) {
-  return <Streamdown animated={false} className="min-w-0 break-words text-sm text-ink" components={markdownComponents} dir="auto" mode="static">{escapeCapturedTags(children)}</Streamdown>;
 }
 
 function JsonBlock({ value }: { value: unknown }) {
@@ -333,21 +271,6 @@ function toolEventKind(message: UnknownRecord): "call" | "result" | null {
   if (type.endsWith("_call_output") || type === "tool_result" || type === "tool_output") return "result";
   if (type.endsWith("_call") || type === "tool_use") return "call";
   return null;
-}
-
-function humanizeField(value: string): string {
-  const labels: Record<string, string> = {
-    cmd: "Command",
-    command: "Command",
-    justification: "Approval question",
-    max_output_tokens: "Output limit",
-    sandbox_permissions: "Sandbox",
-    shell: "Shell",
-    tty: "Terminal",
-    workdir: "Working directory",
-    yield_time_ms: "Wait for output",
-  };
-  return labels[value] || value.replaceAll("_", " ").replace(/^./, (character) => character.toUpperCase());
 }
 
 function formatToolField(key: string, value: unknown): string {
@@ -599,17 +522,45 @@ function toolGroups(value: unknown): Array<{ name: string; tools: UnknownRecord[
   return [...groups].map(([name, tools]) => ({ name, tools }));
 }
 
-function collectInput(body: UnknownRecord): unknown[] {
+/* Split system text into the sections the agent assembled it from, so each is
+   labeled on its own. Raw always shows the exact capture. */
+function systemParts(turn: TurnModel, system: unknown): unknown {
+  const split = turnPlugins(turn).agent.splitSystemText;
+  if (!split) return system;
+  if (typeof system === "string") {
+    const sections = split(system);
+    return sections.length > 1 ? sections.map((text) => ({ type: "text", text })) : system;
+  }
+  if (!Array.isArray(system)) return system;
+  return system.flatMap((raw) => {
+    const block = asRecord(raw);
+    if (block.type !== "text" || typeof block.text !== "string") return [raw];
+    const sections = split(block.text);
+    return sections.length > 1 ? sections.map((text) => ({ ...block, text })) : [raw];
+  });
+}
+
+/* Everything the model read, in order: harness instructions, then the items the
+   turn's protocol carries. */
+function collectInput(turn: TurnModel): unknown[] {
+  const body = contextBody(turn);
+  const protocol = turnPlugins(turn).protocol;
   const items: unknown[] = [];
-  const system = body.instructions ?? body.system ?? body.system_instruction;
-  if (system !== undefined) items.push({ type: "instructions", role: "system", content: system });
-  const source = body.input ?? body.messages ?? body.contents;
-  if (Array.isArray(source)) items.push(...source);
-  else if (source !== undefined) items.push({ type: "message", role: "user", content: source });
+  const system = protocol ? protocol.system(body) : body.instructions ?? body.system ?? body.system_instruction;
+  if (system !== undefined) items.push({ type: "instructions", role: "system", content: systemParts(turn, system) });
+  if (protocol) items.push(...protocol.items(body));
   return items;
 }
 
-function requestToolNames(body: UnknownRecord): string[] {
+/* The request body as the model received it: for a chained request, `input` holds
+   the context rebuilt from the previous captured turn. Raw keeps the exact capture. */
+function contextBody(turn: TurnModel): UnknownRecord {
+  const body = asRecord(turn.record.request?.body);
+  return turn.context.chainedItems ? { ...body, input: turn.context.input } : body;
+}
+
+function requestToolNames(turn: TurnModel): string[] {
+  const body = contextBody(turn);
   const names: string[] = [];
   const addTools = (value: unknown) => {
     for (const item of asArray(value)) {
@@ -622,20 +573,11 @@ function requestToolNames(body: UnknownRecord): string[] {
     }
   };
   addTools(body.tools);
-  for (const item of collectInput(body)) {
+  for (const item of collectInput(turn)) {
     const record = asRecord(item);
     if (record.type === "additional_tools") addTools(record.tools);
   }
   return [...new Set(names)];
-}
-
-function stableValue(value: unknown): string {
-  if (value === undefined) return "";
-  try {
-    return JSON.stringify(value);
-  } catch {
-    return String(value);
-  }
 }
 
 type LayerChange = "added" | "removed" | "changed";
@@ -656,8 +598,8 @@ function entryDiffKey(entry: InputEntry): string {
 /* Compare the two requests block by block. Blocks are matched only by captured
    item id (and part index); blocks without an id are counted, never guessed. */
 function layerDiffs(previous: TurnModel, current: TurnModel): LayerDiff[] {
-  const before = inputEntries(previous, collectInput(asRecord(previous.record.request?.body)));
-  const after = inputEntries(current, collectInput(asRecord(current.record.request?.body)));
+  const before = inputEntries(previous, collectInput(previous));
+  const after = inputEntries(current, collectInput(current));
   const beforeByKey = new Map(before.map((entry) => [entryDiffKey(entry), entry] as const).filter(([key]) => key));
   const afterKeys = new Set(after.map(entryDiffKey).filter(Boolean));
   return LAYER_ORDER.flatMap((layer) => {
@@ -682,7 +624,7 @@ function layerDiffs(previous: TurnModel, current: TurnModel): LayerDiff[] {
 }
 
 function entryPreview(entry: InputEntry): string {
-  if (entry.part !== undefined) return sectionPreview(entry.inputClass.label, capturedText(entry.part));
+  if (entry.part !== undefined) return sectionPreview(entry.section, capturedText(entry.part));
   const kind = toolEventKind(entry.item);
   if (kind === "call") return toolCallPresentation(entry.item).preview || textValue(entry.item.name);
   if (kind === "result") {
@@ -735,8 +677,8 @@ function RequestChanges({ previous, current }: { previous: TurnModel | undefined
     ["User input", previous.title, current.title],
     ["Model", textValue(previousBody.model) || "Unknown", textValue(currentBody.model) || "Unknown"],
     ["Endpoint", `${previous.method} ${previous.path}`.trim(), `${current.method} ${current.path}`.trim()],
-    ["Input items", String(collectInput(previousBody).length), String(collectInput(currentBody).length)],
-    ["Tool definitions", String(requestToolNames(previousBody).length), String(requestToolNames(currentBody).length)],
+    ["Input items", String(collectInput(previous).length), String(collectInput(current).length)],
+    ["Tool definitions", String(requestToolNames(previous).length), String(requestToolNames(current).length)],
     ["Reasoning effort", textValue(previousReasoning.effort) || "Unavailable", textValue(currentReasoning.effort) || "Unavailable"],
   ].filter(([, before, after]) => before !== after);
   const keys = [...new Set([...Object.keys(previousBody), ...Object.keys(currentBody)])];
@@ -753,95 +695,6 @@ function RequestChanges({ previous, current }: { previous: TurnModel | undefined
   </div>;
 }
 
-interface EnvironmentFacts {
-  entries: Array<{ access: string; escalatable: string; special: boolean; target: string }>;
-  fields: Array<[string, string]>;
-  fileSystem: string;
-  profile: string;
-  roots: string[];
-}
-
-const ENVIRONMENT_FIELDS: Record<string, string> = {
-  current_date: "Date",
-  cwd: "Working directory",
-  network: "Network",
-  shell: "Shell",
-  timezone: "Time zone",
-};
-
-function parseEnvironment(value: string): EnvironmentFacts | null {
-  const body = /<environment_context>([\s\S]*?)<\/environment_context>/i.exec(value)?.[1];
-  if (body === undefined) return null;
-  const fileSystem = /<filesystem>([\s\S]*?)<\/filesystem>/i.exec(body)?.[1] || "";
-  const scalars = body.replace(/<filesystem>[\s\S]*?<\/filesystem>/i, "");
-  return {
-    entries: [...fileSystem.matchAll(/<entry\b([^>]*)>([\s\S]*?)<\/entry>/gi)].map((match) => {
-      const path = /<path>([\s\S]*?)<\/path>/i.exec(match[2])?.[1];
-      const special = /<special>([\s\S]*?)<\/special>/i.exec(match[2])?.[1];
-      return {
-        access: /\baccess="([^"]*)"/.exec(match[1])?.[1] || "Unknown",
-        escalatable: /\bescalatable="([^"]*)"/.exec(match[1])?.[1] || "",
-        special: path === undefined && special !== undefined,
-        target: (path ?? special ?? match[2]).trim(),
-      };
-    }),
-    fields: [...scalars.matchAll(/<([A-Za-z_][\w-]*)>([\s\S]*?)<\/\1>/g)].map((match) => [match[1], match[2].trim()]),
-    fileSystem: /<file_system\b[^>]*\btype="([^"]*)"/i.exec(fileSystem)?.[1] || "",
-    profile: /<permission_profile\b[^>]*\btype="([^"]*)"/i.exec(fileSystem)?.[1] || "",
-    roots: [...fileSystem.matchAll(/<root>([\s\S]*?)<\/root>/gi)].map((match) => match[1].trim()),
-  };
-}
-
-function accessCounts(facts: EnvironmentFacts): string {
-  const counts = new Map<string, number>();
-  for (const entry of facts.entries) counts.set(entry.access, (counts.get(entry.access) || 0) + 1);
-  return [...counts].map(([access, count]) => `${access} ${count}`).join(" · ");
-}
-
-/* Field names whose value differs from the nearest earlier Environment block. */
-function environmentChanges(value: string, previous: string | undefined): string[] {
-  if (!previous) return [];
-  const facts = parseEnvironment(value);
-  const earlier = parseEnvironment(previous);
-  if (!facts || !earlier) return [];
-  const before = new Map(earlier.fields);
-  const changed = facts.fields.filter(([key, item]) => before.has(key) && before.get(key) !== item).map(([key]) => (ENVIRONMENT_FIELDS[key] || humanizeField(key)).toLowerCase());
-  if (stableValue(facts.entries) !== stableValue(earlier.entries) || stableValue(facts.roots) !== stableValue(earlier.roots)) changed.push("file system");
-  return changed;
-}
-
-function EnvironmentView({ previous, value }: { previous?: string; value: string }) {
-  const facts = useMemo(() => parseEnvironment(value), [value]);
-  const earlier = useMemo(() => (previous ? parseEnvironment(previous) : null), [previous]);
-  if (!facts) return <ContentPart value={value}/>;
-  const before = new Map(earlier?.fields || []);
-  return <div className="space-y-3">
-    <dl className="grid grid-cols-[7.5rem_minmax(0,1fr)] gap-x-4 gap-y-1.5 text-xs">
-      {facts.fields.map(([key, item]) => {
-        const old = before.get(key);
-        return <div className="contents" key={key}><dt className="text-muted">{ENVIRONMENT_FIELDS[key] || humanizeField(key)}</dt><dd className="min-w-0 break-all font-mono text-xs text-ink">{old !== undefined && old !== item ? <s className="mr-2 text-muted">{old}</s> : null}{item || "Empty"}</dd></div>;
-      })}
-      {facts.roots.length ? <><dt className="text-muted">Workspace roots</dt><dd className="min-w-0 space-y-0.5 break-all font-mono text-xs text-ink">{facts.roots.map((root) => <div key={root}>{root}</div>)}</dd></> : null}
-      {facts.entries.length ? <><dt className="text-muted">File system</dt><dd className="min-w-0 font-mono text-xs text-ink">{[facts.profile && `${facts.profile} profile`, facts.fileSystem, accessCounts(facts)].filter(Boolean).join(" · ")}</dd></> : null}
-    </dl>
-    {facts.entries.length ? <details className="text-xs">
-      <summary className="cursor-pointer text-xs text-muted hover:text-ink">{facts.entries.length} access rules</summary>
-      <div className="mt-2 overflow-hidden rounded-lg border border-line"><table className="w-full table-fixed text-left text-xs"><tbody className="divide-y divide-line">{facts.entries.map((entry, index) => <tr key={`${entry.target}-${index}`}><td className="w-20 px-3 py-1.5 align-top"><Pill tone={entry.access === "deny" ? "danger" : "neutral"}>{entry.access}</Pill></td><td className="break-all px-3 py-1.5 font-mono text-ink">{entry.target}{entry.special ? <span className="ml-2 font-sans text-xs text-muted">special</span> : null}{entry.escalatable === "false" ? <span className="ml-2 font-sans text-xs text-muted">not escalatable</span> : null}</td></tr>)}</tbody></table></div>
-    </details> : null}
-  </div>;
-}
-
-function parseAgentsMd(value: string): { body: string; path: string } | null {
-  const heading = /^# AGENTS\.md instructions(?: for ([^\n]+))?\s*\n/i.exec(value);
-  const wrapped = /<INSTRUCTIONS>([\s\S]*?)(?:<\/INSTRUCTIONS>|$)/i.exec(value)?.[1];
-  if (!heading && wrapped === undefined) return null;
-  return { body: (wrapped ?? value.slice(heading?.[0].length || 0)).trim(), path: heading?.[1]?.trim() || "" };
-}
-
-function ReadableText({ value }: { value: string }) {
-  return <div className="max-h-[36rem] overflow-auto rounded-lg bg-canvas/60 px-4 py-3"><RichText>{value}</RichText></div>;
-}
-
 /* Harness sections arrive wrapped in one pseudo-XML tag; the section label already
    names it, so render only its body. The exact text remains in Tree and Raw. */
 function unwrapSection(value: string): string {
@@ -849,27 +702,18 @@ function unwrapSection(value: string): string {
   return match ? match[2] : value;
 }
 
-function sectionPreview(label: string, value: string): string {
-  if (label === "Environment") {
-    const facts = parseEnvironment(value);
-    if (facts) return facts.fields.map(([, item]) => item).filter(Boolean).join(" · ");
-  }
-  if (label === "AGENTS.md") {
-    const parsed = parseAgentsMd(value);
-    if (parsed) return parsed.path || previewText(parsed.body.replace(/<!--[\s\S]*?-->/g, ""));
-  }
+function sectionPreview(section: SectionView | undefined, value: string): string {
+  const own = section?.preview?.(value);
+  if (own !== undefined) return own;
   // Previews read as prose: drop markdown heading and emphasis markers.
   return previewText(unwrapSection(value).replace(/^\s*#{1,6}\s+/gm, "").replace(/\*\*|__/g, ""));
 }
 
-function SectionContent({ label, previous, value }: { label: string; previous?: string; value: unknown }) {
+function SectionContent({ previous, section, value }: { previous?: string; section?: SectionView; value: unknown }) {
   const text = typeof value === "string" ? value : textValue(asRecord(value).text);
   if (!text) return <ContentPart value={value}/>;
-  if (label === "Environment") return <EnvironmentView previous={previous} value={text}/>;
-  if (label === "AGENTS.md") {
-    const parsed = parseAgentsMd(text);
-    if (parsed) return <ReadableText value={parsed.body}/>;
-  }
+  const own = section?.render?.(text, previous);
+  if (own !== undefined) return <>{own}</>;
   const body = unwrapSection(text);
   return parseStructuredText(body) ? <StructuredText>{body}</StructuredText> : <ReadableText value={body}/>;
 }
@@ -877,6 +721,8 @@ function SectionContent({ label, previous, value }: { label: string; previous?: 
 interface InputEntry {
   blockId?: string;
   inputClass: InputClass;
+  /* The kind the client declared for this part, if any. */
+  declaredKind?: string;
   item: UnknownRecord;
   itemId: string;
   key: string;
@@ -886,6 +732,8 @@ interface InputEntry {
   result?: InputEntry;
   /* State shown on the row; omitted when every item is new so rows stay quiet. */
   rowState?: ItemState;
+  /* The agent's view for this section label, when it has one. */
+  section?: SectionView;
   state?: ItemState;
   tokens?: { cached: number; tokens: number };
 }
@@ -909,19 +757,21 @@ function tokenIndex(turn: TurnModel): Map<string, { cached: number; tokens: numb
 
 function inputEntries(turn: TurnModel, items: unknown[]): InputEntry[] {
   const tokens = tokenIndex(turn);
+  const { agent } = turnPlugins(turn);
+  const withView = (entry: InputEntry): InputEntry => ({ ...entry, section: agent.sections?.[entry.inputClass.label] });
   const entries: InputEntry[] = items.flatMap((raw, itemIndex) => {
     const item = asRecord(raw);
     const itemId = textValue(item.id);
     const state = itemId ? turn.itemStates[itemId] : undefined;
     const key = itemId || `item-${itemIndex}`;
     if (!isMessagePartItem(item)) {
-      return [{ blockId: itemId || undefined, inputClass: classifyInput(item), item, itemId, key, state, tokens: itemId ? tokens.get(`item:${itemId}`) : undefined }];
+      return [withView({ blockId: itemId || undefined, inputClass: classifyInput(turn.record, item), item, itemId, key, state, tokens: itemId ? tokens.get(`item:${itemId}`) : undefined })];
     }
     const parts = inputItemParts(item);
     return parts.map((part, partIndex) => {
       const blockId = itemId ? `${itemId}:${partIndex}` : undefined;
       const partTokens = blockId ? tokens.get(blockId) ?? (parts.length === 1 ? tokens.get(`item:${itemId}`) : undefined) : undefined;
-      return { blockId, inputClass: classifyInput(item, part, partIndex), item, itemId, key: `${key}:${partIndex}`, part, partIndex, state, tokens: partTokens };
+      return withView({ blockId, declaredKind: agent.declaredKind?.(item, partIndex) || undefined, inputClass: classifyInput(turn.record, item, part, partIndex), item, itemId, key: `${key}:${partIndex}`, part, partIndex, state, tokens: partTokens });
     });
   });
   const mixed = entries.some((entry) => entry.state && entry.state !== "new");
@@ -1044,13 +894,19 @@ function BlockAnchor({ blockIds, children, turnId }: { blockIds: string[]; child
 
 /* Flat disclosure row: chevron on the left, summary in one line, body indented under it. */
 /* Flat accordion row: chevron on the left, summary in one line, body indented under it. */
+/* A row this turn added or changed while carrying earlier items. It opens by
+   default, so stepping through turns shows what each one brought in. */
+function isFresh(...entries: Array<InputEntry | undefined>): boolean {
+  return entries.some((entry) => entry?.rowState === "new" || entry?.rowState === "changed");
+}
+
 function Row({ accent, children, defaultOpen = false, dimmed = false, hint, summary }: { accent?: string; children?: ReactNode; defaultOpen?: boolean; dimmed?: boolean; hint?: string; summary: ReactNode }) {
   const { mounted, open, toggle } = useAccordion(defaultOpen);
   // A selected row carries its category color as a left bar and a light tint.
   const mark = accent ? { backgroundColor: `color-mix(in srgb, ${accent} 9%, transparent)`, boxShadow: `inset 3px 0 0 ${accent}` } : undefined;
   const fade = dimmed ? "opacity-45 hover:opacity-100" : "";
-  if (children === undefined) return <div className={`t-fade flex min-h-11 items-center gap-2.5 py-2 pl-10 pr-3 text-sm sm:pr-4 ${fade}`} style={mark} title={hint}>{summary}</div>;
-  return <div className="t-acc" data-open={open ? "true" : "false"}>
+  if (children === undefined) return <div className={`t-row t-fade flex min-h-11 items-center gap-2.5 py-2 pl-10 pr-3 text-sm sm:pr-4 ${fade}`} style={mark} title={hint}>{summary}</div>;
+  return <div className="t-row t-acc" data-open={open ? "true" : "false"}>
     <div aria-expanded={open} className={`t-acc-head t-fade flex min-h-11 cursor-pointer items-center gap-2.5 px-3 py-2 text-sm outline-none hover:bg-canvas/70 focus-visible:bg-canvas sm:px-4 ${fade}`} onClick={toggle} onKeyDown={(event) => activateOnKey(event, toggle)} role="button" style={mark} tabIndex={0} title={hint}>
       <span aria-hidden="true" className={`t-acc-chevron w-3 shrink-0 text-center text-xs ${open ? "text-muted" : "text-muted/60"}`}>›</span>
       {summary}
@@ -1083,10 +939,9 @@ function LayerSection({ badge, children, entries, layer, selection, turnId }: { 
   // A selected layer takes its own color; the other layers step back while it is selected.
   const ring = picked ? { borderColor: meta.color, boxShadow: `0 0 0 3px color-mix(in srgb, ${meta.color} 18%, transparent)` } : undefined;
   return <section aria-label={meta.title} className={`scroll-m-24 overflow-hidden rounded-control border bg-panel transition ${picked ? "" : "border-line"} ${dimmed ? "opacity-50 hover:opacity-100" : ""}`} data-layer={layer} data-turn-id={turnId} style={ring} tabIndex={-1}>
-    <header className="flex min-h-12 items-center gap-2.5 bg-canvas/60 px-3 py-2 sm:px-4">
+    <header className="flex min-h-11 items-center gap-2.5 px-3 py-1.5 sm:px-4">
       <Icon color={meta.color} name={LAYER_ICONS[layer]}/>
-      <h3 className="shrink-0 text-base font-semibold">{meta.title}</h3>
-      <Meta>{meta.description}</Meta>
+      <h3 className="shrink-0 text-sm font-semibold">{meta.title}</h3>
       <RowEnd badge={badge ?? <StateSummary entries={entries}/>} tokens={sumTokens(entries)}/>
     </header>
     <div className="divide-y divide-line border-t border-line">{children}</div>
@@ -1142,19 +997,16 @@ function ToolDefinitionRow({ entry, onSelectToken, selection, tools, turnId }: R
   </Row>;
 }
 
-function contentKind(entry: InputEntry): string {
-  const kinds = asRecord(entry.item.internal_chat_message_metadata_passthrough).content_item_kinds;
-  return Array.isArray(kinds) && entry.partIndex !== undefined ? textValue(kinds[entry.partIndex]) : "";
-}
-
 /* A short identifying fact for a row, never a prose preview: the declared content
    kind, the wrapper tag, or a heading that says more than the label. */
 function sectionFact(entry: InputEntry, text: string): { mono: boolean; value: string } {
   const label = entry.inputClass.label;
-  if (label === "Environment" || label === "AGENTS.md") return { mono: false, value: sectionPreview(label, text) };
+  const own = entry.section?.fact?.(text);
+  if (own) return own;
+  const preview = entry.section?.preview?.(text);
+  if (preview !== undefined) return { mono: false, value: preview };
   if (label === "Assistant messages") return { mono: false, value: [textValue(entry.item.phase).replaceAll("_", " "), previewText(text)].filter(Boolean).join(" · ") };
-  const kind = contentKind(entry);
-  if (kind) return { mono: true, value: kind };
+  if (entry.declaredKind) return { mono: true, value: entry.declaredKind };
   const tag = /^\s*<([A-Za-z][\w -]*)>/.exec(text)?.[1];
   if (tag && unwrapSection(text) !== text) return { mono: true, value: tag };
   const heading = /^\s*#{1,6}\s+([^\n]+)/.exec(text)?.[1]?.trim();
@@ -1168,10 +1020,10 @@ function PartRow({ defaultOpen = false, entry, onSelectToken, previous, selectio
   const isPrompt = label === "User prompt";
   const fact = sectionFact(entry, text);
   const blockIds = entry.blockId ? [entry.blockId] : [];
-  const changes = label === "Environment" ? environmentChanges(text, previous) : [];
+  const changes = entry.section?.changes?.(text, previous) || [];
   const badge = changes.length ? <Badge tone="changed">{changes.length === 1 ? `${changes[0]} changed` : `${changes.length} fields changed`}</Badge> : <StateBadge state={entry.rowState}/>;
   const marks = rowMarks([entry], label, entry.inputClass.layer, selection, turnId);
-  return <Row accent={marks.accent} defaultOpen={defaultOpen || marks.open} dimmed={marks.dimmed} hint={isPrompt ? undefined : sectionPreview(label, text)} summary={<>
+  return <Row accent={marks.accent} defaultOpen={defaultOpen || marks.open || isFresh(entry)} dimmed={marks.dimmed} hint={isPrompt ? undefined : sectionPreview(entry.section, text)} summary={<>
     <LinkSwatch blockIds={blockIds} icon={isPrompt ? "user" : label === "Assistant messages" ? "chat" : undefined} label={label} layer={entry.inputClass.layer} onSelectToken={onSelectToken} selection={selection} turnId={turnId}/>
     {isPrompt ? <span className="min-w-0 flex-1 truncate font-medium text-ink">{previewText(entry.part) || "Empty prompt"}</span> : <>
       <span className="shrink-0 text-ink">{label === "Assistant messages" ? "Assistant" : label}</span>
@@ -1179,7 +1031,7 @@ function PartRow({ defaultOpen = false, entry, onSelectToken, previous, selectio
     </>}
     <RowEnd badge={badge} tokens={entry.tokens}/>
   </>}>
-    <BlockAnchor blockIds={blockIds} turnId={turnId}><SectionContent label={label} previous={previous} value={entry.part}/></BlockAnchor>
+    <BlockAnchor blockIds={blockIds} turnId={turnId}><SectionContent previous={previous} section={entry.section} value={entry.part}/></BlockAnchor>
   </Row>;
 }
 
@@ -1193,7 +1045,7 @@ function ReasoningRow({ entry, onSelectToken, selection, turnId }: RowProps & { 
   const blockIds = entryBlockIds([entry]);
   const detail = [encrypted ? "encrypted" : "", summary ? previewText(summary) : "no summary"].filter(Boolean).join(" · ");
   const marks = rowMarks([entry], "Reasoning", "conversation", selection, turnId);
-  return <Row accent={marks.accent} defaultOpen={marks.open} dimmed={marks.dimmed} summary={<>
+  return <Row accent={marks.accent} defaultOpen={marks.open || isFresh(entry)} dimmed={marks.dimmed} summary={<>
     <LinkSwatch blockIds={blockIds} icon="sparkle" label="Reasoning" layer="conversation" onSelectToken={onSelectToken} selection={selection} turnId={turnId}/>
     <span className="shrink-0 text-ink">Reasoning</span>
     <Meta>{detail}</Meta>
@@ -1240,7 +1092,7 @@ function ToolExchangeRow({ call, onSelectToken, result, selection, turnId }: Row
   const state = result?.rowState ?? call?.rowState;
   const resultParts = resultItem ? inputItemParts(resultItem).length : 0;
   const marks = rowMarks([call, result], result && selectionHits([result], selection, turnId) ? "Tool results" : "Tool calls", "conversation", selection, turnId);
-  return <Row accent={marks.accent} defaultOpen={marks.open} dimmed={marks.dimmed} summary={<>
+  return <Row accent={marks.accent} defaultOpen={marks.open || isFresh(call, result)} dimmed={marks.dimmed} summary={<>
     <LinkSwatch blockIds={blockIds} icon="terminal" label={call ? "Tool calls" : "Tool results"} layer="conversation" onSelectToken={onSelectToken} selection={selection} turnId={turnId}/>
     <span className="shrink-0 font-mono text-sm text-ink">{namespace ? <span className="text-muted">{namespace}.</span> : null}{presentation?.name || "Tool result"}</span>
     <Meta>{title}</Meta>
@@ -1262,7 +1114,7 @@ function ToolExchangeRow({ call, onSelectToken, result, selection, turnId }: Row
 function GenericRow({ entry, onSelectToken, selection, turnId }: RowProps & { entry: InputEntry }) {
   const blockIds = entryBlockIds([entry]);
   const marks = rowMarks([entry], entry.inputClass.label, entry.inputClass.layer, selection, turnId);
-  return <Row accent={marks.accent} defaultOpen={marks.open} dimmed={marks.dimmed} summary={<>
+  return <Row accent={marks.accent} defaultOpen={marks.open || isFresh(entry)} dimmed={marks.dimmed} summary={<>
     <LinkSwatch blockIds={blockIds} label={entry.inputClass.label} layer={entry.inputClass.layer} onSelectToken={onSelectToken} selection={selection} turnId={turnId}/>
     <span className="shrink-0 text-ink">{entry.inputClass.label}</span>
     <Meta mono>{textValue(entry.item.type) || "input"}</Meta>
@@ -1419,10 +1271,9 @@ function RequestSettings({ body, record }: { body: UnknownRecord; record: TraceR
   const visible = groups.map(([title, facts]) => [title, facts.filter(([, value]) => value !== undefined && value !== null && value !== "")] as const).filter(([, facts]) => facts.length);
   if (!visible.length) return null;
   return <section aria-label="Request settings" className="overflow-hidden rounded-control border border-line bg-panel">
-    <header className="flex min-h-12 items-center gap-2.5 bg-canvas/60 px-3 py-2 sm:px-4">
+    <header className="flex min-h-11 items-center gap-2.5 px-3 py-1.5 sm:px-4">
       <Icon name="sliders"/>
-      <h3 className="shrink-0 text-base font-semibold">Request settings</h3>
-      <Meta>No input tokens</Meta>
+      <h3 className="shrink-0 text-sm font-semibold">Request settings</h3>
     </header>
     <div className="divide-y divide-line border-t border-line">
       {chips.length ? <div className="flex flex-wrap gap-1.5 px-3 py-2.5 sm:px-4">{chips.map((chip) => <Badge key={chip}>{chip}</Badge>)}</div> : null}
@@ -1436,12 +1287,13 @@ function RequestSettings({ body, record }: { body: UnknownRecord; record: TraceR
 /* Text of the nearest earlier Environment block, for field-level comparison. */
 function earlierEnvironment(earlierTurns: TurnModel[]): string | undefined {
   for (let index = earlierTurns.length - 1; index >= 0; index -= 1) {
-    for (const raw of collectInput(asRecord(earlierTurns[index].record.request?.body))) {
+    const turn = earlierTurns[index];
+    for (const raw of collectInput(turn)) {
       const item = asRecord(raw);
       if (!isMessagePartItem(item)) continue;
       const parts = inputItemParts(item);
       for (let partIndex = 0; partIndex < parts.length; partIndex += 1) {
-        if (classifyInput(item, parts[partIndex], partIndex).label === "Environment") return capturedText(parts[partIndex]);
+        if (classifyInput(turn.record, item, parts[partIndex], partIndex).label === "Environment") return capturedText(parts[partIndex]);
       }
     }
   }
@@ -1452,7 +1304,7 @@ function RequestHeader({ turn }: { turn: TurnModel }) {
   const record = turn.record;
   const status = Number(record.response?.status || 0);
   const route = record.transport || `${record.request?.method || ""} ${record.request?.path || ""}`.trim();
-  const facts = [`Turn ${turn.label}`, turn.model, route, status ? String(status) : "", turn.durationMs ? formatDuration(turn.durationMs) : ""].filter(Boolean);
+  const facts = [turn.model, route, status ? String(status) : "", turn.durationMs ? formatDuration(turn.durationMs) : ""].filter(Boolean);
   return <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1 px-1 pb-1">
     <h3 className="min-w-0 max-w-full truncate text-lg font-semibold tracking-[-0.01em]">{turn.queryText || turn.title}</h3>
     <span className={`text-xs ${status >= 400 ? "text-danger" : "text-muted"}`}>{facts.join(" · ")}</span>
@@ -1460,11 +1312,36 @@ function RequestHeader({ turn }: { turn: TurnModel }) {
   </div>;
 }
 
+/* A chained request sends only new items. Say where the rest of its context came
+   from, and say so plainly when the previous response was not captured. */
+function ChainNote({ turn }: { turn: TurnModel }) {
+  const { chainBroken, chainedFromTurn, chainedItems } = turn.context;
+  const estimated = turn.categories.some((category) => category.estimated);
+  const estimateNote = estimated ? " Within those measured totals, blocks are sized with a local tokenizer (≈)." : "";
+  if (turn.cacheChain) return <p className="flex items-center gap-2 px-1 text-xs text-muted">
+    <Icon name="history"/>
+    <span>From prompt-cache counts: {formatNumber(turn.cacheChain.carried)} tokens are Turn {turn.cacheChain.fromTurn}&apos;s prompt read from cache, and {formatNumber(turn.cacheChain.added)} tokens are the items added since.{estimateNote}</span>
+  </p>;
+  if (estimated) return <p className="flex items-center gap-2 px-1 text-xs text-muted">
+    <Icon name="history"/>
+    <span>The provider reported only a total for this request. Categories size each block with a local tokenizer (≈), scaled to the measured {formatNumber(turn.input)} input tokens.</span>
+  </p>;
+  if (chainedFromTurn && chainedItems) return <p className="flex items-center gap-2 px-1 text-xs text-muted">
+    <Icon name="history"/>
+    <span>Continues Turn {chainedFromTurn}: {formatNumber(chainedItems)} earlier {chainedItems === 1 ? "item comes" : "items come"} from that turn&apos;s captured request and output. Raw shows only the new items this request sent.</span>
+  </p>;
+  if (chainBroken) return <p className="flex items-center gap-2 px-1 text-xs text-muted">
+    <Icon name="history"/>
+    <span>This request continues a response that was not captured, so only the new items it sent are shown.</span>
+  </p>;
+  return null;
+}
+
 function StructuredRequest({ earlierTurns, onSelectToken, selection, turn }: { earlierTurns: TurnModel[]; onSelectToken: (selection: TokenSelection | null) => void; selection: TokenSelection | null; turn: TurnModel }) {
   const record = turn.record;
   const turnId = turn.id;
   const body = asRecord(record.request?.body);
-  const input = useMemo(() => collectInput(body), [body]);
+  const input = useMemo(() => collectInput(turn), [turn]);
   const entries = useMemo(() => inputEntries(turn, input), [turn, input]);
   const previousEnvironment = useMemo(() => earlierEnvironment(earlierTurns), [earlierTurns]);
   const topLevelTools = asArray(body.tools);
@@ -1473,9 +1350,11 @@ function StructuredRequest({ earlierTurns, onSelectToken, selection, turn }: { e
   const lastPromptKey = [...entries].reverse().find((entry) => entry.inputClass.label === "User prompt")?.key || "";
   const hasContent = entries.length > 0 || topLevelTools.length > 0;
   const rowProps = { onSelectToken, selection, turnId };
-  const contextChanges = (byLayer.get("context") || []).filter((entry) => entry.inputClass.label === "Environment" && environmentChanges(capturedText(entry.part), previousEnvironment).length).length;
+  const contextChanges = (byLayer.get("context") || []).filter((entry) => entry.inputClass.label === "Environment" && (entry.section?.changes?.(capturedText(entry.part), previousEnvironment) || []).length).length;
 
   return <div className="space-y-4 p-3 sm:p-4">
+
+    <ChainNote turn={turn}/>
 
     {LAYER_ORDER.map((layer) => {
       const layerEntries = byLayer.get(layer) || [];
@@ -1568,18 +1447,28 @@ export function RequestView({ jumpToBlock, onNavigate, onSelectToken, selection,
   const [query, setQuery] = useState("");
   const [cursor, setCursor] = useState({ index: -1, query: "" });
   const [listOpen, setListOpen] = useState(true);
+  const [searchOpen, setSearchOpen] = useState(false);
+  const searchRef = useRef<HTMLInputElement>(null);
   const [localJump, setLocalJump] = useState<InspectorJump | null>(null);
   const bodyRef = useRef<HTMLDivElement>(null);
   const rangesRef = useRef<Range[]>([]);
   const selectedIndex = turns.findIndex((item) => item.id === turn.id);
   const previous = selectedIndex > 0 ? turns[selectedIndex - 1] : undefined;
-  // Page side-by-side: a later turn slides in from the right, an earlier one from the left.
-  const [shownIndex, setShownIndex] = useState(selectedIndex);
-  const [direction, setDirection] = useState(1);
-  if (selectedIndex !== shownIndex) {
-    setDirection(selectedIndex > shownIndex ? 1 : -1);
-    setShownIndex(selectedIndex);
+  // Turn changes update the request in place instead of replacing it: rows that
+  // persist keep their place and open state, and only the rows this turn brings in
+  // enter (Row enter). The flag is set in the same render as the new turn, so the
+  // entering rows commit with it and start from their entry style.
+  const [shownTurn, setShownTurn] = useState(turn.id);
+  const [rowMotion, setRowMotion] = useState(false);
+  if (turn.id !== shownTurn) {
+    setShownTurn(turn.id);
+    setRowMotion(true);
   }
+  useEffect(() => {
+    if (!rowMotion) return;
+    const timer = window.setTimeout(() => setRowMotion(false), motionMs("--row-enter-dur", 900));
+    return () => window.clearTimeout(timer);
+  }, [rowMotion, shownTurn]);
   const searching = scope === "turn" && query.trim().length >= MIN_QUERY;
   const hits = useMemo(() => (searching ? searchRecord(turn.record, query) : []), [query, searching, turn.record]);
   const current = cursor.query === query ? cursor.index : -1;
@@ -1654,10 +1543,26 @@ export function RequestView({ jumpToBlock, onNavigate, onSelectToken, selection,
       setLocalJump({ blockId: "", label: hit.label, path: hit.path, ...reveal });
     }
   };
+  // One view switch: the structured or raw request, or what changed since the previous turn.
+  const view = scope === "changes" ? "changes" : mode;
+  const setView = (next: RequestMode | "changes") => {
+    if (next === "changes") setScope("changes");
+    else {
+      setScope("turn");
+      setMode(next);
+    }
+  };
+  const openSearch = () => {
+    setScope("turn");
+    setSearchOpen(true);
+    window.requestAnimationFrame(() => searchRef.current?.focus());
+  };
   const onSearchKey = (event: React.KeyboardEvent<HTMLInputElement>) => {
     if (event.key === "Escape") {
       event.preventDefault();
+      event.stopPropagation();
       setQuery("");
+      setSearchOpen(false);
     } else if (event.key === "Enter" && hits.length) {
       event.preventDefault();
       goTo((current + (event.shiftKey ? -1 : 1) + hits.length) % hits.length);
@@ -1666,31 +1571,31 @@ export function RequestView({ jumpToBlock, onNavigate, onSelectToken, selection,
 
   return <section aria-label={`Turn ${turn.label}`} className="rounded-panel border border-line bg-panel shadow-sm">
     <div className="sticky top-0 z-20 rounded-t-2xl border-b border-line bg-panel lg:top-14" data-search-ignore="">
-      <div className="flex flex-wrap items-center gap-2 px-3 py-2.5 sm:px-4">
-        <button className="tf-control inline-flex items-center gap-1.5 rounded-control px-2 text-sm font-medium text-muted hover:bg-canvas hover:text-ink" onClick={() => onNavigate(null)} type="button">← Overview</button>
-        <div className="flex items-center gap-1">
-          <button aria-label="Previous turn" className="tf-icon-control grid place-items-center rounded-control text-muted hover:bg-canvas hover:text-ink disabled:opacity-30" disabled={selectedIndex <= 0} onClick={() => step(-1)} type="button">‹</button>
-          <span className="font-mono text-xs text-muted">{selectedIndex + 1} / {turns.length}</span>
-          <button aria-label="Next turn" className="tf-icon-control grid place-items-center rounded-control text-muted hover:bg-canvas hover:text-ink disabled:opacity-30" disabled={selectedIndex >= turns.length - 1} onClick={() => step(1)} type="button">›</button>
+      <div className="flex flex-wrap items-center gap-1 px-2 py-2 sm:px-3">
+        <button aria-label="Back to overview" className="tf-icon-control grid place-items-center rounded-control text-muted hover:bg-canvas hover:text-ink" onClick={() => onNavigate(null)} title="Overview (Esc)" type="button">←</button>
+        <div className="flex items-center">
+          <button aria-label="Previous turn" className="tf-icon-control grid place-items-center rounded-control text-muted hover:bg-canvas hover:text-ink disabled:opacity-30" disabled={selectedIndex <= 0} onClick={() => step(-1)} title="Previous turn (↑)" type="button">‹</button>
+          <span className="whitespace-nowrap px-1 text-sm"><span className="font-medium">Turn {turn.label}</span><span className="text-muted"> of {turns.length}</span></span>
+          <button aria-label="Next turn" className="tf-icon-control grid place-items-center rounded-control text-muted hover:bg-canvas hover:text-ink disabled:opacity-30" disabled={selectedIndex >= turns.length - 1} onClick={() => step(1)} title="Next turn (↓)" type="button">›</button>
         </div>
         {selection?.turnId === turn.id ? <SelectionChip onJump={(next) => setLocalJump({ ...next, nonce: Date.now() })} onSelectToken={onSelectToken} selection={selection}/> : null}
-        <div className="ml-auto flex flex-wrap items-center gap-2">
-          {scope === "turn" ? <Segmented label="Request format" onChange={setMode} options={[["structured", "Structured"], ["raw", "Raw"]]} value={mode}/> : null}
-          <Segmented label="Request scope" onChange={setScope} options={[["turn", "This turn"], ["changes", "Changes"]]} value={scope}/>
+        <div className="ml-auto flex items-center gap-1">
+          <Segmented label="Request view" onChange={setView} options={[["structured", "Structured"], ["raw", "Raw"], ["changes", "Changes"]]} value={view}/>
+          <button aria-expanded={searchOpen || Boolean(query)} aria-label="Search this turn" className={`tf-icon-control grid place-items-center rounded-control hover:bg-canvas ${searchOpen || query ? "text-ink" : "text-muted"}`} onClick={() => { if (searchOpen || query) { setSearchOpen(false); setQuery(""); } else openSearch(); }} title="Search this turn" type="button"><SearchIcon className="size-[18px]"/></button>
         </div>
       </div>
-      {scope === "turn" ? <div className="flex items-center gap-2 px-3 pb-2.5 sm:px-4">
+      {scope === "turn" && (searchOpen || query) ? <div className="flex items-center gap-2 px-3 pb-2.5 sm:px-4">
         <label className="relative block min-w-0 flex-1">
           <span className="sr-only">Search this turn</span>
-          <SearchIcon className="pointer-events-none absolute left-2.5 top-2.5 size-4 text-muted"/>
-          <input className="tf-control w-full rounded-control border border-line bg-canvas pl-8 pr-8 text-sm outline-none placeholder:text-muted focus:border-muted" onChange={(event) => { setQuery(event.target.value); setListOpen(true); }} onKeyDown={onSearchKey} placeholder="Search this turn's request and response" type="search" value={query}/>
+          <SearchIcon className="pointer-events-none absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-muted"/>
+          <input className="tf-control w-full rounded-control border border-line bg-canvas pl-8 pr-8 text-sm outline-none placeholder:text-muted focus:border-muted" onChange={(event) => { setQuery(event.target.value); setListOpen(true); }} onKeyDown={onSearchKey} autoFocus placeholder="Search this turn's request and response" ref={searchRef} type="search" value={query}/>
           {query ? <button aria-label="Clear search" className="absolute right-0.5 top-0 grid size-11 place-items-center text-sm text-muted hover:text-ink" onClick={() => setQuery("")} type="button">×</button> : null}
         </label>
         {searching && hits.length ? <button aria-expanded={listOpen} className="tf-control shrink-0 rounded-control px-2 text-sm font-medium text-muted hover:bg-canvas hover:text-ink" onClick={() => setListOpen(!listOpen)} type="button">{listOpen ? "Hide list" : `Show ${hits.length}`}</button> : null}
       </div> : null}
       {searching && listOpen ? <SearchResults current={current} hits={hits} onPick={goTo} query={query}/> : null}
     </div>
-    <div className="t-page-enter" key={turn.id} ref={bodyRef} style={{ "--t-page-dir": direction } as React.CSSProperties}>
+    <div data-row-motion={rowMotion ? "enter" : undefined} ref={bodyRef}>
       <div className="px-3 pt-3 sm:px-4 sm:pt-4"><RequestHeader turn={turn}/></div>
       {scope === "changes" ? <RequestChanges current={turn} previous={previous}/> : <RequestBody earlierTurns={turns.slice(0, Math.max(0, selectedIndex))} focusPath={mode === "raw" ? jump?.path : null} mode={mode} onSelectToken={onSelectToken} selection={selection} turn={turn}/>}
     </div>

@@ -40,7 +40,8 @@ async def _start_test_app(app: web.Application) -> tuple[web.AppRunner, int]:
     return runner, port
 
 
-def test_resolve_dashboard_port_defaults_to_shared_port() -> None:
+def test_resolve_dashboard_port_defaults_to_shared_port(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("TOKEN_FLOW_DASHBOARD_PORT", raising=False)
     assert resolve_dashboard_port(0) == DEFAULT_DASHBOARD_PORT
     assert resolve_dashboard_port(None) == DEFAULT_DASHBOARD_PORT
 

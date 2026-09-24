@@ -2,6 +2,11 @@ import asyncio
 import base64
 import json
 import logging
+import os
+import shutil
+import signal
+import subprocess
+import sys
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -10,6 +15,7 @@ import pytest
 from aiohttp.test_utils import make_mocked_request
 
 from tests.conftest import playwright_skip_reason
+from token_tap.agents import codexapp as codexapp_agent
 from token_tap.server.api import _record_limit_from_request
 from token_tap.server.app import LiveViewerServer
 from token_tap.server.dashboard import (
@@ -1909,6 +1915,7 @@ async def test_dashboard_can_start_and_stop_codex_app_capture(trace_db, monkeypa
 
     monkeypatch.setattr(capture_manager_module.sys, "platform", "darwin")
     monkeypatch.setattr(capture_manager_module.asyncio, "create_subprocess_exec", fake_create_subprocess_exec)
+    monkeypatch.setattr(codexapp_agent.PLUGIN, "resolve_executable", lambda client_cmd: "/Applications/Codex.app")
 
     server = LiveViewerServer(port=0, dashboard_mode=True)
     port = await server.start()
@@ -1945,6 +1952,134 @@ async def test_dashboard_can_start_and_stop_codex_app_capture(trace_db, monkeypa
                 assert payload["pid"] is None
 
             assert process.signal == capture_manager_module.signal.SIGINT
+    finally:
+        await server.stop()
+
+
+@pytest.mark.asyncio
+async def test_dashboard_can_start_and_stop_pi_capture_in_terminal(trace_db, monkeypatch) -> None:
+    import token_tap.capture.manager as capture_manager_module
+
+    # Detach the stand-in capture like a Terminal window would, so it is not our child.
+    # It restores the default SIGINT handler, which background shell jobs ignore.
+    stand_in = "import signal, time; signal.signal(signal.SIGINT, signal.default_int_handler); time.sleep(60)"
+    sleeper_pid = int(
+        subprocess.check_output(
+            ["sh", "-c", f'"{sys.executable}" -c "{stand_in}" >/dev/null 2>&1 & echo $!'], text=True
+        )
+    )
+
+    def sleeper_alive() -> bool:
+        try:
+            os.kill(sleeper_pid, 0)
+        except ProcessLookupError:
+            return False
+        return True
+
+    opened = {}
+    real_create_subprocess_exec = asyncio.create_subprocess_exec
+
+    async def fake_create_subprocess_exec(*command, **kwargs):
+        if command[0] != "open":
+            return await real_create_subprocess_exec(*command, **kwargs)
+        script = Path(command[-1])
+        opened["command"] = command
+        opened["script"] = script.read_text()
+        (script.parent / "pid").write_text(str(sleeper_pid))
+        return await real_create_subprocess_exec("true")
+
+    monkeypatch.setattr(capture_manager_module.sys, "platform", "darwin")
+    monkeypatch.setattr(shutil, "which", lambda name, *args, **kwargs: f"/usr/local/bin/{name}")
+    monkeypatch.setattr(capture_manager_module.asyncio, "create_subprocess_exec", fake_create_subprocess_exec)
+
+    server = LiveViewerServer(port=0, dashboard_mode=True)
+    port = await server.start()
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.get(f"http://127.0.0.1:{port}/dashboard/health") as resp:
+                token = (await resp.json())["quit_token"]
+            headers = {"X-Claude-Tap-Dashboard-Token": token}
+
+            async with session.get(f"http://127.0.0.1:{port}/dashboard/captures") as resp:
+                clients = {client["id"]: client for client in (await resp.json())["clients"]}
+                assert clients["pi"]["available"] is True
+                assert clients["pi"]["terminal"] is True
+
+            async with session.post(
+                f"http://127.0.0.1:{port}/dashboard/captures", headers=headers, json={"client": "pi"}
+            ) as resp:
+                assert resp.status == 202
+                payload = await resp.json()
+                assert payload["state"] == "capturing"
+                assert payload["client"] == "pi"
+                assert payload["pid"] == sleeper_pid
+
+            assert opened["command"][:3] == ("open", "-a", "Terminal")
+            assert "--tap-client pi --tap-no-open --tap-no-live" in opened["script"]
+
+            async with session.delete(f"http://127.0.0.1:{port}/dashboard/captures", headers=headers) as resp:
+                assert resp.status == 200
+                assert (await resp.json())["state"] == "idle"
+
+            assert not sleeper_alive()
+    finally:
+        if sleeper_alive():
+            os.kill(sleeper_pid, signal.SIGKILL)
+        await server.stop()
+
+
+@pytest.mark.asyncio
+async def test_dashboard_capture_status_lists_every_agent_with_install_state(trace_db, monkeypatch) -> None:
+    import token_tap.capture.manager as capture_manager_module
+    from token_tap.agents import AGENTS
+
+    monkeypatch.setattr(capture_manager_module.sys, "platform", "darwin")
+    monkeypatch.setattr(shutil, "which", lambda name, *args, **kwargs: "/usr/local/bin/pi" if name == "pi" else None)
+    monkeypatch.setattr(codexapp_agent.PLUGIN, "resolve_executable", lambda client_cmd: None)
+
+    server = LiveViewerServer(port=0, dashboard_mode=True)
+    port = await server.start()
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.get(f"http://127.0.0.1:{port}/dashboard/captures") as resp:
+                payload = await resp.json()
+        clients = {client["id"]: client for client in payload["clients"]}
+        assert payload["enabled"] is True
+        assert set(clients) == set(AGENTS)
+        assert clients["pi"] == {
+            "id": "pi",
+            "label": "Pi",
+            "available": True,
+            "reason": None,
+            "terminal": True,
+            "command": "pi",
+            "install_url": AGENTS["pi"].config.install_url,
+        }
+        assert clients["claude"]["reason"] == "not_installed"
+        assert clients["codexapp"]["terminal"] is False
+        assert clients["codexapp"]["command"] is None
+        assert clients["codexapp"]["reason"] == "not_installed"
+    finally:
+        await server.stop()
+
+
+@pytest.mark.asyncio
+async def test_dashboard_rejects_unknown_capture_client(trace_db, monkeypatch) -> None:
+    import token_tap.capture.manager as capture_manager_module
+
+    monkeypatch.setattr(capture_manager_module.sys, "platform", "darwin")
+    server = LiveViewerServer(port=0, dashboard_mode=True)
+    port = await server.start()
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.get(f"http://127.0.0.1:{port}/dashboard/health") as resp:
+                token = (await resp.json())["quit_token"]
+            async with session.post(
+                f"http://127.0.0.1:{port}/dashboard/captures",
+                headers={"X-Claude-Tap-Dashboard-Token": token},
+                json={"client": "nope"},
+            ) as resp:
+                assert resp.status == 400
     finally:
         await server.stop()
 

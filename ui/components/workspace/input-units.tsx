@@ -8,6 +8,8 @@ import type { InputLayer } from "@/lib/types";
 
 export interface CategoryTotal {
   cached: number;
+  /* Some of its tokens are local estimates scaled to a measured total. */
+  estimated?: boolean;
   label: string;
   layer: InputLayer;
   tokens: number;
@@ -130,7 +132,7 @@ export function InputUnits({ categories, focus, onFocus, total }: { categories: 
             const color = categoryColor(category.label, category.layer);
             const faded = Boolean(focus) && focus?.label !== category.label;
             return <g className="t-fade" data-category={category.label} key={`${region.layer}-${category.label}`} style={{ opacity: faded ? 0.22 : 1 }}>
-              <title>{`${category.label}: ${formatNumber(category.tokens)} tokens, ${formatNumber(category.cached)} cached · ${cells.length} ${cells.length === 1 ? "square" : "squares"}`}</title>
+              <title>{`${category.label}: ${category.estimated ? "≈" : ""}${formatNumber(category.tokens)} tokens, ${formatNumber(category.cached)} cached · ${cells.length} ${cells.length === 1 ? "square" : "squares"}`}</title>
               {cells.map((cell, index) => <rect fill={color} fillOpacity={index < cached ? 0.38 : 1} height={CELL} key={index} rx={2.5} width={CELL} x={cell.x * PITCH} y={cell.y * PITCH}/>)}
             </g>;
           }))}

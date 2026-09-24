@@ -6,12 +6,8 @@ import json
 import pytest
 
 from token_tap import parse_args
-from token_tap.commands.cli import (
-    CLIENT_CONFIGS,
-    _detect_codebuddy_target,
-    _reverse_proxy_trace_options,
-    run_client,
-)
+from token_tap.agents.codebuddy import _detect_codebuddy_target
+from token_tap.commands.cli_clients import CLIENT_CONFIGS, _reverse_proxy_trace_options, run_client
 
 
 class _DummyProc:

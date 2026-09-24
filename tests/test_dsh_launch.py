@@ -5,8 +5,8 @@ import asyncio
 import pytest
 
 from token_tap import parse_args
-from token_tap.commands.cli import CLIENT_CONFIGS, _reverse_proxy_trace_options, run_client
-from token_tap.commands.cli_clients import _detect_dsh_target, _node_supports_env_proxy
+from token_tap.agents.dsh import _detect_dsh_target, _node_supports_env_proxy
+from token_tap.commands.cli_clients import CLIENT_CONFIGS, _reverse_proxy_trace_options, run_client
 
 
 class _DummyProc:
@@ -76,7 +76,7 @@ async def test_run_client_dsh_forward_enables_node_proxy_and_preserves_args(
     monkeypatch.setenv("NO_PROXY", "localhost,corp.example")
     monkeypatch.setenv("no_proxy", "127.0.0.1")
     monkeypatch.setattr("token_tap.commands.cli.shutil.which", lambda _: "/tmp/dsh")
-    monkeypatch.setattr("token_tap.commands.cli_clients._node_supports_env_proxy", lambda _: True)
+    monkeypatch.setattr("token_tap.agents.dsh._node_supports_env_proxy", lambda _: True)
     monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_create_subprocess_exec)
     monkeypatch.setattr("sys.stdin.isatty", lambda: False)
 
@@ -103,7 +103,7 @@ async def test_run_client_dsh_forward_rejects_node_without_env_proxy_support(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     monkeypatch.setattr("token_tap.commands.cli.shutil.which", lambda _: "/tmp/dsh")
-    monkeypatch.setattr("token_tap.commands.cli_clients._node_supports_env_proxy", lambda _: False)
+    monkeypatch.setattr("token_tap.agents.dsh._node_supports_env_proxy", lambda _: False)
 
     code = await run_client(43123, [], client="dsh", proxy_mode="forward")
 
@@ -121,8 +121,8 @@ def test_node_supports_env_proxy_probes_node_on_path(monkeypatch: pytest.MonkeyP
         captured["env"] = kwargs["env"]
         return type("Result", (), {"returncode": 0})()
 
-    monkeypatch.setattr("token_tap.commands.cli_clients.shutil.which", lambda cmd, path=None: "/opt/node")
-    monkeypatch.setattr("token_tap.commands.cli_clients.subprocess.run", fake_run)
+    monkeypatch.setattr("token_tap.agents.dsh.shutil.which", lambda cmd, path=None: "/opt/node")
+    monkeypatch.setattr("token_tap.agents.dsh.subprocess.run", fake_run)
 
     assert _node_supports_env_proxy({"PATH": "/opt/bin", "NODE_OPTIONS": "--inspect"})
     assert captured["cmd"] == ["/opt/node", "--use-env-proxy", "--version"]

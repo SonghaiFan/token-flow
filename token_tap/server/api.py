@@ -12,6 +12,13 @@ from urllib.parse import quote, urlsplit
 
 from aiohttp import web
 
+from token_tap.analysis.estimates import (
+    ESTIMATE_ENCODING,
+    MAX_ESTIMATE_CHARS,
+    MAX_ESTIMATE_TEXTS,
+    EstimatesUnavailable,
+    estimate_token_counts,
+)
 from token_tap.analysis.records import (
     _extract_metadata_from_record,
     _normalize_record_for_viewer,
@@ -26,6 +33,7 @@ from token_tap.analysis.sessions import (
     redact_dashboard_summary,
     select_trace_turn_records,
 )
+from token_tap.capture.manager import DEFAULT_CAPTURE_CLIENT, capture_clients
 from token_tap.core.compact_trace import build_compact_trace_bundle
 from token_tap.server.dashboard import read_dashboard_template
 from token_tap.server.shared_dashboard import token_tap_VERSION
@@ -149,19 +157,49 @@ class ServerAPI:
             )
         return None
 
+    async def _handle_token_estimates(self, request: web.Request) -> web.Response:
+        """Estimate token counts for prompt blocks with a local tokenizer."""
+        try:
+            payload = await request.json()
+        except ValueError:
+            return web.json_response({"error": "Body must be JSON"}, status=400)
+        texts = payload.get("texts") if isinstance(payload, dict) else None
+        if not isinstance(texts, list) or not all(isinstance(text, str) for text in texts):
+            return web.json_response({"error": "texts must be a list of strings"}, status=400)
+        if len(texts) > MAX_ESTIMATE_TEXTS or sum(len(text) for text in texts) > MAX_ESTIMATE_CHARS:
+            return web.json_response({"error": "Too much text to estimate in one request"}, status=413)
+        try:
+            counts = await asyncio.to_thread(estimate_token_counts, texts)
+        except EstimatesUnavailable as exc:
+            return web.json_response({"error": str(exc)}, status=501)
+        return web.json_response({"encoding": ESTIMATE_ENCODING, "counts": counts})
+
     async def _handle_capture_status(self, _request: web.Request) -> web.Response:
         return web.json_response(self.capture_manager.status(enabled=self.dashboard_mode))
 
     async def _handle_start_capture(self, request: web.Request) -> web.Response:
         if error := self._capture_mutation_error(request):
             return error
-        if not self.capture_manager.available:
+        client = DEFAULT_CAPTURE_CLIENT
+        if raw := await request.read():
+            try:
+                payload = json.loads(raw)
+            except ValueError:
+                return web.json_response({"error": "Capture request body must be JSON"}, status=400)
+            if isinstance(payload, dict) and payload.get("client") is not None:
+                client = payload["client"]
+        plugin = capture_clients().get(client)
+        if plugin is None:
+            return web.json_response({"error": f"Unsupported capture client: {client}"}, status=400)
+        if not self.capture_manager.client_available(client):
             return web.json_response(
-                {"error": "Codex App capture from the dashboard is currently available on macOS only"},
+                {
+                    "error": f"{plugin.picker_label} capture from the dashboard requires macOS with {plugin.picker_label} installed"
+                },
                 status=501,
             )
         try:
-            started = await self.capture_manager.start()
+            started = await self.capture_manager.start(client)
         except OSError:
             return web.json_response(self.capture_manager.status(enabled=self.dashboard_mode), status=500)
         if not started:

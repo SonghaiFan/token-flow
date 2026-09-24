@@ -5,14 +5,10 @@ import asyncio
 import pytest
 
 from token_tap import parse_args
+from token_tap.agents.grok import _detect_grok_target
 from token_tap.capture.proxy import _is_allowed_path, _matches_path_prefixes
-from token_tap.commands.cli import (
-    CLIENT_CONFIGS,
-    _reverse_proxy_path_prefixes,
-    _reverse_proxy_trace_options,
-    run_client,
-)
-from token_tap.commands.cli_clients import _detect_grok_target
+from token_tap.commands.cli import _reverse_proxy_path_prefixes
+from token_tap.commands.cli_clients import CLIENT_CONFIGS, _reverse_proxy_trace_options, run_client
 
 
 class _DummyProc:

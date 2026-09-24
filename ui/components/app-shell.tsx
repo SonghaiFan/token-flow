@@ -1,17 +1,22 @@
 "use client";
 
 import type { ReactNode } from "react";
-import { CaptureControl } from "./capture-control";
-import { ArrowLeftIcon, MoonIcon } from "./icons";
+import { CaptureIndicator } from "./capture-menu";
+import { ArrowLeftIcon, MoonIcon, MoreIcon } from "./icons";
+import { Menu } from "./menu";
 
 interface AppShellProps {
   children: ReactNode;
   onBack?: () => void;
   title?: string;
   meta?: ReactNode;
+  /* Low-frequency service actions, shown in the toolbar's ••• menu. */
+  menu?: (close: () => void) => ReactNode;
+  /* The running-capture Stop indicator; pages with their own capture control hide it. */
+  captureIndicator?: boolean;
 }
 
-export function AppShell({ children, onBack, title, meta }: AppShellProps) {
+export function AppShell({ captureIndicator = true, children, onBack, title, meta, menu }: AppShellProps) {
   function toggleTheme() {
     const root = document.documentElement;
     const next = root.dataset.theme === "dark" ? "light" : "dark";
@@ -43,10 +48,11 @@ export function AppShell({ children, onBack, title, meta }: AppShellProps) {
           ) : null}
           <div className="ml-auto flex min-w-0 items-center gap-2">
             {meta ? <div className="hidden min-w-0 items-center gap-4 text-xs text-muted lg:flex">{meta}</div> : null}
-            <CaptureControl />
-            <button aria-label="Toggle appearance" className="tf-icon-control grid place-items-center rounded-control border border-line bg-panel hover:bg-canvas" onClick={toggleTheme} type="button">
+            {captureIndicator ? <CaptureIndicator /> : null}
+            <button aria-label="Toggle appearance" className="tf-icon-control grid place-items-center rounded-control text-muted hover:bg-canvas hover:text-ink" onClick={toggleTheme} type="button">
               <MoonIcon className="size-[18px]" />
             </button>
+            {menu ? <Menu label="More actions" trigger={(props) => <button {...props} aria-label="More actions" className="tf-icon-control grid place-items-center rounded-control text-muted hover:bg-canvas hover:text-ink" type="button"><MoreIcon className="size-5"/></button>} width={240}>{menu}</Menu> : null}
           </div>
         </div>
       </header>

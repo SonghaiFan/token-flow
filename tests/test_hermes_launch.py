@@ -6,7 +6,8 @@ from pathlib import Path
 import pytest
 
 from token_tap import parse_args
-from token_tap.commands.cli import CLIENT_CONFIGS, ClientConfig, run_client
+from token_tap.agents.base import ClientConfig
+from token_tap.commands.cli_clients import CLIENT_CONFIGS, run_client
 
 
 class _DummyProc:

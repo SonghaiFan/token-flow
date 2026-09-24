@@ -41,10 +41,39 @@ composition without requiring users to understand provider protocols.
   inherited module name is a compatibility boundary, not the Token Flow product
   name. Do not rename it casually: stored traces, subprocess startup, exports,
   and tests still depend on it.
-- Keep backend modules grouped by responsibility: `capture/`, `core/`,
-  `storage/`, `analysis/`, `server/`, `commands/`, and generated `static_ui/`.
-  Package resources such as the HTML viewer templates and `model_prices.json`
-  remain at the `token_tap/` root.
+- Keep backend modules grouped by responsibility: `agents/`, `capture/`,
+  `core/`, `storage/`, `analysis/`, `server/`, `commands/`, and generated
+  `static_ui/`. Package resources such as the HTML viewer templates and
+  `model_prices.json` remain at the `token_tap/` root.
+
+## Agent and protocol plugins
+
+Supported clients are plugins; never branch on a client id outside its plugin.
+
+- **Agent, capture side:** `token_tap/agents/<id>.py` exports `PLUGIN`, an
+  `AgentPlugin` with its `ClientConfig` and only the launch hooks it needs
+  (target detection, env/args, preflight, exit handling, dashboard capture).
+  `token_tap/agents/__init__.py` is the only client list; the CLI, dashboard
+  Capture menu, and conversation labels all read it.
+- **Agent, view side:** `ui/lib/agents/<id>.tsx` owns what the harness means by
+  its content: declared content kinds, text patterns, injected-prompt prefixes,
+  system-text splitting, and section views. Agents without a plugin use
+  `fallbackAgent`.
+- **Protocol:** `ui/lib/protocols/<id>.ts` owns the wire format, whichever
+  agent sent it: which records are turns, the token/cache schema, where system
+  text and items live, typed content blocks, and server-side chaining. One agent
+  can speak several protocols (Pi uses Anthropic Messages or Chat Completions).
+- Token categories come from provider counts first: per-item attribution
+  (`blockTokens`), then prompt-cache counts (`cachePrefix`). A cache read counts
+  as carried from an earlier turn only when it equals that turn's tokens up to its
+  last breakpoint and the system text, tools, and items up to that breakpoint are
+  identical.
+- Only within a measured count that covers blocks of different classes may
+  blocks be sized by local tiktoken estimates (`/api/token-estimates`,
+  `o200k_base`). Estimates are scaled to that measured count, never change a
+  total, never replace per-item provider counts, and are always marked `≈`.
+- Shared section rendering primitives live in
+  `ui/components/workspace/section-views.tsx`, not in plugins.
 - `.agents/docs/standards/product-design-system.md` is the product and
   interaction contract for every user-facing surface.
 - `/Users/songhaifan/Documents/Token Flow/claude-tap` is a read-only upstream
@@ -71,7 +100,8 @@ composition without requiring users to understand provider protocols.
 - Use **Token Flow** in product copy, docs, packaging, and new identifiers.
 - Preserve raw captured evidence while adding structured and visual views.
 - Show `Unknown` when evidence is insufficient. Never invent category, query,
-  turn, token, or cache attribution.
+  turn, token, or cache attribution; the only exception is the marked local
+  token estimates described under agent and protocol plugins.
 - Cursor capture and transcript import are not supported. Keep legacy Cursor
   traces readable so previously stored conversations remain available.
 - Keep the dashboard and conversation workspace one coherent flow.

@@ -55,14 +55,14 @@ function locate(record: TraceRecord, parts: JsonPathPart[]): { blockId?: string;
       const source = body[field];
       const item = asRecord(Array.isArray(source) ? source[index] : undefined);
       const id = typeof item.id === "string" ? item.id : "";
-      let inputClass = classifyInput(item);
+      let inputClass = classifyInput(record, item);
       let blockId = id || undefined;
       if (item.role && !isToolEvent(item) && item.type !== "additional_tools") {
         const partKey = parts[5];
         const partIndex = (partKey === "content" || partKey === "parts") && typeof parts[6] === "number" ? parts[6] : 0;
         const content = item.content ?? item.parts;
         const part = Array.isArray(content) ? content[partIndex] : content;
-        inputClass = classifyInput(item, part, partIndex);
+        inputClass = classifyInput(record, item, part, partIndex);
         blockId = id ? `${id}:${partIndex}` : undefined;
       }
       return { blockId, color: categoryColor(inputClass.label, inputClass.layer), label: inputClass.label, location: `${LAYER_META[inputClass.layer].title} › ${inputClass.label}` };

@@ -1,13 +1,17 @@
 """Pytest configuration and shared fixtures."""
 
+import asyncio
 import os
 import shutil
+import socket
+import sys
 import tempfile
 from pathlib import Path
 
 import pytest
 
-from token_tap.commands.cli_clients import _extend_no_proxy
+from token_tap.agents.base import _extend_no_proxy
+from token_tap.server.shared_dashboard import stop_dashboard_service
 from token_tap.storage.trace_store import get_trace_store, reset_trace_store
 
 
@@ -82,6 +86,40 @@ def isolate_trace_store():
         os.environ.pop("CLOUDTAP_DB", None)
     else:
         os.environ["CLOUDTAP_DB"] = saved_legacy_db
+
+
+def _free_local_port() -> int:
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+        sock.bind(("127.0.0.1", 0))
+        return sock.getsockname()[1]
+
+
+def _is_port_listening(port: int) -> bool:
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+        sock.settimeout(0.2)
+        return sock.connect_ex(("127.0.0.1", port)) == 0
+
+
+@pytest.fixture(autouse=True)
+def isolate_shared_dashboard(monkeypatch):
+    """Keep tests off the user's real dashboard port and out of their browser.
+
+    CLI runs without ``--tap-no-live`` spawn a detached shared dashboard. On
+    the default port that would displace the user's dashboard and outlive the
+    test's temporary DB, so every test gets its own ephemeral port (inherited
+    by subprocesses through the environment) and anything left listening
+    there is stopped on teardown.
+    """
+    port = _free_local_port()
+    monkeypatch.setenv("TOKEN_FLOW_DASHBOARD_PORT", str(port))
+    monkeypatch.delenv("PACKLITE_DASHBOARD_PORT", raising=False)
+    monkeypatch.delenv("CLOUDTAP_DASHBOARD_PORT", raising=False)
+    if sys.platform != "win32":
+        # webbrowser honors $BROWSER; `true` accepts the URL and opens nothing.
+        monkeypatch.setenv("BROWSER", "true")
+    yield port
+    if _is_port_listening(port):
+        asyncio.run(stop_dashboard_service("127.0.0.1", port))
 
 
 @pytest.fixture

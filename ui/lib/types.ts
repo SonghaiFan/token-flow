@@ -45,9 +45,27 @@ export interface DeleteSessionsResult {
 
 export type CaptureState = "idle" | "starting" | "capturing" | "stopping" | "error";
 
-export interface CaptureStatus {
+export interface CaptureClient {
+  id: string;
+  label: string;
   available: boolean;
-  client: "codexapp";
+  /* Why it cannot start from the dashboard, when unavailable. */
+  reason?: "platform" | "not_installed" | null;
+  /* Interactive TUI clients open in their own Terminal window. */
+  terminal: boolean;
+  /* The command a Terminal client runs. */
+  command?: string | null;
+  install_url?: string;
+}
+
+export interface CaptureStatus {
+  /* The dashboard can start captures (false for a plain viewer). */
+  enabled?: boolean;
+  available: boolean;
+  client: string;
+  clients?: CaptureClient[];
+  /* Directory terminal clients start in. */
+  cwd?: string;
   state: CaptureState;
   pid?: number | null;
   started_at?: string | null;
@@ -107,6 +125,8 @@ export interface TokenCategory {
   fresh: number;
   color: string;
   aggregate?: boolean;
+  /* Sized by local tokenizer estimates scaled to a measured total. */
+  estimated?: boolean;
 }
 
 export interface TokenSelection {
@@ -142,7 +162,25 @@ export interface TurnModel {
   fresh: number;
   categories: TokenCategory[];
   itemStates: Record<string, ItemState>;
+  /* The input the model received: the request's own input, preceded by the context
+     and output of the turn named by `previous_response_id` when that was captured. */
+  context: {
+    input: unknown[];
+    chainedFromTurn?: string;
+    chainedItems: number;
+    chainBroken: boolean;
+  };
+  /* Set when prompt-cache counts prove this turn reused an earlier turn's prompt:
+     `carried` tokens came from that turn, `added` tokens are new in this one. */
+  cacheChain?: {
+    fromTurn: string;
+    carried: number;
+    added: number;
+  };
   /* Captured thread identity; the token flow only connects turns in the same lane. */
   lane: string;
+  /* Plugins that read this turn: the wire protocol and the agent harness. */
+  protocol: string;
+  agent: string;
   record: TraceRecord;
 }

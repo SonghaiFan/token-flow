@@ -179,6 +179,9 @@ class _RequestAdapter:
     async def json(self) -> Any:
         return await self._request.json()
 
+    async def read(self) -> bytes:
+        return await self._request.body()
+
 
 class _StreamAdapter:
     """Queue-backed response interface consumed by the existing SSE handlers."""
@@ -282,6 +285,7 @@ def create_app(controller) -> FastAPI:
         ("/api/traces/{date}", "GET", "_handle_traces_by_date", False),
         ("/api/traces/{date}", "DELETE", "_handle_delete_traces_by_date", False),
         ("/api/agents", "GET", "_handle_agents", False),
+        ("/api/token-estimates", "POST", "_handle_token_estimates", False),
         ("/api/sessions", "GET", "_handle_sessions", False),
         ("/api/sessions", "DELETE", "_handle_delete_sessions", False),
         ("/api/sessions/{session_id}", "DELETE", "_handle_delete_session", False),

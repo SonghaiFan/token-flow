@@ -3,14 +3,16 @@ from __future__ import annotations
 import asyncio
 import os
 import re
+import shutil
 import subprocess
 from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
 
-from token_tap.commands import cli_clients
-from token_tap.commands.cli import run_client
+from token_tap.agents import codexapp as codexapp_agent
+from token_tap.agents import get_agent
+from token_tap.commands.cli_clients import run_client
 
 
 class _DummyProc:
@@ -75,14 +77,14 @@ def test_codex_app_existing_processes_filters_current_pid_and_legacy_chatgpt(
             ),
         )
 
-    monkeypatch.setattr(cli_clients.sys, "platform", "darwin")
-    monkeypatch.setattr(cli_clients.subprocess, "run", fake_run)
+    monkeypatch.setattr(codexapp_agent.sys, "platform", "darwin")
+    monkeypatch.setattr(codexapp_agent.subprocess, "run", fake_run)
 
-    assert cli_clients._codex_app_existing_processes() == [
+    assert codexapp_agent._codex_app_existing_processes() == [
         f"123 {chatgpt_codex}",
         "124 /Applications/Codex.app/Contents/Resources/codex app-server",
     ]
-    assert captured["cmd"] == ["pgrep", "-fl", f"({cli_clients._CODEX_APP_PROCESS_RE})"]
+    assert captured["cmd"] == ["pgrep", "-fl", f"({codexapp_agent._CODEX_APP_PROCESS_RE})"]
     assert captured["kwargs"]["timeout"] == 2
 
 
@@ -91,10 +93,10 @@ def test_codex_app_isolated_profile_dir_is_unique_per_call(
     tmp_path: Path,
 ) -> None:
     monkeypatch.delenv("CODEX_APP_USER_DATA_DIR", raising=False)
-    monkeypatch.setattr(cli_clients, "_CODEX_APP_ISOLATED_PROFILE_ROOT", tmp_path / "profiles")
+    monkeypatch.setattr(codexapp_agent, "_CODEX_APP_ISOLATED_PROFILE_ROOT", tmp_path / "profiles")
 
-    first = cli_clients._codex_app_isolated_profile_dir()
-    second = cli_clients._codex_app_isolated_profile_dir()
+    first = codexapp_agent._codex_app_isolated_profile_dir()
+    second = codexapp_agent._codex_app_isolated_profile_dir()
 
     assert first != second
     assert first.parent == tmp_path / "profiles"
@@ -113,35 +115,35 @@ def test_codex_app_existing_processes_matches_custom_executable(
         captured["cmd"] = cmd
         return SimpleNamespace(returncode=0, stdout=f"123 {configured}\n")
 
-    monkeypatch.setattr(cli_clients.sys, "platform", "darwin")
-    monkeypatch.setenv(cli_clients._CODEX_APP_EXECUTABLE_ENV, str(configured))
-    monkeypatch.setattr(cli_clients.subprocess, "run", fake_run)
+    monkeypatch.setattr(codexapp_agent.sys, "platform", "darwin")
+    monkeypatch.setenv(codexapp_agent._CODEX_APP_EXECUTABLE_ENV, str(configured))
+    monkeypatch.setattr(codexapp_agent.subprocess, "run", fake_run)
 
-    assert cli_clients._codex_app_existing_processes() == [f"123 {configured}"]
+    assert codexapp_agent._codex_app_existing_processes() == [f"123 {configured}"]
     assert captured["cmd"] == [
         "pgrep",
         "-fl",
-        f"({cli_clients._CODEX_APP_PROCESS_RE}|{re.escape(str(configured))})",
+        f"({codexapp_agent._CODEX_APP_PROCESS_RE}|{re.escape(str(configured))})",
     ]
 
 
 def test_codex_app_existing_processes_handles_unsupported_platform_and_pgrep_failures(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(cli_clients.sys, "platform", "linux")
-    assert cli_clients._codex_app_existing_processes() == []
+    monkeypatch.setattr(codexapp_agent.sys, "platform", "linux")
+    assert codexapp_agent._codex_app_existing_processes() == []
 
-    monkeypatch.setattr(cli_clients.sys, "platform", "darwin")
+    monkeypatch.setattr(codexapp_agent.sys, "platform", "darwin")
     monkeypatch.setattr(
-        cli_clients.subprocess, "run", lambda *_args, **_kwargs: SimpleNamespace(returncode=2, stdout="")
+        codexapp_agent.subprocess, "run", lambda *_args, **_kwargs: SimpleNamespace(returncode=2, stdout="")
     )
-    assert cli_clients._codex_app_existing_processes() == []
+    assert codexapp_agent._codex_app_existing_processes() == []
 
     def raise_os_error(*_args: object, **_kwargs: object) -> SimpleNamespace:
         raise OSError("pgrep unavailable")
 
-    monkeypatch.setattr(cli_clients.subprocess, "run", raise_os_error)
-    assert cli_clients._codex_app_existing_processes() == []
+    monkeypatch.setattr(codexapp_agent.subprocess, "run", raise_os_error)
+    assert codexapp_agent._codex_app_existing_processes() == []
 
 
 def test_quit_codex_app_uses_bundle_id_and_reports_failures(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -152,27 +154,27 @@ def test_quit_codex_app_uses_bundle_id_and_reports_failures(monkeypatch: pytest.
         captured["kwargs"] = kwargs
         return SimpleNamespace(returncode=0)
 
-    monkeypatch.setattr(cli_clients.subprocess, "run", fake_run)
+    monkeypatch.setattr(codexapp_agent.subprocess, "run", fake_run)
 
-    assert cli_clients._quit_codex_app() is True
+    assert codexapp_agent._quit_codex_app() is True
     assert captured["cmd"] == ["osascript", "-e", 'tell application id "com.openai.codex" to quit']
     assert captured["kwargs"]["timeout"] == 5
 
-    monkeypatch.setattr(cli_clients.subprocess, "run", lambda *_args, **_kwargs: SimpleNamespace(returncode=1))
-    assert cli_clients._quit_codex_app() is False
+    monkeypatch.setattr(codexapp_agent.subprocess, "run", lambda *_args, **_kwargs: SimpleNamespace(returncode=1))
+    assert codexapp_agent._quit_codex_app() is False
 
     def raise_subprocess_error(*_args: object, **_kwargs: object) -> SimpleNamespace:
         raise subprocess.SubprocessError("osascript failed")
 
-    monkeypatch.setattr(cli_clients.subprocess, "run", raise_subprocess_error)
-    assert cli_clients._quit_codex_app() is False
+    monkeypatch.setattr(codexapp_agent.subprocess, "run", raise_subprocess_error)
+    assert codexapp_agent._quit_codex_app() is False
 
 
 def test_codex_app_executable_candidates_prefers_env_override(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    monkeypatch.setattr(cli_clients.sys, "platform", "darwin")
-    monkeypatch.setenv(cli_clients._CODEX_APP_EXECUTABLE_ENV, "~/custom/Codex")
+    monkeypatch.setattr(codexapp_agent.sys, "platform", "darwin")
+    monkeypatch.setenv(codexapp_agent._CODEX_APP_EXECUTABLE_ENV, "~/custom/Codex")
 
-    candidates = cli_clients._codex_app_executable_candidates()
+    candidates = codexapp_agent._codex_app_executable_candidates()
 
     assert candidates[0] == Path("~/custom/Codex").expanduser()
     assert Path("/Applications/ChatGPT.app/Contents/MacOS/ChatGPT") in candidates
@@ -186,14 +188,14 @@ def test_codex_app_executable_candidates_prefers_env_override(monkeypatch: pytes
 
 
 def test_codex_app_process_re_matches_chatgpt_and_legacy_codex_paths() -> None:
-    pattern = re.compile(cli_clients._CODEX_APP_PROCESS_RE)
+    pattern = re.compile(codexapp_agent._CODEX_APP_PROCESS_RE)
     assert pattern.search("/Applications/ChatGPT.app/Contents/MacOS/ChatGPT")
     assert pattern.search("/Applications/ChatGPT.app/Contents/Resources/codex")
     assert pattern.search("/Applications/Codex.app/Contents/MacOS/Codex")
     assert pattern.search("/Applications/Codex.app/Contents/Resources/codex app-server")
     assert not pattern.search("/Applications/Safari.app/Contents/MacOS/Safari")
     # pgrep on macOS uses POSIX ERE and rejects Python-style non-capturing groups.
-    assert "(?:" not in cli_clients._CODEX_APP_PROCESS_RE
+    assert "(?:" not in codexapp_agent._CODEX_APP_PROCESS_RE
 
 
 def test_is_codex_desktop_executable_requires_codex_bundle_id_for_chatgpt_app(
@@ -211,7 +213,7 @@ def test_is_codex_desktop_executable_requires_codex_bundle_id_for_chatgpt_app(
 </dict></plist>
 """
     )
-    assert cli_clients._is_codex_desktop_executable(chatgpt) is False
+    assert codexapp_agent._is_codex_desktop_executable(chatgpt) is False
 
     info.write_bytes(
         b"""<?xml version="1.0" encoding="UTF-8"?>
@@ -221,12 +223,12 @@ def test_is_codex_desktop_executable_requires_codex_bundle_id_for_chatgpt_app(
 </dict></plist>
 """
     )
-    assert cli_clients._is_codex_desktop_executable(chatgpt) is True
+    assert codexapp_agent._is_codex_desktop_executable(chatgpt) is True
 
     legacy = tmp_path / "Codex.app" / "Contents" / "MacOS" / "Codex"
     legacy.parent.mkdir(parents=True)
     legacy.write_text("")
-    assert cli_clients._is_codex_desktop_executable(legacy) is True
+    assert codexapp_agent._is_codex_desktop_executable(legacy) is True
 
 
 def test_resolve_client_executable_skips_non_codex_chatgpt_app(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
@@ -244,24 +246,23 @@ def test_resolve_client_executable_skips_non_codex_chatgpt_app(monkeypatch: pyte
     legacy = tmp_path / "Codex.app" / "Contents" / "MacOS" / "Codex"
     legacy.parent.mkdir(parents=True)
     legacy.write_text("")
-    monkeypatch.delenv(cli_clients._CODEX_APP_EXECUTABLE_ENV, raising=False)
+    monkeypatch.delenv(codexapp_agent._CODEX_APP_EXECUTABLE_ENV, raising=False)
     monkeypatch.setattr(
-        cli_clients,
+        codexapp_agent,
         "_codex_app_executable_candidates",
         lambda: (wrong_chatgpt, legacy),
     )
 
-    cfg = cli_clients.CLIENT_CONFIGS["codexapp"]
-    assert cli_clients._resolve_client_executable("codexapp", cfg, None) == str(legacy)
+    assert get_agent("codexapp").resolve_executable(None) == str(legacy)
 
 
 def test_codex_app_executable_candidates_empty_on_non_macos_without_override(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(cli_clients.sys, "platform", "linux")
-    monkeypatch.delenv(cli_clients._CODEX_APP_EXECUTABLE_ENV, raising=False)
+    monkeypatch.setattr(codexapp_agent.sys, "platform", "linux")
+    monkeypatch.delenv(codexapp_agent._CODEX_APP_EXECUTABLE_ENV, raising=False)
 
-    assert cli_clients._codex_app_executable_candidates() == ()
+    assert codexapp_agent._codex_app_executable_candidates() == ()
 
 
 def test_resolve_client_executable_uses_env_override_before_default_install(
@@ -269,15 +270,14 @@ def test_resolve_client_executable_uses_env_override_before_default_install(
 ) -> None:
     configured = tmp_path / "Codex"
     configured.write_text("")
-    monkeypatch.setenv(cli_clients._CODEX_APP_EXECUTABLE_ENV, str(configured))
+    monkeypatch.setenv(codexapp_agent._CODEX_APP_EXECUTABLE_ENV, str(configured))
     monkeypatch.setattr(
-        cli_clients,
+        codexapp_agent,
         "_codex_app_executable_candidates",
         lambda: (configured, Path("/Applications/Codex.app/Contents/MacOS/Codex")),
     )
 
-    cfg = cli_clients.CLIENT_CONFIGS["codexapp"]
-    resolved = cli_clients._resolve_client_executable("codexapp", cfg, None)
+    resolved = get_agent("codexapp").resolve_executable(None)
 
     assert resolved == str(configured)
 
@@ -285,18 +285,16 @@ def test_resolve_client_executable_uses_env_override_before_default_install(
 def test_resolve_client_executable_returns_none_when_no_candidate_exists(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(cli_clients, "_codex_app_executable_candidates", lambda: (Path("/nonexistent/Codex"),))
+    monkeypatch.setattr(codexapp_agent, "_codex_app_executable_candidates", lambda: (Path("/nonexistent/Codex"),))
 
-    cfg = cli_clients.CLIENT_CONFIGS["codexapp"]
-    assert cli_clients._resolve_client_executable("codexapp", cfg, None) is None
+    assert get_agent("codexapp").resolve_executable(None) is None
 
 
 def test_resolve_client_executable_prefers_explicit_client_cmd(tmp_path: Path) -> None:
     wrapper_cmd = tmp_path / "codex-wrapper"
     wrapper_cmd.write_text("")
 
-    cfg = cli_clients.CLIENT_CONFIGS["codexapp"]
-    resolved = cli_clients._resolve_client_executable("codexapp", cfg, str(wrapper_cmd))
+    resolved = get_agent("codexapp").resolve_executable(str(wrapper_cmd))
 
     assert resolved == str(wrapper_cmd)
 
@@ -304,24 +302,23 @@ def test_resolve_client_executable_prefers_explicit_client_cmd(tmp_path: Path) -
 def test_resolve_client_executable_falls_back_to_path_lookup_for_other_clients(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(cli_clients.shutil, "which", lambda cmd: f"/usr/local/bin/{cmd}")
+    monkeypatch.setattr(shutil, "which", lambda cmd: f"/usr/local/bin/{cmd}")
 
-    cfg = cli_clients.CLIENT_CONFIGS["claude"]
-    resolved = cli_clients._resolve_client_executable("claude", cfg, None)
+    resolved = get_agent("claude").resolve_executable(None)
 
     assert resolved == "/usr/local/bin/claude"
 
 
 @pytest.mark.asyncio
 async def test_wait_for_codex_app_exit_times_out(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(cli_clients, "_codex_app_existing_processes", lambda: ["123 Codex"])
+    monkeypatch.setattr(codexapp_agent, "_codex_app_existing_processes", lambda: ["123 Codex"])
 
     async def fake_sleep(_seconds: float) -> None:
         return None
 
     monkeypatch.setattr(asyncio, "sleep", fake_sleep)
 
-    assert await cli_clients._wait_for_codex_app_exit(timeout_seconds=0) is False
+    assert await codexapp_agent._wait_for_codex_app_exit(timeout_seconds=0) is False
 
 
 @pytest.mark.asyncio
@@ -332,7 +329,7 @@ async def test_prepare_codex_app_forward_launch_uses_isolated_profile_when_alrea
 ) -> None:
     profile = tmp_path / "isolated-profile"
     monkeypatch.setattr(
-        cli_clients,
+        codexapp_agent,
         "_codex_app_existing_processes",
         lambda: [
             "123 /Applications/Codex.app/Contents/MacOS/Codex",
@@ -341,9 +338,9 @@ async def test_prepare_codex_app_forward_launch_uses_isolated_profile_when_alrea
             "126 /Applications/Codex.app/Contents/Resources/codex app-server",
         ],
     )
-    monkeypatch.setattr(cli_clients, "_codex_app_isolated_profile_dir", lambda: profile)
+    monkeypatch.setattr(codexapp_agent, "_codex_app_isolated_profile_dir", lambda: profile)
 
-    plan = await cli_clients._prepare_codex_app_forward_launch()
+    plan = await codexapp_agent._prepare_codex_app_forward_launch()
 
     assert plan.proceed is True
     assert plan.user_data_dir == profile
@@ -358,11 +355,11 @@ async def test_prepare_codex_app_forward_launch_uses_isolated_profile_when_alrea
 async def test_prepare_codex_app_forward_launch_keeps_default_profile_when_idle(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(cli_clients, "_codex_app_existing_processes", lambda: [])
+    monkeypatch.setattr(codexapp_agent, "_codex_app_existing_processes", lambda: [])
 
-    plan = await cli_clients._prepare_codex_app_forward_launch()
+    plan = await codexapp_agent._prepare_codex_app_forward_launch()
 
-    assert plan == cli_clients.CodexAppLaunchPlan(proceed=True, user_data_dir=None)
+    assert plan == codexapp_agent.CodexAppLaunchPlan(proceed=True, user_data_dir=None)
 
 
 @pytest.mark.asyncio
@@ -373,10 +370,10 @@ async def test_prepare_codex_app_forward_launch_forces_isolated_profile_from_env
 ) -> None:
     profile = tmp_path / "forced-profile"
     monkeypatch.setenv("CODEX_APP_USER_DATA_DIR", str(profile))
-    monkeypatch.setattr(cli_clients, "_codex_app_existing_processes", lambda: [])
-    monkeypatch.setattr(cli_clients, "_codex_app_isolated_profile_dir", lambda: profile)
+    monkeypatch.setattr(codexapp_agent, "_codex_app_existing_processes", lambda: [])
+    monkeypatch.setattr(codexapp_agent, "_codex_app_isolated_profile_dir", lambda: profile)
 
-    plan = await cli_clients._prepare_codex_app_forward_launch()
+    plan = await codexapp_agent._prepare_codex_app_forward_launch()
 
     assert plan.proceed is True
     assert plan.user_data_dir == profile
@@ -403,10 +400,9 @@ async def test_run_client_codexapp_forward_launches_app_with_proxy_env(
         return _DummyProc()
 
     monkeypatch.setattr(
-        "token_tap.commands.cli_clients._resolve_client_executable",
-        lambda client, cfg, client_cmd: "/Applications/Codex.app/Contents/MacOS/Codex",
+        codexapp_agent.PLUGIN, "resolve_executable", lambda client_cmd: "/Applications/Codex.app/Contents/MacOS/Codex"
     )
-    monkeypatch.setattr("token_tap.commands.cli_clients._codex_app_existing_processes", lambda: [])
+    monkeypatch.setattr("token_tap.agents.codexapp._codex_app_existing_processes", lambda: [])
     monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_create_subprocess_exec)
     monkeypatch.setattr("sys.stdin.isatty", lambda: False)
 
@@ -450,14 +446,15 @@ async def test_run_client_codexapp_forward_launches_isolated_instance_when_app_r
         return _DummyProc()
 
     monkeypatch.setattr(
-        "token_tap.commands.cli_clients._resolve_client_executable",
-        lambda client, cfg, client_cmd: "/Applications/ChatGPT.app/Contents/MacOS/ChatGPT",
+        codexapp_agent.PLUGIN,
+        "resolve_executable",
+        lambda client_cmd: "/Applications/ChatGPT.app/Contents/MacOS/ChatGPT",
     )
     monkeypatch.setattr(
-        "token_tap.commands.cli_clients._codex_app_existing_processes",
+        "token_tap.agents.codexapp._codex_app_existing_processes",
         lambda: ["123 /Applications/ChatGPT.app/Contents/MacOS/ChatGPT"],
     )
-    monkeypatch.setattr("token_tap.commands.cli_clients._codex_app_isolated_profile_dir", lambda: profile)
+    monkeypatch.setattr("token_tap.agents.codexapp._codex_app_isolated_profile_dir", lambda: profile)
     monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_create_subprocess_exec)
 
     code = await run_client(43123, [], client="codexapp", proxy_mode="forward")
@@ -486,16 +483,15 @@ async def test_run_client_codexapp_forward_respects_preflighted_isolated_profile
         captured["cmd"] = cmd
         return _DummyProc()
 
-    async def fail_prepare() -> cli_clients.CodexAppLaunchPlan:
+    async def fail_prepare() -> codexapp_agent.CodexAppLaunchPlan:
         nonlocal prepare_called
         prepare_called = True
         raise AssertionError("prepare should be skipped when preflighted")
 
     monkeypatch.setattr(
-        "token_tap.commands.cli_clients._resolve_client_executable",
-        lambda client, cfg, client_cmd: "/Applications/Codex.app/Contents/MacOS/Codex",
+        codexapp_agent.PLUGIN, "resolve_executable", lambda client_cmd: "/Applications/Codex.app/Contents/MacOS/Codex"
     )
-    monkeypatch.setattr("token_tap.commands.cli_clients._prepare_codex_app_forward_launch", fail_prepare)
+    monkeypatch.setattr("token_tap.agents.codexapp._prepare_codex_app_forward_launch", fail_prepare)
     monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_create_subprocess_exec)
 
     code = await run_client(
@@ -503,8 +499,7 @@ async def test_run_client_codexapp_forward_respects_preflighted_isolated_profile
         [],
         client="codexapp",
         proxy_mode="forward",
-        codex_app_preflighted=True,
-        codex_app_user_data_dir=profile,
+        launch_state={"user_data_dir": profile},
     )
 
     assert code == 0

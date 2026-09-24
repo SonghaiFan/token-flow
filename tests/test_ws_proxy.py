@@ -13,9 +13,9 @@ import pytest
 from aiohttp import web
 from yarl import URL
 
+from token_tap.agents.base import _extend_no_proxy
 from token_tap.capture.proxy import proxy_handler
 from token_tap.capture.ws_proxy import _build_ws_record, _get_ws_proxy_settings
-from token_tap.commands.cli_clients import _extend_no_proxy
 from token_tap.storage.trace import TraceWriter
 from token_tap.storage.trace_store import get_trace_store, reset_trace_store
 

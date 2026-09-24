@@ -9,6 +9,7 @@ from datetime import datetime, timezone
 from typing import Any
 from urllib.parse import parse_qsl, urlencode, urlparse, urlsplit, urlunsplit
 
+from token_tap.agents import dashboard_labels
 from token_tap.core.bedrock import bedrock_model_from_path
 from token_tap.core.trace_encoding import (
     _decode_bedrock_eventstream_events,
@@ -22,22 +23,7 @@ from token_tap.storage.trace_store import SessionQuery, TraceStore, get_trace_st
 
 _DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 
-CLIENT_LABELS = {
-    "agy": "Antigravity",
-    "antigravity": "Antigravity",
-    "claude": "Claude Code",
-    "codex": "Codex",
-    "codexapp": "Codex App",
-    "cursor": "Cursor",
-    "gemini": "Gemini",
-    "hermes": "Hermes",
-    "kimi": "Kimi",
-    "kimi-code": "Kimi Code",
-    "mimo": "MiMo Code",
-    "opencode": "OpenCode",
-    "pi": "Pi",
-    "qoder": "Qoder",
-}
+CLIENT_LABELS = dashboard_labels()
 DASHBOARD_SUMMARY_VERSION = 7
 VALID_SESSION_STATUSES = {"active", "complete", "error", "empty"}
 _REDACTED_VALUE = "REDACTED"

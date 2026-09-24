@@ -23,33 +23,14 @@ from urllib.parse import urlparse
 import aiohttp
 from aiohttp import web
 
+from token_tap.agents import get_agent
+from token_tap.agents.base import _extend_no_proxy
 from token_tap.capture.certs import CertificateAuthority, ensure_ca, is_macos_ca_trusted, trust_macos_ca
 from token_tap.capture.forward_proxy import ForwardProxyServer
 from token_tap.capture.proxy import proxy_handler
 from token_tap.commands.cli_clients import (
-    _CODEX_CHATGPT_TARGET,
     CLIENT_CONFIGS,
-    TARGET_DETECTORS,
-    ClientConfig,
-    _codex_config_override_value,
-    _codex_config_override_values,
-    _codex_home,
-    _codex_profile_arg,
-    _codex_selected_provider_base_url_key,
-    _detect_claude_target,
-    _detect_codebuddy_target,
-    _detect_codex_target,
-    _extend_no_proxy,
-    _has_settings_arg,
-    _maybe_rewrite_hermes_gateway_start,
-    _prepare_codex_app_forward_launch,
-    _read_codebuddy_endpoint_cache,
-    _read_codex_config,
-    _read_settings_env_base_url,
     _reverse_proxy_trace_options,
-    _selected_codex_provider_base_url,
-    _settings_arg,
-    _toml_dotted_key_segment,
     run_client,
 )
 from token_tap.commands.cli_output import print_status as _print
@@ -114,27 +95,8 @@ try:
 except Exception:
     __version__ = "0.0.0"
 
-_CLI_COMPAT_EXPORTS = (
-    shutil,
-    ClientConfig,
-    _CODEX_CHATGPT_TARGET,
-    _codex_config_override_value,
-    _codex_config_override_values,
-    _codex_home,
-    _codex_profile_arg,
-    _codex_selected_provider_base_url_key,
-    _detect_claude_target,
-    _detect_codebuddy_target,
-    _extend_no_proxy,
-    _has_settings_arg,
-    _maybe_rewrite_hermes_gateway_start,
-    _read_codebuddy_endpoint_cache,
-    _read_codex_config,
-    _read_settings_env_base_url,
-    _selected_codex_provider_base_url,
-    _settings_arg,
-    _toml_dotted_key_segment,
-)
+# Tests patch ``cli.shutil.which`` to fake installed clients.
+_CLI_COMPAT_EXPORTS = (shutil,)
 
 
 def _open_browser(url: str) -> None:
@@ -268,14 +230,12 @@ async def _async_main(args: argparse.Namespace) -> int:
     effective_proxy_mode = args.proxy_mode
     trace_metadata = {"client": args.client, "proxy_mode": effective_proxy_mode}
 
-    codex_app_preflighted = False
-    codex_app_user_data_dir = None
-    if args.client == "codexapp" and args.proxy_mode == "forward" and not args.no_launch:
-        launch_plan = await _prepare_codex_app_forward_launch()
-        if not launch_plan.proceed:
+    # Plugin preflight runs before the proxy starts so it can abort cleanly.
+    launch_state: dict[str, object] | None = None
+    if not args.no_launch:
+        launch_state = await get_agent(args.client).prepare_launch(args.proxy_mode)
+        if launch_state is None:
             return 1
-        codex_app_preflighted = True
-        codex_app_user_data_dir = launch_plan.user_data_dir
 
     ca_cert_path: Path | None = None
     ca_key_path: Path | None = None
@@ -421,8 +381,7 @@ async def _async_main(args: argparse.Namespace) -> int:
                     ca_cert_path=ca_cert_path,
                     client_cmd=getattr(args, "client_cmd", None),
                     capture_only=capture_only,
-                    codex_app_preflighted=codex_app_preflighted,
-                    codex_app_user_data_dir=codex_app_user_data_dir,
+                    launch_state=launch_state,
                 )
             except asyncio.CancelledError:
                 pass
@@ -817,20 +776,13 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     # 127.0.0.1 otherwise (launching the client locally).
     if args.host is None:
         args.host = "0.0.0.0" if args.no_launch else "127.0.0.1"
+    plugin = get_agent(args.client)
     if args.target is None:
-        if args.client == "codex":
-            args.target = _detect_codex_target(claude_args)
-        elif args.client == "kimi-code":
-            args.target = TARGET_DETECTORS["kimi-code"](claude_args)
-        elif args.client == "openclaw":
-            args.target = TARGET_DETECTORS["openclaw"](claude_args)
-        else:
-            detector = TARGET_DETECTORS.get(args.client)
-            args.target = detector() if detector else client_cfg.default_target
+        args.target = plugin.detect_target(claude_args)
     if args.proxy_mode is None:
         args.proxy_mode = client_cfg.default_proxy_mode
-    if args.client == "codexapp" and args.proxy_mode != "forward":
-        tap_parser.error("--tap-client codexapp only supports forward proxy mode")
+    if plugin.forward_only and args.proxy_mode != "forward":
+        tap_parser.error(f"--tap-client {args.client} only supports forward proxy mode")
     if args.trust_ca and args.proxy_mode != "forward":
         tap_parser.error("--tap-trust-ca only applies to forward proxy mode")
     # Validate --tap-allow-path prefixes
