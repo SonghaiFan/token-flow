@@ -1,13 +1,17 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { categoryColor } from "@/lib/category-palette";
+import { categoryColor, FADED_MARK_OPACITY } from "@/lib/category-palette";
 import { formatCompact, formatDuration, formatNumber, formatTime } from "@/lib/format";
 import { LAYER_META, LAYER_ORDER, layerTotals } from "@/lib/token-model";
 import { queryGroups } from "@/lib/turn-order";
 import type { InputLayer, TokenSelection, TurnModel } from "@/lib/types";
-import { SearchIcon } from "../icons";
-import { Segmented } from "../motion";
+import { Badge, Swatch } from "../ui/badge";
+import { IconButton } from "../ui/button";
+import { EmptyState } from "../ui/feedback";
+import { SearchField } from "../ui/field";
+import { SearchIcon } from "../ui/icons";
+import { Segmented } from "../ui/segmented";
 
 /* Fixed geometry keeps every Sankey node and ribbon aligned with its HTML row. */
 const ROW = 56;
@@ -253,35 +257,30 @@ export function TurnFlow({ focus = null, onSelectNode, onSelectTurn, selected, s
     onSelectNode(row.index, { blockId: node.blockIds[0] || "", blockIds: node.blockIds, label: node.label, layer: layerNode ? node.layer : undefined, turnId: turn.id });
   };
 
-  return <aside aria-label="Token flow" className="min-w-0 border-b border-line bg-panel [--text-w:8.5rem] sm:[--text-w:10rem] lg:sticky lg:top-[68px] lg:flex lg:h-[calc(100dvh-80px)] lg:flex-col lg:rounded-panel lg:border lg:shadow-sm">
-    <div className="space-y-2 border-b border-line px-3 py-2.5">
+  return <aside aria-label="Token flow" className="min-w-0 border-b border-line bg-panel [--text-w:8.5rem] sm:[--text-w:10rem] lg:tf-panel lg:sticky lg:top-[calc(var(--tf-toolbar-height)+0.75rem)] lg:flex lg:h-[calc(100dvh-var(--tf-toolbar-height)-1.5rem)] lg:flex-col">
+    <div className="tf-inset space-y-2 border-b border-line py-2">
       <div className="flex items-center gap-2">
         {/* The overview is the flow's resting state; this line returns to it. */}
-        <button aria-current={selected === null ? "page" : undefined} className={`tf-control -ml-1 flex min-w-0 flex-1 items-baseline gap-2 rounded-control px-1 text-left transition ${selected === null ? "text-ink" : "text-muted hover:text-ink"}`} onClick={() => onSelectTurn(null)} title="Conversation overview (Esc)" type="button">
+        <button aria-current={selected === null ? "page" : undefined} className={`tf-control -ml-2 flex min-w-0 flex-1 items-center gap-2 rounded-control px-2 text-left transition-colors hover:bg-fill-hover ${selected === null ? "text-ink" : "text-muted hover:text-ink"}`} onClick={() => onSelectTurn(null)} title="Conversation overview (Esc)" type="button">
           <span className="whitespace-nowrap text-sm font-semibold">{turns.length} {turns.length === 1 ? "turn" : "turns"}</span>
           <span className="hidden truncate font-mono text-xs text-muted sm:inline">{formatCompact(totalInput)} input</span>
         </button>
-        {turns.length >= SEARCH_THRESHOLD ? <button aria-expanded={searchOpen} aria-label="Search turns" className={`tf-icon-control grid shrink-0 place-items-center rounded-control hover:bg-canvas ${searchOpen || query ? "text-ink" : "text-muted"}`} onClick={() => { const next = !searchOpen; setSearchOpen(next); if (!next) setQuery(""); else window.requestAnimationFrame(() => searchRef.current?.focus()); }} title="Search turns (/)" type="button"><SearchIcon className="size-[18px]"/></button> : null}
+        {turns.length >= SEARCH_THRESHOLD ? <IconButton active={searchOpen || Boolean(query)} aria-expanded={searchOpen} label="Search turns" onClick={() => { const next = !searchOpen; setSearchOpen(next); if (!next) setQuery(""); else window.requestAnimationFrame(() => searchRef.current?.focus()); }} title="Search turns (/)"><SearchIcon/></IconButton> : null}
         <Segmented compact label="Flow nodes" onChange={setGranularity} options={[["layers", "Layers"], ["categories", "Categories"]]} value={granularity}/>
       </div>
-      {searchOpen || query ? <label className="relative block">
-        <span className="sr-only">Search turns</span>
-        <SearchIcon className="pointer-events-none absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-muted"/>
-        <input className="tf-control w-full rounded-control border border-line bg-canvas pl-8 pr-8 text-sm outline-none placeholder:text-muted" onChange={(event) => setQuery(event.target.value)} onKeyDown={(event) => { if (event.key === "Escape") { event.stopPropagation(); setQuery(""); setSearchOpen(false); } }} autoFocus={!query} placeholder="Search turns" ref={searchRef} type="search" value={query}/>
-        {query ? <button aria-label="Clear turn search" className="absolute right-1 top-0 grid size-11 place-items-center text-sm text-muted hover:text-ink" onClick={() => setQuery("")} type="button">×</button> : null}
-      </label> : null}
-      <div aria-label="Legend" className="flex flex-wrap gap-x-3 gap-y-1 text-[11px] text-muted" role="list">
-        {LAYER_ORDER.filter((layer) => layer !== "unknown").map((layer) => <span className="inline-flex items-center gap-1.5" key={layer} role="listitem"><i className="size-2 rounded-[2px]" style={{ background: LAYER_META[layer].color }}/>{LAYER_META[layer].title}</span>)}
-        <span className="inline-flex items-center gap-1.5" role="listitem" title="Hatched: read from cache. Darker ribbons carry new tokens into the next turn."><i className="size-2 rounded-[2px] border border-line bg-[repeating-linear-gradient(135deg,transparent_0,transparent_2px,var(--ink)_2px,var(--ink)_3px)] opacity-60"/>cached</span>
+      {searchOpen || query ? <div className="flex"><SearchField autoFocus={!query} inputRef={searchRef} label="Search turns" onChange={setQuery} onKeyDown={(event) => { if (event.key === "Escape") { event.stopPropagation(); setQuery(""); setSearchOpen(false); } }} placeholder="Search turns" value={query}/></div> : null}
+      <div aria-label="Legend" className="flex flex-wrap gap-x-3 gap-y-1 pb-0.5 text-xs text-muted" role="list">
+        {LAYER_ORDER.filter((layer) => layer !== "unknown").map((layer) => <span className="inline-flex items-center gap-1.5" key={layer} role="listitem"><Swatch color={LAYER_META[layer].color}/>{LAYER_META[layer].title}</span>)}
+        <span className="inline-flex items-center gap-1.5" role="listitem" title="Hatched: read from cache. Darker ribbons carry new tokens into the next turn."><Swatch className="border border-line bg-[repeating-linear-gradient(135deg,transparent_0,transparent_2px,var(--ink)_2px,var(--ink)_3px)] opacity-60"/>cached</span>
       </div>
     </div>
 
     <div className="lg:min-h-0 lg:flex-1 lg:overflow-y-auto">
-      {normalized && !visible.length ? <div className="px-3 py-10 text-center text-xs text-muted">No turns match “{query}”.</div> : null}
+      {normalized && !visible.length ? <EmptyState title={`No turns match “${query}”`}>Search matches turn numbers, prompts, tools, models, and status.</EmptyState> : null}
       <div className="relative" style={{ height: layout.height }}>
         <ol>
           {layout.items.map((item) => {
-            if (item.kind === "query") return <li className="absolute inset-x-0 flex items-end truncate px-3 pb-1 text-xs font-medium text-muted" key={item.key} style={{ height: HEADER, top: item.top }} title={item.label}>{item.label}</li>;
+            if (item.kind === "query") return <li className="tf-inset absolute inset-x-0 flex items-end truncate pb-1 text-xs font-medium text-muted" key={item.key} style={{ height: HEADER, top: item.top }} title={item.label}>{item.label}</li>;
             const turn = turns[item.index];
             const active = item.index === selected;
             const failed = turn.status >= 400;
@@ -290,18 +289,19 @@ export function TurnFlow({ focus = null, onSelectNode, onSelectTurn, selected, s
               <button
                 aria-current={active ? "page" : undefined}
                 aria-label={`Turn ${turn.label}, ${turn.step}, ${formatNumber(turn.input)} input tokens, ${cacheShare(turn)}${failed ? `, HTTP ${turn.status}` : ""}`}
-                className={`grid h-full w-full grid-cols-[var(--text-w)_minmax(0,1fr)] gap-3 border-t border-line px-3 text-left transition focus-visible:outline-ink ${active ? "bg-canvas shadow-[inset_3px_0_0_var(--ink)]" : "hover:bg-canvas/60"}`}
+                className={`tf-focus-inset tf-inset grid h-full w-full grid-cols-[var(--text-w)_minmax(0,1fr)] gap-3 border-t border-line text-left transition-colors ${active ? "bg-fill-selected shadow-[inset_3px_0_0_var(--ink)]" : "hover:bg-fill-hover"}`}
                 onClick={() => onSelectTurn(item.index)}
                 ref={(element) => { if (element) rowRefs.current.set(item.index, element); else rowRefs.current.delete(item.index); }}
                 title={[turn.captureTurn !== undefined ? `Captured request ${turn.captureTurn}` : "", cacheShare(turn), formatDuration(turn.durationMs), formatTime(turn.timestamp)].filter(Boolean).join(" · ")}
                 type="button"
               >
-                {/* All row text stays in the left column; the right column belongs to the Sankey. */}
+                {/* All row text stays in the left column; the right column belongs to the Sankey,
+                    whose overlay starts at this row's inset plus the text column and gap. */}
                 <span className="min-w-0 pt-2.5">
                   <span className="flex items-center gap-1.5">
                     <strong className="whitespace-nowrap text-sm">Turn {turn.label}</strong>
-                    {auxiliary ? <span className="hidden rounded-full border border-line px-1.5 font-mono text-[10px] uppercase tracking-wide text-muted sm:inline" title="Auxiliary request in its own thread, outside the flow">Meta</span> : null}
-                    {failed ? <span className="font-mono text-xs font-semibold text-danger">HTTP {turn.status}</span> : null}
+                    {auxiliary ? <span className="hidden sm:inline-flex"><Badge title="Auxiliary request in its own thread, outside the flow">Meta</Badge></span> : null}
+                    {failed ? <Badge mono tone="danger">HTTP {turn.status}</Badge> : null}
                     <b className="ml-auto font-mono text-xs font-semibold">{formatCompact(turn.input)}</b>
                   </span>
                   <span className="mt-0.5 block truncate text-xs text-muted">{turn.step}</span>
@@ -311,7 +311,7 @@ export function TurnFlow({ focus = null, onSelectNode, onSelectTurn, selected, s
             </li>;
           })}
         </ol>
-        <div aria-hidden="true" className="pointer-events-none absolute inset-y-0 right-3" ref={canvasRef} style={{ left: "calc(var(--text-w) + 1.5rem)" }}>
+        <div aria-hidden="true" className="pointer-events-none absolute inset-y-0 left-[calc(var(--text-w)+1.5rem)] right-3 sm:left-[calc(var(--text-w)+1.75rem)] sm:right-4" ref={canvasRef}>
           {width ? <svg className="block overflow-visible" height={layout.height} viewBox={`0 0 ${width} ${Math.max(1, layout.height)}`} width={width}>
             <defs><pattern height="8" id="turn-flow-hatch" patternUnits="userSpaceOnUse" width="8"><path d="M-2 2L2-2M0 8L8 0M6 10L10 6" fill="none" stroke="var(--ink)" strokeOpacity="0.34" strokeWidth="1"/></pattern></defs>
             {(["base", "fresh"] as const).map((kind) => <g key={kind}>{graph.links.map((link) => {
@@ -330,7 +330,7 @@ export function TurnFlow({ focus = null, onSelectNode, onSelectTurn, selected, s
                 const active = isActive(row, node);
                 const y = row.top + NODE_TOP;
                 const label = nodeWidth >= node.label.length * 5.4 + 6;
-                return <g className="t-fade cursor-pointer" key={node.key} onClick={(event) => { event.stopPropagation(); pick(row, node); }} style={{ opacity: hasTokenSelection && !relatedKeys.has(node.key) ? 0.22 : 1, pointerEvents: "all" }}>
+                return <g className="t-fade cursor-pointer" key={node.key} onClick={(event) => { event.stopPropagation(); pick(row, node); }} style={{ opacity: hasTokenSelection && !relatedKeys.has(node.key) ? FADED_MARK_OPACITY : 1, pointerEvents: "all" }}>
                   <title>{`Turn ${turn.label} · ${node.label}: ${node.estimated ? "≈" : ""}${formatNumber(node.tokens)} tokens${node.estimated ? " (estimated)" : ""}; cache read ${formatNumber(node.cached)}; fresh ${formatNumber(node.tokens - node.cached)}${node.aggregate ? "; categories below 3% combined" : ""}`}</title>
                   <rect fill={node.color} fillOpacity={0.82} height={NODE} rx={3} stroke={active ? "var(--ink)" : "var(--panel)"} strokeWidth={active ? 2 : 1} width={nodeWidth} x={node.x0} y={y}/>
                   {cachedWidth > 0 ? <rect fill="url(#turn-flow-hatch)" height={NODE} pointerEvents="none" rx={3} width={cachedWidth} x={node.x0} y={y}/> : null}

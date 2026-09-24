@@ -1,10 +1,11 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState, type MouseEvent } from "react";
-import { categoryColor } from "@/lib/category-palette";
+import { categoryColor, FADED_MARK_OPACITY } from "@/lib/category-palette";
 import { formatNumber } from "@/lib/format";
 import { LAYER_META, LAYER_ORDER } from "@/lib/token-model";
 import type { InputLayer } from "@/lib/types";
+import { Swatch } from "../ui/badge";
 
 export interface CategoryTotal {
   cached: number;
@@ -131,7 +132,7 @@ export function InputUnits({ categories, focus, onFocus, total }: { categories: 
             const { cached, category } = group;
             const color = categoryColor(category.label, category.layer);
             const faded = Boolean(focus) && focus?.label !== category.label;
-            return <g className="t-fade" data-category={category.label} key={`${region.layer}-${category.label}`} style={{ opacity: faded ? 0.22 : 1 }}>
+            return <g className="t-fade" data-category={category.label} key={`${region.layer}-${category.label}`} style={{ opacity: faded ? FADED_MARK_OPACITY : 1 }}>
               <title>{`${category.label}: ${category.estimated ? "≈" : ""}${formatNumber(category.tokens)} tokens, ${formatNumber(category.cached)} cached · ${cells.length} ${cells.length === 1 ? "square" : "squares"}`}</title>
               {cells.map((cell, index) => <rect fill={color} fillOpacity={index < cached ? 0.38 : 1} height={CELL} key={index} rx={2.5} width={CELL} x={cell.x * PITCH} y={cell.y * PITCH}/>)}
             </g>;
@@ -140,10 +141,10 @@ export function InputUnits({ categories, focus, onFocus, total }: { categories: 
       </svg> : <div className="h-40"/>}
     </div>
 
-    <p className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-muted">
-      {layers.map((layer) => <span className="inline-flex items-center gap-1.5" key={layer.layer}><i className="size-2.5 rounded-[3px]" style={{ background: LAYER_META[layer.layer].color }}/>{LAYER_META[layer.layer].title}</span>)}
-      <span className="inline-flex items-center gap-1.5"><i className="size-2.5 rounded-[3px] bg-ink"/>1 square = {formatNumber(unit)} tokens</span>
-      <span className="inline-flex items-center gap-1.5"><i className="size-2.5 rounded-[3px] bg-ink opacity-40"/>cached</span>
+    <p className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted">
+      {layers.map((layer) => <span className="inline-flex items-center gap-1.5" key={layer.layer}><Swatch color={LAYER_META[layer.layer].color}/>{LAYER_META[layer.layer].title}</span>)}
+      <span className="inline-flex items-center gap-1.5"><Swatch className="bg-ink"/>1 square = {formatNumber(unit)} tokens</span>
+      <span className="inline-flex items-center gap-1.5"><Swatch className="bg-ink opacity-40"/>cached</span>
       <span>A category under half a square shows as one.</span>
     </p>
   </div>;

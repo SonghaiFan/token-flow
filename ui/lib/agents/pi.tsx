@@ -72,11 +72,11 @@ function skillCount(skills: SkillEntry[]): string {
 }
 
 function SkillList({ skills }: { skills: SkillEntry[] }) {
-  return <ul className="max-h-[36rem] divide-y divide-line overflow-auto rounded-lg border border-line text-xs">
+  return <ul className="max-h-[36rem] divide-y divide-line overflow-auto rounded-inset border border-line text-xs">
     {skills.map((skill, index) => <li className="space-y-0.5 px-3 py-2" key={`${skill.name}-${index}`}>
       <p className="break-all font-mono font-medium text-ink">{skill.name}</p>
       <p className="line-clamp-2 text-muted" title={skill.description}>{skill.description || "No description"}</p>
-      {skill.location ? <p className="truncate font-mono text-[11px] text-muted" title={skill.location}>{skill.location}</p> : null}
+      {skill.location ? <p className="truncate font-mono text-xs text-muted" title={skill.location}>{skill.location}</p> : null}
     </li>)}
   </ul>;
 }

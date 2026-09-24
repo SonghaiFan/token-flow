@@ -7,10 +7,15 @@ import { classifyInput, LAYER_META, LAYER_ORDER, turnPlugins } from "@/lib/token
 import type { InputClass, InputLayer, ItemState, TokenSelection, TraceRecord, TurnModel } from "@/lib/types";
 import { categoryColor } from "@/lib/category-palette";
 import { CategorySwatch } from "../charts/category-legend";
-import { SearchIcon } from "../icons";
-import { activateOnKey, motionMs, Segmented, useAccordion } from "../motion";
+import { activateOnKey, motionMs, useAccordion } from "../motion";
+import { Badge, Swatch, type Tone } from "../ui/badge";
+import { Button, IconButton } from "../ui/button";
+import { EmptyState, Notice } from "../ui/feedback";
+import { SearchField } from "../ui/field";
+import { ArrowLeftIcon, BookIcon, ChatIcon, ChevronLeftIcon, ChevronRightIcon, CloseIcon, HistoryIcon, PinIcon, QuestionIcon, SearchIcon, SlidersIcon, SparkleIcon, TerminalIcon, ToolIcon, UserIcon } from "../ui/icons";
+import { Segmented } from "../ui/segmented";
 import { RawJsonTree } from "./raw-json-tree";
-import { humanizeField, Pill, previewText, ReadableText, RichText, stableValue } from "./section-views";
+import { humanizeField, previewText, ReadableText, RichText, stableValue } from "./section-views";
 import { clearCurrentMatch, clearHighlights, focusMatch, highlightMatches, MIN_QUERY, SEARCH_HIT_LIMIT, searchRecord, type JsonPathPart, type SearchHit } from "./request-search";
 
 type UnknownRecord = Record<string, unknown>;
@@ -55,7 +60,7 @@ function inputItemParts(message: UnknownRecord): unknown[] {
 }
 
 function JsonBlock({ value }: { value: unknown }) {
-  return <pre className="tf-code max-h-[28rem] overflow-auto rounded-lg border border-line bg-canvas p-3 text-ink">{JSON.stringify(value, null, 2)}</pre>;
+  return <pre className="tf-code tf-well max-h-[28rem] overflow-auto border border-line p-3 text-ink">{JSON.stringify(value, null, 2)}</pre>;
 }
 
 interface ParsedStructuredText {
@@ -315,28 +320,28 @@ function ResultNotice({ value }: { value: string }) {
     .replace(/\s*\(?original token count:\s*[\d,]+\)?/i, "")
     .replace(/\s*total output lines:\s*[\d,]+/i, "")
     .trim();
-  return <div className="flex flex-wrap items-center gap-2 rounded-control border border-amber-200 bg-amber-50 px-3 py-2 text-amber-900 dark:border-amber-900 dark:bg-amber-950 dark:text-amber-200">
-    <span className="text-xs font-medium">{warning || "Captured output metadata"}</span>
-    {tokenCount ? <Pill tone="system">Original {Number(tokenCount.replaceAll(",", "")).toLocaleString()} tokens</Pill> : null}
-    {lineCount ? <Pill tone="system">{Number(lineCount.replaceAll(",", "")).toLocaleString()} output {Number(lineCount.replaceAll(",", "")) === 1 ? "line" : "lines"}</Pill> : null}
-  </div>;
+  return <Notice compact tone="warning"><div className="flex flex-wrap items-center gap-2">
+    <span className="font-medium">{warning || "Captured output metadata"}</span>
+    {tokenCount ? <Badge mono tone="warning">Original {Number(tokenCount.replaceAll(",", "")).toLocaleString()} tokens</Badge> : null}
+    {lineCount ? <Badge mono tone="warning">{Number(lineCount.replaceAll(",", "")).toLocaleString()} output {Number(lineCount.replaceAll(",", "")) === 1 ? "line" : "lines"}</Badge> : null}
+  </div></Notice>;
 }
 
 function ToolResultCatalog({ tools }: { tools: ToolResultDefinition[] }) {
-  return <section className="overflow-hidden rounded-control border border-line bg-canvas/40">
-    <div className="flex flex-wrap items-center gap-2 border-b border-line px-3 py-3 sm:px-4">
-      <div className="min-w-0"><h4 className="text-sm font-semibold">Returned tool catalog</h4><p className="mt-0.5 text-xs text-muted">Tool definitions returned by this call, rendered as readable entries.</p></div>
-      <Pill>{tools.length} tools</Pill>
+  return <section className="tf-card overflow-hidden">
+    <div className="tf-inset flex flex-wrap items-center gap-2 border-b border-line py-3">
+      <div className="min-w-0"><h4 className="tf-heading">Returned tool catalog</h4><p className="mt-0.5 text-xs text-muted">Tool definitions returned by this call, rendered as readable entries.</p></div>
+      <Badge mono>{tools.length} tools</Badge>
     </div>
     <div className="space-y-2 p-2 sm:p-3">{tools.map((tool, index) => {
       const { declaration, summary } = splitToolDescription(tool.description);
       const metadata = Object.fromEntries(Object.entries(tool).filter(([key]) => key !== "name" && key !== "description"));
       return <div key={`${tool.name}-${index}`} style={{ containIntrinsicSize: "0 64px", contentVisibility: "auto" }}>
-        <Disclosure summary={<div className="min-w-0"><div className="flex flex-wrap items-center gap-2"><strong className="break-all font-mono text-xs text-ink">{tool.name}</strong><Pill>{textValue(tool.type) || "tool"}</Pill></div>{summary ? <p className="mt-1 line-clamp-2 text-xs leading-4 text-muted">{summary}</p> : null}</div>}>
+        <Disclosure summary={<div className="min-w-0"><div className="flex flex-wrap items-center gap-2"><strong className="break-all font-mono text-xs text-ink">{tool.name}</strong><Badge mono>{textValue(tool.type) || "tool"}</Badge></div>{summary ? <p className="mt-1 line-clamp-2 text-xs leading-4 text-muted">{summary}</p> : null}</div>}>
           <div className="space-y-3">
             {summary ? <RichText>{summary}</RichText> : null}
-            {declaration ? <Disclosure summary={<><strong className="text-xs">Declaration</strong><span className="text-xs text-muted">Parameters and return type</span></>}><pre className="max-h-[32rem] overflow-auto whitespace-pre-wrap rounded-lg bg-canvas p-3 font-mono text-xs leading-5 text-ink">{declaration}</pre></Disclosure> : null}
-            {Object.keys(metadata).length ? <Disclosure summary={<><strong className="text-xs">Additional fields</strong><Pill>{Object.keys(metadata).length}</Pill></>}><JsonBlock value={metadata}/></Disclosure> : null}
+            {declaration ? <Disclosure summary={<><strong className="text-xs">Declaration</strong><span className="text-xs text-muted">Parameters and return type</span></>}><pre className="tf-code tf-well max-h-[32rem] overflow-auto whitespace-pre-wrap p-3 text-ink">{declaration}</pre></Disclosure> : null}
+            {Object.keys(metadata).length ? <Disclosure summary={<><strong className="text-xs">Additional fields</strong><Badge mono>{Object.keys(metadata).length}</Badge></>}><JsonBlock value={metadata}/></Disclosure> : null}
           </div>
         </Disclosure>
       </div>;
@@ -346,10 +351,10 @@ function ToolResultCatalog({ tools }: { tools: ToolResultDefinition[] }) {
 
 function StructuredValue({ value }: { value: unknown }) {
   if (Array.isArray(value) && value.length && value.every(isToolResultDefinition)) return <ToolResultCatalog tools={value}/>;
-  if (Array.isArray(value)) return <section className="space-y-2"><div className="flex items-center gap-2"><strong className="text-xs">Structured list</strong><Pill>{value.length} items</Pill></div>{value.map((item, index) => <Disclosure key={index} summary={<><strong className="text-xs">Item {index + 1}</strong><span className="min-w-0 truncate text-xs text-muted">{previewText(item)}</span></>}><StructuredValue value={item}/></Disclosure>)}</section>;
+  if (Array.isArray(value)) return <section className="space-y-2"><div className="flex items-center gap-2"><strong className="text-xs">Structured list</strong><Badge mono>{value.length} items</Badge></div>{value.map((item, index) => <Disclosure key={index} summary={<><strong className="text-xs">Item {index + 1}</strong><span className="min-w-0 truncate text-xs text-muted">{previewText(item)}</span></>}><StructuredValue value={item}/></Disclosure>)}</section>;
   if (value && typeof value === "object") {
     const entries = Object.entries(asRecord(value));
-    return <dl className="divide-y divide-line overflow-hidden rounded-control border border-line">{entries.map(([key, item]) => <div className="grid gap-1 px-3 py-3 text-xs sm:grid-cols-[10rem_minmax(0,1fr)]" key={key}><dt className="break-all font-mono text-xs font-medium text-muted">{key}</dt><dd className="min-w-0 break-words text-ink">{item && typeof item === "object" ? <Disclosure summary={<><span className="text-xs">{Array.isArray(item) ? `${item.length} items` : `${Object.keys(asRecord(item)).length} fields`}</span><span className="min-w-0 truncate text-xs text-muted">{previewText(item)}</span></>}><StructuredValue value={item}/></Disclosure> : <span className="whitespace-pre-wrap">{textValue(item) || (item === null ? "null" : "")}</span>}</dd></div>)}</dl>;
+    return <dl className="tf-card divide-y divide-line overflow-hidden">{entries.map(([key, item]) => <div className="tf-inset grid gap-1 py-3 text-xs sm:grid-cols-[10rem_minmax(0,1fr)]" key={key}><dt className="break-all font-mono text-xs font-medium text-muted">{key}</dt><dd className="min-w-0 break-words text-ink">{item && typeof item === "object" ? <Disclosure summary={<><span className="text-xs">{Array.isArray(item) ? `${item.length} items` : `${Object.keys(asRecord(item)).length} fields`}</span><span className="min-w-0 truncate text-xs text-muted">{previewText(item)}</span></>}><StructuredValue value={item}/></Disclosure> : <span className="whitespace-pre-wrap">{textValue(item) || (item === null ? "null" : "")}</span>}</dd></div>)}</dl>;
   }
   return <span className="whitespace-pre-wrap text-xs text-ink">{textValue(value) || (value === null ? "null" : "")}</span>;
 }
@@ -363,7 +368,7 @@ function StructuredText({ children }: { children: string }) {
 function StructuredOutput({ parsed }: { parsed: ParsedStructuredText }) {
   return <div className="space-y-3">
     {parsed.prefix ? <ResultNotice value={parsed.prefix}/> : null}
-    {parsed.recovered ? <div className="rounded-control border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900 dark:border-amber-900 dark:bg-amber-950 dark:text-amber-200">Recovered {Array.isArray(parsed.value) ? parsed.value.length : 0} complete entries from truncated JSON. The incomplete final entry remains available in Raw.</div> : null}
+    {parsed.recovered ? <Notice compact tone="warning">Recovered {Array.isArray(parsed.value) ? parsed.value.length : 0} complete entries from truncated JSON. The incomplete final entry remains available in Raw.</Notice> : null}
     <StructuredValue value={parsed.value}/>
     {parsed.suffix ? <ResultNotice value={parsed.suffix}/> : null}
   </div>;
@@ -401,9 +406,9 @@ function HtmlOutput({ value }: { value: string }) {
     ["Challenge", challenge ? "SHA-256 proof of work" : ""],
     ["Next action", /location\.reload\(\)/.test(value) ? "Reload after verification" : ""],
   ].filter(([, item]) => item);
-  return <section className="overflow-hidden rounded-control border border-line">
-    <div className="border-b border-line bg-canvas/60 px-3 py-3 sm:px-4"><div className="flex flex-wrap items-center gap-2"><h4 className="text-sm font-semibold">{verification ? "Browser verification page" : "HTML document"}</h4><Pill>HTML</Pill></div><p className="mt-1 text-xs text-muted">{verification ? "The server returned a verification challenge instead of the requested data." : "The server returned a document instead of structured data."}</p></div>
-    <div className="space-y-4 px-3 py-3 sm:px-4">
+  return <section className="tf-card overflow-hidden">
+    <div className="tf-inset border-b border-line bg-canvas py-3"><div className="flex flex-wrap items-center gap-2"><h4 className="tf-heading">{verification ? "Browser verification page" : "HTML document"}</h4><Badge mono>HTML</Badge></div><p className="mt-1 text-xs text-muted">{verification ? "The server returned a verification challenge instead of the requested data." : "The server returned a document instead of structured data."}</p></div>
+    <div className="tf-inset space-y-4 py-3">
       {notice ? <div><div className="text-xs font-medium text-muted">Page notice</div><p className="mt-1 text-sm leading-5 text-ink">{notice}</p></div> : null}
       {facts.length ? <dl className="grid gap-x-5 gap-y-3 sm:grid-cols-2">{facts.map(([label, item]) => <div key={label}><dt className="text-xs font-medium text-muted">{label}</dt><dd className="mt-1 break-words font-mono text-xs text-ink">{item}</dd></div>)}</dl> : null}
     </div>
@@ -412,9 +417,9 @@ function HtmlOutput({ value }: { value: string }) {
 
 function TextOutput({ value }: { value: string }) {
   const lines = value.split("\n");
-  if (!value) return <div className="rounded-lg border border-dashed border-line px-3 py-4 text-xs text-muted">The tool completed without captured output.</div>;
-  if (/too many requests|rate limit/i.test(value)) return <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-3 dark:border-amber-900 dark:bg-amber-950"><strong className="text-xs text-amber-900 dark:text-amber-200">Rate limited</strong><p className="mt-1 text-xs text-amber-900 dark:text-amber-200">{value.trim()}</p></div>;
-  return <section><div className="mb-1.5 flex items-center justify-between gap-3"><h4 className="text-xs font-semibold uppercase tracking-[0.1em] text-muted">Output</h4><span className="font-mono text-xs text-muted">{lines.length} {lines.length === 1 ? "line" : "lines"}</span></div><ol className="max-h-[28rem] overflow-auto rounded-lg bg-canvas py-2 font-mono text-xs leading-5 text-ink">{lines.map((line, index) => <li className="grid grid-cols-[2.5rem_minmax(0,1fr)] px-3" key={index}><span className="select-none pr-3 text-right text-muted/70">{index + 1}</span><span className="whitespace-pre-wrap break-words">{line || " "}</span></li>)}</ol></section>;
+  if (!value) return <EmptyState framed>The tool completed without captured output.</EmptyState>;
+  if (/too many requests|rate limit/i.test(value)) return <Notice compact title="Rate limited" tone="warning">{value.trim()}</Notice>;
+  return <section><BlockHeading aside={`${lines.length} ${lines.length === 1 ? "line" : "lines"}`}>Output</BlockHeading><ol className="tf-code tf-well max-h-[28rem] overflow-auto py-2 text-ink">{lines.map((line, index) => <li className="grid grid-cols-[2.5rem_minmax(0,1fr)] px-3" key={index}><span className="select-none pr-3 text-right text-muted/70">{index + 1}</span><span className="whitespace-pre-wrap break-words">{line || " "}</span></li>)}</ol></section>;
 }
 
 function looksLikeMarkdown(value: string): boolean {
@@ -433,7 +438,7 @@ function looksLikeMarkdown(value: string): boolean {
 
 function MarkdownOutput({ value }: { value: string }) {
   const lineCount = value.split("\n").length;
-  return <section><div className="mb-2 flex flex-wrap items-center justify-between gap-2"><div><h4 className="text-xs font-semibold">Rendered Markdown</h4><p className="mt-0.5 text-xs text-muted">Exact source remains available in Raw.</p></div><Pill>{lineCount} {lineCount === 1 ? "line" : "lines"}</Pill></div><div className="max-h-[40rem] overflow-auto rounded-control border border-line bg-canvas/50 px-4 py-3 sm:px-5 sm:py-4"><RichText>{value}</RichText></div></section>;
+  return <section><BlockHeading aside={`${lineCount} ${lineCount === 1 ? "line" : "lines"}`}>Rendered Markdown · exact source in Raw</BlockHeading><div className="tf-well max-h-[40rem] overflow-auto px-4 py-3"><RichText>{value}</RichText></div></section>;
 }
 
 type DetectedToolOutput =
@@ -462,9 +467,9 @@ function ToolOutputView({ value }: { value: string }) {
 function Disclosure({ children, defaultOpen = false, summary }: { children: ReactNode; defaultOpen?: boolean; summary: ReactNode }) {
   // A later selection inside a closed disclosure opens it at once so the block can be scrolled to.
   const { mounted, open, toggle } = useAccordion(defaultOpen);
-  return <div className="t-acc rounded-control border border-line bg-panel" data-open={open ? "true" : "false"}>
-    <div aria-expanded={open} className="t-acc-head flex min-h-11 cursor-pointer items-center gap-2 rounded-control px-3 py-2 outline-none hover:bg-canvas/70 focus-visible:ring-2 focus-visible:ring-ink/30" onClick={toggle} onKeyDown={(event) => activateOnKey(event, toggle)} role="button" tabIndex={0}>{summary}<span aria-hidden="true" className="t-acc-chevron ml-auto text-xs text-muted">›</span></div>
-    {mounted ? <div className="t-acc-panel"><div className="t-acc-panel-inner"><div className="border-t border-line px-3 py-3 sm:px-4">{children}</div></div></div> : null}
+  return <div className="t-acc tf-card" data-open={open ? "true" : "false"}>
+    <div aria-expanded={open} className="t-acc-head tf-focus-inset flex min-h-11 cursor-pointer flex-wrap items-center gap-x-2 gap-y-1 rounded-control px-3 py-2 hover:bg-fill-hover" onClick={toggle} onKeyDown={(event) => activateOnKey(event, toggle)} role="button" tabIndex={0}><Chevron open={open}/>{summary}</div>
+    {mounted ? <div className="t-acc-panel"><div className="t-acc-panel-inner"><div className="tf-inset border-t border-line py-3">{children}</div></div></div> : null}
   </div>;
 }
 
@@ -475,7 +480,7 @@ function ContentPart({ value }: { value: unknown }) {
   if (text) return <StructuredText>{text}</StructuredText>;
   const type = textValue(part.type) || "content";
   if (type.includes("image") || part.image_url || part.file_id) {
-    return <div className="flex flex-wrap items-center gap-2"><Pill>{type}</Pill><span className="text-xs text-muted">Attachment metadata is available in Raw JSON.</span></div>;
+    return <div className="flex flex-wrap items-center gap-2"><Badge mono>{type}</Badge><span className="text-xs text-muted">Attachment metadata is available in Raw JSON.</span></div>;
   }
   return <JsonBlock value={value}/>;
 }
@@ -582,6 +587,8 @@ function requestToolNames(turn: TurnModel): string[] {
 
 type LayerChange = "added" | "removed" | "changed";
 
+const CHANGE_TONES: Record<LayerChange, Tone> = { added: "success", changed: "warning", removed: "neutral" };
+
 interface LayerDiff {
   after?: number;
   before?: number;
@@ -643,21 +650,21 @@ function LayerDiffSection({ diff }: { diff: LayerDiff }) {
   const count = (change: LayerChange) => diff.rows.filter((row) => row.change === change).length;
   const delta = diff.before !== undefined && diff.after !== undefined ? diff.after - diff.before : undefined;
   const summary = <>
-    <span aria-hidden="true" className="size-2.5 shrink-0 rounded-sm" style={{ background: meta.color }}/>
+    <Swatch color={meta.color}/>
     <strong className="text-xs">{meta.title}</strong>
-    {count("added") ? <Pill>+{count("added")} added</Pill> : null}
-    {count("changed") ? <Pill tone="system">{count("changed")} changed</Pill> : null}
-    {count("removed") ? <Pill>{count("removed")} removed</Pill> : null}
+    {count("added") ? <Badge tone={CHANGE_TONES.added}>+{count("added")} added</Badge> : null}
+    {count("changed") ? <Badge tone={CHANGE_TONES.changed}>{count("changed")} changed</Badge> : null}
+    {count("removed") ? <Badge tone={CHANGE_TONES.removed}>{count("removed")} removed</Badge> : null}
     {!diff.rows.length ? <span className="text-xs text-muted">{diff.uncompared ? "No matched changes" : "Unchanged"}</span> : null}
     <span className="ml-auto shrink-0 font-mono text-xs text-muted">{tokenText(diff.before)} → <span className="text-ink">{tokenText(diff.after)}</span>{delta ? ` (${delta > 0 ? "+" : ""}${delta.toLocaleString()})` : ""}</span>
   </>;
-  if (!diff.rows.length && !diff.uncompared) return <div className="flex min-h-11 items-center gap-2 rounded-control border border-line px-3 py-2">{summary}</div>;
+  if (!diff.rows.length && !diff.uncompared) return <div className="tf-card flex min-h-11 flex-wrap items-center gap-x-2 gap-y-1 py-2 pl-9 pr-3">{summary}</div>;
   return <Disclosure summary={summary}>
     <ul className="divide-y divide-line text-xs">
       {diff.rows.map(({ change, entry }) => <li className="flex items-center gap-2 py-2" key={`${change}-${entry.key}`}>
         <CategorySwatch label={entry.inputClass.label} layer={entry.inputClass.layer}/>
         <span className="shrink-0 font-medium">{entry.inputClass.label}</span>
-        <Pill tone={change === "changed" ? "system" : "neutral"}>{change}</Pill>
+        <Badge tone={CHANGE_TONES[change]}>{change}</Badge>
         <span className="min-w-0 flex-1 truncate text-muted">{entryPreview(entry)}</span>
         {entry.tokens ? <span className="shrink-0 font-mono text-xs text-muted">{entry.tokens.tokens.toLocaleString()}</span> : null}
       </li>)}
@@ -667,7 +674,7 @@ function LayerDiffSection({ diff }: { diff: LayerDiff }) {
 }
 
 function RequestChanges({ previous, current }: { previous: TurnModel | undefined; current: TurnModel }) {
-  if (!previous) return <div className="p-8 text-center"><strong className="text-sm">No previous turn</strong><p className="mt-1 text-xs text-muted">Choose Turn 2 or later to compare captured requests.</p></div>;
+  if (!previous) return <div className="tf-pad"><EmptyState framed title="No previous turn">Choose Turn 2 or later to compare captured requests.</EmptyState></div>;
 
   const previousBody = asRecord(previous.record.request?.body);
   const currentBody = asRecord(current.record.request?.body);
@@ -685,13 +692,13 @@ function RequestChanges({ previous, current }: { previous: TurnModel | undefined
   const changedFields = keys.filter((key) => stableValue(previousBody[key]) !== stableValue(currentBody[key]));
   const diffs = layerDiffs(previous, current);
 
-  return <div className="space-y-4 p-3 sm:p-4">
-    <div className="flex flex-wrap items-center justify-between gap-2"><div><h3 className="text-sm font-semibold">Turn {previous.label} → Turn {current.label}</h3><p className="mt-1 text-xs text-muted">Only captured request differences are shown.</p></div><Pill>{changedFields.length} changed fields</Pill></div>
-    {facts.length ? <dl className="divide-y divide-line overflow-hidden rounded-control border border-line">{facts.map(([label, before, after]) => <div className="grid gap-1 px-3 py-3 text-xs sm:grid-cols-[8rem_minmax(0,1fr)_auto_minmax(0,1fr)] sm:items-start" key={label}>
+  return <div className="tf-pad space-y-4">
+    <div className="flex flex-wrap items-center justify-between gap-2"><div><h3 className="tf-heading">Turn {previous.label} → Turn {current.label}</h3><p className="mt-1 text-xs text-muted">Only captured request differences are shown.</p></div><Badge mono>{changedFields.length} changed fields</Badge></div>
+    {facts.length ? <dl className="tf-card divide-y divide-line overflow-hidden">{facts.map(([label, before, after]) => <div className="tf-inset grid gap-1 py-3 text-xs sm:grid-cols-[8rem_minmax(0,1fr)_auto_minmax(0,1fr)] sm:items-start" key={label}>
       <dt className="font-medium text-muted">{label}</dt><dd className="min-w-0 break-words font-mono text-xs text-muted">{before}</dd><span aria-hidden="true" className="hidden text-muted sm:block">→</span><dd className="min-w-0 break-words font-mono text-xs text-ink">{after}</dd>
-    </div>)}</dl> : <div className="rounded-control border border-dashed border-line p-6 text-center text-xs text-muted">No high-level request changes detected.</div>}
-    <section className="space-y-2"><h4 className="text-xs font-semibold">Input by layer</h4>{diffs.map((diff) => <LayerDiffSection diff={diff} key={diff.layer}/>)}</section>
-    {changedFields.length ? <Disclosure summary={<><strong className="text-xs">Changed request fields</strong><span className="text-xs text-muted">Exact top-level evidence</span></>}><div className="flex flex-wrap gap-1.5">{changedFields.map((field) => <Pill key={field}>{field}</Pill>)}</div></Disclosure> : null}
+    </div>)}</dl> : <EmptyState framed>No high-level request changes detected.</EmptyState>}
+    <section className="space-y-2"><h4 className="tf-eyebrow">Input by layer</h4>{diffs.map((diff) => <LayerDiffSection diff={diff} key={diff.layer}/>)}</section>
+    {changedFields.length ? <Disclosure summary={<><strong className="text-xs">Changed request fields</strong><span className="text-xs text-muted">Exact top-level evidence</span></>}><div className="flex flex-wrap gap-1.5">{changedFields.map((field) => <Badge key={field} mono>{field}</Badge>)}</div></Disclosure> : null}
   </div>;
 }
 
@@ -823,46 +830,29 @@ function rowMarks(entries: Array<InputEntry | undefined>, label: string, layer: 
   };
 }
 
-const ICON_PATHS: Record<string, string> = {
-  book: "M5 4.5A1.5 1.5 0 0 1 6.5 3H19v15H6.5A1.5 1.5 0 0 0 5 19.5zM5 19.5A1.5 1.5 0 0 0 6.5 21H19M9 7h6",
-  chat: "M4 5h12v9H9l-5 4zM16 9h4v9l-3-2.5h-6V14",
-  history: "M4 12a8 8 0 1 0 2.4-5.7L4 8.5M4 4v4.5h4.5M12 8v4l2.5 2",
-  pin: "M12 21s-6-5.5-6-11a6 6 0 0 1 12 0c0 5.5-6 11-6 11zM12 12.5a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5z",
-  question: "M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18zM9.5 9.5a2.5 2.5 0 1 1 3.5 2.3c-.6.3-1 .9-1 1.6v.6M12 17h.01",
-  sliders: "M6 4v16M12 4v16M18 4v16M4 9h4M10 15h4M16 7h4",
-  sparkle: "M12 4l1.8 4.7L18.5 10.5 13.8 12.3 12 17l-1.8-4.7L5.5 10.5l4.7-1.8zM18 16l.8 2 2 .8-2 .8-.8 2-.8-2-2-.8 2-.8z",
-  terminal: "M4 5h16v14H4zM8 10l2.5 2L8 14M13 14h3",
-  tool: "M14.5 5.5a4 4 0 0 0 4.9 4.9L12 17.8 9.2 20.6a2 2 0 0 1-2.8-2.8L9.2 15 16.6 7.6a4 4 0 0 0-2.1-2.1z",
-  user: "M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM5 20a7 7 0 0 1 14 0",
+type IconComponent = typeof ToolIcon;
+
+const LAYER_ICONS: Record<InputLayer, IconComponent> = {
+  capabilities: ToolIcon,
+  instructions: BookIcon,
+  context: PinIcon,
+  conversation: ChatIcon,
+  unknown: QuestionIcon,
 };
 
-const LAYER_ICONS: Record<InputLayer, string> = {
-  capabilities: "tool",
-  instructions: "book",
-  context: "pin",
-  conversation: "chat",
-  unknown: "question",
-};
-
-function Icon({ color, name }: { color?: string; name: string }) {
-  return <svg aria-hidden="true" className="size-[18px] shrink-0 text-muted" fill="none" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.7} style={color ? { color } : undefined} viewBox="0 0 24 24"><path d={ICON_PATHS[name]}/></svg>;
+/* A row or section's leading icon, tinted with its category or layer color. */
+function RowIcon({ color, icon: Icon }: { color?: string; icon: IconComponent }) {
+  return <Icon className="shrink-0 text-muted" style={color ? { color } : undefined}/>;
 }
 
-type BadgeTone = "new" | "changed" | "neutral" | "danger";
-
-function Badge({ children, tone = "neutral" }: { children: ReactNode; tone?: BadgeTone }) {
-  const tones: Record<BadgeTone, string> = {
-    changed: "bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300",
-    danger: "bg-red-100 text-danger dark:bg-red-950",
-    neutral: "bg-canvas text-muted",
-    new: "bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300",
-  };
-  return <span className={`whitespace-nowrap rounded-md px-2 py-0.5 font-mono text-xs ${tones[tone]}`}>{children}</span>;
+/* The accordion chevron; it turns when the row opens (Accordion expand). */
+function Chevron({ open }: { open: boolean }) {
+  return <span aria-hidden="true" className={`t-acc-chevron grid w-4 shrink-0 place-items-center ${open ? "text-muted" : "text-muted/60"}`}><ChevronRightIcon className="size-4"/></span>;
 }
 
 function StateBadge({ state }: { state?: ItemState }) {
-  if (state === "new") return <Badge tone="new">new</Badge>;
-  if (state === "changed") return <Badge tone="changed">changed</Badge>;
+  if (state === "new") return <Badge tone="success">new</Badge>;
+  if (state === "changed") return <Badge tone="warning">changed</Badge>;
   return null;
 }
 
@@ -876,12 +866,12 @@ function RowEnd({ badge, tokens }: { badge?: ReactNode; tokens?: { cached: numbe
 
 /* The row's one leading mark: a category swatch, or an icon tinted with the category
    color. It also links the row's blocks to Composition and Token flow. */
-function LinkSwatch({ blockIds, icon, label, layer, onSelectToken, selection, turnId }: { blockIds: string[]; icon?: string; label: string; layer: InputLayer; onSelectToken: (selection: TokenSelection | null) => void; selection: TokenSelection | null; turnId: string }) {
+function LinkSwatch({ blockIds, icon, label, layer, onSelectToken, selection, turnId }: { blockIds: string[]; icon?: IconComponent; label: string; layer: InputLayer; onSelectToken: (selection: TokenSelection | null) => void; selection: TokenSelection | null; turnId: string }) {
   const selectedIds = selection?.turnId === turnId ? selection.blockIds || [selection.blockId] : [];
   const active = blockIds.some((id) => selectedIds.includes(id));
-  const mark = icon ? <Icon color={categoryColor(label, layer)} name={icon}/> : <CategorySwatch label={label} layer={layer}/>;
+  const mark = icon ? <RowIcon color={categoryColor(label, layer)} icon={icon}/> : <CategorySwatch label={label} layer={layer}/>;
   if (!blockIds.length) return <span className="grid size-5 shrink-0 place-items-center">{mark}</span>;
-  return <button aria-label={active ? `Unlink ${label}` : `Link ${label} in the charts`} aria-pressed={active} className={`grid size-5 shrink-0 place-items-center rounded ${active ? "ring-2 ring-ink" : "hover:ring-1 hover:ring-line"}`} onClick={(event) => { event.preventDefault(); event.stopPropagation(); onSelectToken(active ? null : { blockId: blockIds[0], blockIds, label, turnId }); }} title={`${label} · link in charts`} type="button">{mark}</button>;
+  return <button aria-label={active ? `Unlink ${label}` : `Link ${label} in the charts`} aria-pressed={active} className={`grid size-5 shrink-0 place-items-center rounded-tag ${active ? "ring-2 ring-ink" : "hover:ring-1 hover:ring-line"}`} onClick={(event) => { event.preventDefault(); event.stopPropagation(); onSelectToken(active ? null : { blockId: blockIds[0], blockIds, label, turnId }); }} title={`${label} · link in charts`} type="button">{mark}</button>;
 }
 
 /* Invisible scroll targets for one or more captured blocks; the row carries the highlight. */
@@ -892,26 +882,26 @@ function BlockAnchor({ blockIds, children, turnId }: { blockIds: string[]; child
   </div>;
 }
 
-/* Flat disclosure row: chevron on the left, summary in one line, body indented under it. */
-/* Flat accordion row: chevron on the left, summary in one line, body indented under it. */
 /* A row this turn added or changed while carrying earlier items. It opens by
    default, so stepping through turns shows what each one brought in. */
 function isFresh(...entries: Array<InputEntry | undefined>): boolean {
   return entries.some((entry) => entry?.rowState === "new" || entry?.rowState === "changed");
 }
 
+/* Flat accordion row: chevron on the left, summary in one line, body aligned with
+   the summary. A row without a body keeps the chevron's space so summaries align. */
 function Row({ accent, children, defaultOpen = false, dimmed = false, hint, summary }: { accent?: string; children?: ReactNode; defaultOpen?: boolean; dimmed?: boolean; hint?: string; summary: ReactNode }) {
   const { mounted, open, toggle } = useAccordion(defaultOpen);
   // A selected row carries its category color as a left bar and a light tint.
   const mark = accent ? { backgroundColor: `color-mix(in srgb, ${accent} 9%, transparent)`, boxShadow: `inset 3px 0 0 ${accent}` } : undefined;
-  const fade = dimmed ? "opacity-45 hover:opacity-100" : "";
-  if (children === undefined) return <div className={`t-row t-fade flex min-h-11 items-center gap-2.5 py-2 pl-10 pr-3 text-sm sm:pr-4 ${fade}`} style={mark} title={hint}>{summary}</div>;
+  const fade = dimmed ? "tf-dimmed" : "";
+  if (children === undefined) return <div className={`t-row t-fade tf-inset flex min-h-11 items-center gap-2.5 py-2 text-sm ${fade}`} style={mark} title={hint}><span aria-hidden="true" className="w-4 shrink-0"/>{summary}</div>;
   return <div className="t-row t-acc" data-open={open ? "true" : "false"}>
-    <div aria-expanded={open} className={`t-acc-head t-fade flex min-h-11 cursor-pointer items-center gap-2.5 px-3 py-2 text-sm outline-none hover:bg-canvas/70 focus-visible:bg-canvas sm:px-4 ${fade}`} onClick={toggle} onKeyDown={(event) => activateOnKey(event, toggle)} role="button" style={mark} tabIndex={0} title={hint}>
-      <span aria-hidden="true" className={`t-acc-chevron w-3 shrink-0 text-center text-xs ${open ? "text-muted" : "text-muted/60"}`}>›</span>
+    <div aria-expanded={open} className={`t-acc-head t-fade tf-inset tf-focus-inset flex min-h-11 cursor-pointer items-center gap-2.5 py-2 text-sm hover:bg-fill-hover ${fade}`} onClick={toggle} onKeyDown={(event) => activateOnKey(event, toggle)} role="button" style={mark} tabIndex={0} title={hint}>
+      <Chevron open={open}/>
       {summary}
     </div>
-    {mounted ? <div className="t-acc-panel"><div className="t-acc-panel-inner"><div className="pb-4 pl-[3.25rem] pr-3 pt-1 sm:pr-4">{children}</div></div></div> : null}
+    {mounted ? <div className="t-acc-panel"><div className="t-acc-panel-inner"><div className="tf-inset pb-4 pt-1"><div className="pl-[1.625rem]">{children}</div></div></div></div> : null}
   </div>;
 }
 
@@ -929,7 +919,7 @@ function StateSummary({ entries }: { entries: InputEntry[] }) {
   }
   if (!seen.size) return null;
   if (!counts.new && !counts.changed) return <Badge>unchanged</Badge>;
-  return <>{counts.changed ? <Badge tone="changed">{counts.changed} changed</Badge> : null}{counts.new ? <Badge tone="new">+{counts.new} new</Badge> : null}</>;
+  return <>{counts.changed ? <Badge tone="warning">{counts.changed} changed</Badge> : null}{counts.new ? <Badge tone="success">+{counts.new} new</Badge> : null}</>;
 }
 
 function LayerSection({ badge, children, entries, layer, selection, turnId }: { badge?: ReactNode; children: ReactNode; entries: InputEntry[]; layer: InputLayer; selection: TokenSelection | null; turnId: string }) {
@@ -938,10 +928,10 @@ function LayerSection({ badge, children, entries, layer, selection, turnId }: { 
   const dimmed = selection?.turnId === turnId && Boolean(selection.layer) && !picked;
   // A selected layer takes its own color; the other layers step back while it is selected.
   const ring = picked ? { borderColor: meta.color, boxShadow: `0 0 0 3px color-mix(in srgb, ${meta.color} 18%, transparent)` } : undefined;
-  return <section aria-label={meta.title} className={`scroll-m-24 overflow-hidden rounded-control border bg-panel transition ${picked ? "" : "border-line"} ${dimmed ? "opacity-50 hover:opacity-100" : ""}`} data-layer={layer} data-turn-id={turnId} style={ring} tabIndex={-1}>
-    <header className="flex min-h-11 items-center gap-2.5 px-3 py-1.5 sm:px-4">
-      <Icon color={meta.color} name={LAYER_ICONS[layer]}/>
-      <h3 className="shrink-0 text-sm font-semibold">{meta.title}</h3>
+  return <section aria-label={meta.title} className={`tf-card scroll-m-24 overflow-hidden transition ${dimmed ? "tf-dimmed" : ""}`} data-layer={layer} data-turn-id={turnId} style={ring} tabIndex={-1}>
+    <header className="tf-inset flex min-h-11 items-center gap-2.5 py-1.5">
+      <RowIcon color={meta.color} icon={LAYER_ICONS[layer]}/>
+      <h3 className="tf-heading shrink-0">{meta.title}</h3>
       <RowEnd badge={badge ?? <StateSummary entries={entries}/>} tokens={sumTokens(entries)}/>
     </header>
     <div className="divide-y divide-line border-t border-line">{children}</div>
@@ -985,7 +975,7 @@ function ToolDefinitionRow({ entry, onSelectToken, selection, tools, turnId }: R
           const description = textValue(tool.description);
           const schema = tool.parameters ?? tool.input_schema ?? tool.format;
           return <li key={`${name}-${index}`} style={{ containIntrinsicSize: "0 28px", contentVisibility: "auto" }}><details>
-            <summary className="grid cursor-pointer list-none grid-cols-[minmax(6rem,12rem)_minmax(0,1fr)] gap-3 rounded px-1 py-1 font-mono text-xs hover:bg-canvas/70 [&::-webkit-details-marker]:hidden"><span className="truncate text-ink">{name}</span><span className="truncate text-muted">{toolSignature(tool)}</span></summary>
+            <summary className="grid cursor-pointer list-none grid-cols-[minmax(6rem,12rem)_minmax(0,1fr)] gap-3 rounded-tag px-1 py-1 font-mono text-xs hover:bg-fill-hover [&::-webkit-details-marker]:hidden"><span className="truncate text-ink">{name}</span><span className="truncate text-muted">{toolSignature(tool)}</span></summary>
             <div className="mb-2 ml-1 mt-1 space-y-2 border-l-2 border-line pl-3">
               {description ? <p className="whitespace-pre-wrap text-xs leading-5 text-muted">{description}</p> : null}
               {schema ? <details><summary className="cursor-pointer text-xs font-medium text-muted hover:text-ink">Schema</summary><div className="mt-2"><JsonBlock value={schema}/></div></details> : null}
@@ -1021,10 +1011,10 @@ function PartRow({ defaultOpen = false, entry, onSelectToken, previous, selectio
   const fact = sectionFact(entry, text);
   const blockIds = entry.blockId ? [entry.blockId] : [];
   const changes = entry.section?.changes?.(text, previous) || [];
-  const badge = changes.length ? <Badge tone="changed">{changes.length === 1 ? `${changes[0]} changed` : `${changes.length} fields changed`}</Badge> : <StateBadge state={entry.rowState}/>;
+  const badge = changes.length ? <Badge tone="warning">{changes.length === 1 ? `${changes[0]} changed` : `${changes.length} fields changed`}</Badge> : <StateBadge state={entry.rowState}/>;
   const marks = rowMarks([entry], label, entry.inputClass.layer, selection, turnId);
   return <Row accent={marks.accent} defaultOpen={defaultOpen || marks.open || isFresh(entry)} dimmed={marks.dimmed} hint={isPrompt ? undefined : sectionPreview(entry.section, text)} summary={<>
-    <LinkSwatch blockIds={blockIds} icon={isPrompt ? "user" : label === "Assistant messages" ? "chat" : undefined} label={label} layer={entry.inputClass.layer} onSelectToken={onSelectToken} selection={selection} turnId={turnId}/>
+    <LinkSwatch blockIds={blockIds} icon={isPrompt ? UserIcon : label === "Assistant messages" ? ChatIcon : undefined} label={label} layer={entry.inputClass.layer} onSelectToken={onSelectToken} selection={selection} turnId={turnId}/>
     {isPrompt ? <span className="min-w-0 flex-1 truncate font-medium text-ink">{previewText(entry.part) || "Empty prompt"}</span> : <>
       <span className="shrink-0 text-ink">{label === "Assistant messages" ? "Assistant" : label}</span>
       <Meta mono={fact.mono}>{fact.value}</Meta>
@@ -1046,7 +1036,7 @@ function ReasoningRow({ entry, onSelectToken, selection, turnId }: RowProps & { 
   const detail = [encrypted ? "encrypted" : "", summary ? previewText(summary) : "no summary"].filter(Boolean).join(" · ");
   const marks = rowMarks([entry], "Reasoning", "conversation", selection, turnId);
   return <Row accent={marks.accent} defaultOpen={marks.open || isFresh(entry)} dimmed={marks.dimmed} summary={<>
-    <LinkSwatch blockIds={blockIds} icon="sparkle" label="Reasoning" layer="conversation" onSelectToken={onSelectToken} selection={selection} turnId={turnId}/>
+    <LinkSwatch blockIds={blockIds} icon={SparkleIcon} label="Reasoning" layer="conversation" onSelectToken={onSelectToken} selection={selection} turnId={turnId}/>
     <span className="shrink-0 text-ink">Reasoning</span>
     <Meta>{detail}</Meta>
     <RowEnd badge={<StateBadge state={entry.rowState}/>} tokens={entry.tokens}/>
@@ -1058,13 +1048,13 @@ function ReasoningRow({ entry, onSelectToken, selection, turnId }: RowProps & { 
 const CALL_SOURCE_KEYS = ["code", "cmd", "command", "source", "script", "query", "input"];
 
 function CallInput({ value }: { value: unknown }) {
-  if (typeof value === "string") return <pre className="max-h-80 overflow-auto whitespace-pre-wrap break-words rounded-lg bg-canvas px-3 py-2 font-mono text-xs leading-5 text-ink">{value}</pre>;
+  if (typeof value === "string") return <pre className="tf-code tf-well max-h-80 overflow-auto whitespace-pre-wrap break-words px-3 py-2 text-ink">{value}</pre>;
   const record = asRecord(value);
   const sourceKey = CALL_SOURCE_KEYS.find((key) => typeof record[key] === "string");
   const rest = Object.entries(record).filter(([key]) => key !== sourceKey);
   if (!sourceKey && !rest.length) return <p className="text-xs text-muted">No captured input.</p>;
   return <div className="space-y-2">
-    {sourceKey ? <pre className="max-h-80 overflow-auto whitespace-pre-wrap break-words rounded-lg bg-canvas px-3 py-2 font-mono text-xs leading-5 text-ink">{textValue(record[sourceKey])}</pre> : null}
+    {sourceKey ? <pre className="tf-code tf-well max-h-80 overflow-auto whitespace-pre-wrap break-words px-3 py-2 text-ink">{textValue(record[sourceKey])}</pre> : null}
     {rest.length ? <dl className="grid grid-cols-[7.5rem_minmax(0,1fr)] gap-x-4 gap-y-1 text-xs">{rest.map(([key, item]) => <div className="contents" key={key}><dt className="text-muted">{humanizeField(key)}</dt><dd className="min-w-0 break-words font-mono text-xs text-ink">{item && typeof item === "object" ? <StructuredValue value={item}/> : formatToolField(key, item) || (item === null ? "null" : "Unknown")}</dd></div>)}</dl> : null}
   </div>;
 }
@@ -1075,8 +1065,13 @@ function callSource(message: UnknownRecord, input: unknown): string {
   return key ? `${field}.${key}` : field;
 }
 
-function BlockHeading({ children, tokens }: { children: ReactNode; tokens?: { cached: number; tokens: number } }) {
-  return <div className="mb-1.5 flex items-baseline justify-between gap-3 text-xs text-muted"><span className="min-w-0 truncate">{children}</span>{tokens ? <span className="shrink-0 font-mono">{tokens.tokens.toLocaleString()} tok</span> : null}</div>;
+/* The label above one captured block inside a row: what it is, and a measure. */
+function BlockHeading({ aside, children }: { aside?: string; children: ReactNode }) {
+  return <div className="mb-1.5 flex items-baseline justify-between gap-3 text-xs text-muted"><span className="min-w-0 truncate">{children}</span>{aside ? <span className="shrink-0 font-mono">{aside}</span> : null}</div>;
+}
+
+function tokenAside(tokens: { cached: number; tokens: number } | undefined): string | undefined {
+  return tokens ? `${tokens.tokens.toLocaleString()} tok` : undefined;
 }
 
 function ToolExchangeRow({ call, onSelectToken, result, selection, turnId }: RowProps & { call?: InputEntry; result?: InputEntry }) {
@@ -1093,18 +1088,18 @@ function ToolExchangeRow({ call, onSelectToken, result, selection, turnId }: Row
   const resultParts = resultItem ? inputItemParts(resultItem).length : 0;
   const marks = rowMarks([call, result], result && selectionHits([result], selection, turnId) ? "Tool results" : "Tool calls", "conversation", selection, turnId);
   return <Row accent={marks.accent} defaultOpen={marks.open || isFresh(call, result)} dimmed={marks.dimmed} summary={<>
-    <LinkSwatch blockIds={blockIds} icon="terminal" label={call ? "Tool calls" : "Tool results"} layer="conversation" onSelectToken={onSelectToken} selection={selection} turnId={turnId}/>
+    <LinkSwatch blockIds={blockIds} icon={TerminalIcon} label={call ? "Tool calls" : "Tool results"} layer="conversation" onSelectToken={onSelectToken} selection={selection} turnId={turnId}/>
     <span className="shrink-0 font-mono text-sm text-ink">{namespace ? <span className="text-muted">{namespace}.</span> : null}{presentation?.name || "Tool result"}</span>
     <Meta>{title}</Meta>
     <RowEnd badge={failed ? <Badge tone="danger">failed</Badge> : <StateBadge state={state}/>} tokens={tokens}/>
   </>}>
     <div className="space-y-4">
       {call && callItem && presentation ? <BlockAnchor blockIds={entryBlockIds([call])} turnId={turnId}>
-        <BlockHeading tokens={call.tokens}>Call · {callSource(callItem, presentation.input)}{presentation.wrapperName ? ` · ${presentation.wrapperName}` : ""}</BlockHeading>
+        <BlockHeading aside={tokenAside(call.tokens)}>Call · {callSource(callItem, presentation.input)}{presentation.wrapperName ? ` · ${presentation.wrapperName}` : ""}</BlockHeading>
         <CallInput value={presentation.input}/>
       </BlockAnchor> : null}
       {result && resultItem && outcome ? <BlockAnchor blockIds={entryBlockIds([result])} turnId={turnId}>
-        <BlockHeading tokens={result.tokens}>{["Result", outcome.status, outcome.elapsed && `wall ${outcome.elapsed}`, resultParts > 1 ? `${resultParts} parts` : ""].filter(Boolean).join(" · ")}</BlockHeading>
+        <BlockHeading aside={tokenAside(result.tokens)}>{["Result", outcome.status, outcome.elapsed && `wall ${outcome.elapsed}`, resultParts > 1 ? `${resultParts} parts` : ""].filter(Boolean).join(" · ")}</BlockHeading>
         <ToolOutputView value={outcome.output}/>
       </BlockAnchor> : <p className="text-xs text-muted">The result is not part of this request.</p>}
     </div>
@@ -1184,7 +1179,7 @@ function ConversationRows({ entries, lastPromptKey, ...props }: RowProps & { ent
   return <>
     {prompt.map((entry) => <EntryRow entry={entry} key={entry.key} {...props}/>)}
     {carried.length ? <Row defaultOpen={selectionHits(carried, props.selection, props.turnId)} dimmed={selectionIds(props.selection, props.turnId).length > 0 && !selectionHits(carried, props.selection, props.turnId)} summary={<>
-      <span className="grid size-5 shrink-0 place-items-center"><Icon name="history"/></span>
+      <span className="grid size-5 shrink-0 place-items-center"><RowIcon icon={HistoryIcon}/></span>
       <span className="shrink-0 text-ink">Carried over</span>
       <Meta>{carriedItems} {carriedItems === 1 ? "item" : "items"} · {carriedSummary(carriedRows)}</Meta>
       <RowEnd badge={cacheBadge} tokens={carriedTokens}/>
@@ -1194,7 +1189,7 @@ function ConversationRows({ entries, lastPromptKey, ...props }: RowProps & { ent
 }
 
 function NestedRows({ children }: { children: ReactNode }) {
-  return <div className="-ml-7 divide-y divide-line overflow-hidden rounded-lg border border-line">{children}</div>;
+  return <div className="-ml-[1.625rem] divide-y divide-line overflow-hidden rounded-inset border border-line">{children}</div>;
 }
 
 /* Rows below 5% of their section's tokens collapse into one line when there are at
@@ -1216,7 +1211,7 @@ function MinorRowsGroup({ entries, ...props }: RowProps & { entries: InputEntry[
   const labels = [...new Set(entries.map((entry) => entry.inputClass.label))];
   const matched = entries.find((entry) => selectionHits([entry], props.selection, props.turnId));
   return <Row accent={matched ? categoryColor(matched.inputClass.label, matched.inputClass.layer) : undefined} defaultOpen={Boolean(matched)} dimmed={selectionIds(props.selection, props.turnId).length > 0 && !matched} summary={<>
-    <span className="flex shrink-0 -space-x-1">{labels.slice(0, 4).map((label) => <span className="rounded-[4px] ring-2 ring-panel" key={label}><CategorySwatch label={label} layer={entries[0].inputClass.layer}/></span>)}</span>
+    <span className="flex shrink-0 -space-x-1">{labels.slice(0, 4).map((label) => <span className="rounded-mark ring-2 ring-panel" key={label}><CategorySwatch label={label} layer={entries[0].inputClass.layer}/></span>)}</span>
     <span className="min-w-0 flex-1 truncate text-ink">{labels.join(" · ")}</span>
     <RowEnd badge={<StateBadge state={entries.find((entry) => entry.rowState)?.rowState}/>} tokens={sumTokens(entries)}/>
   </>}><NestedRows>{entries.map((entry) => <EntryRow entry={entry} key={entry.key} {...props}/>)}</NestedRows></Row>;
@@ -1270,13 +1265,13 @@ function RequestSettings({ body, record }: { body: UnknownRecord; record: TraceR
   ];
   const visible = groups.map(([title, facts]) => [title, facts.filter(([, value]) => value !== undefined && value !== null && value !== "")] as const).filter(([, facts]) => facts.length);
   if (!visible.length) return null;
-  return <section aria-label="Request settings" className="overflow-hidden rounded-control border border-line bg-panel">
-    <header className="flex min-h-11 items-center gap-2.5 px-3 py-1.5 sm:px-4">
-      <Icon name="sliders"/>
-      <h3 className="shrink-0 text-sm font-semibold">Request settings</h3>
+  return <section aria-label="Request settings" className="tf-card overflow-hidden">
+    <header className="tf-inset flex min-h-11 items-center gap-2.5 py-1.5">
+      <RowIcon icon={SlidersIcon}/>
+      <h3 className="tf-heading shrink-0">Request settings</h3>
     </header>
     <div className="divide-y divide-line border-t border-line">
-      {chips.length ? <div className="flex flex-wrap gap-1.5 px-3 py-2.5 sm:px-4">{chips.map((chip) => <Badge key={chip}>{chip}</Badge>)}</div> : null}
+      {chips.length ? <div className="tf-inset flex flex-wrap gap-1.5 py-2.5">{chips.map((chip) => <Badge key={chip} mono>{chip}</Badge>)}</div> : null}
       <Row summary={<span className="text-muted">All settings</span>}>
         <div className="space-y-4">{visible.map(([title, facts]) => <section key={title}><h4 className="mb-1.5 text-xs font-medium text-muted">{title}</h4><dl className="grid grid-cols-[9rem_minmax(0,1fr)] gap-x-4 gap-y-1 text-xs">{facts.map(([label, value]) => <div className="contents" key={label}><dt className="text-muted">{label}</dt><dd className="min-w-0 break-all font-mono text-xs text-ink">{typeof value === "boolean" ? (value ? "on" : "off") : textValue(value) || "configured"}</dd></div>)}</dl></section>)}</div>
       </Row>
@@ -1306,7 +1301,7 @@ function RequestHeader({ turn }: { turn: TurnModel }) {
   const route = record.transport || `${record.request?.method || ""} ${record.request?.path || ""}`.trim();
   const facts = [turn.model, route, status ? String(status) : "", turn.durationMs ? formatDuration(turn.durationMs) : ""].filter(Boolean);
   return <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1 px-1 pb-1">
-    <h3 className="min-w-0 max-w-full truncate text-lg font-semibold tracking-[-0.01em]">{turn.queryText || turn.title}</h3>
+    <h3 className="tf-title min-w-0 max-w-full truncate">{turn.queryText || turn.title}</h3>
     <span className={`text-xs ${status >= 400 ? "text-danger" : "text-muted"}`}>{facts.join(" · ")}</span>
     <span className="ml-auto font-mono text-xs text-muted">{turn.input ? <>{formatNumber(turn.input)} in · {formatNumber(turn.cached)} cached · <span className="text-ink">{formatNumber(turn.fresh)} new</span></> : "Token usage unknown"}</span>
   </div>;
@@ -1319,19 +1314,19 @@ function ChainNote({ turn }: { turn: TurnModel }) {
   const estimated = turn.categories.some((category) => category.estimated);
   const estimateNote = estimated ? " Within those measured totals, blocks are sized with a local tokenizer (≈)." : "";
   if (turn.cacheChain) return <p className="flex items-center gap-2 px-1 text-xs text-muted">
-    <Icon name="history"/>
+    <RowIcon icon={HistoryIcon}/>
     <span>From prompt-cache counts: {formatNumber(turn.cacheChain.carried)} tokens are Turn {turn.cacheChain.fromTurn}&apos;s prompt read from cache, and {formatNumber(turn.cacheChain.added)} tokens are the items added since.{estimateNote}</span>
   </p>;
   if (estimated) return <p className="flex items-center gap-2 px-1 text-xs text-muted">
-    <Icon name="history"/>
+    <RowIcon icon={HistoryIcon}/>
     <span>The provider reported only a total for this request. Categories size each block with a local tokenizer (≈), scaled to the measured {formatNumber(turn.input)} input tokens.</span>
   </p>;
   if (chainedFromTurn && chainedItems) return <p className="flex items-center gap-2 px-1 text-xs text-muted">
-    <Icon name="history"/>
+    <RowIcon icon={HistoryIcon}/>
     <span>Continues Turn {chainedFromTurn}: {formatNumber(chainedItems)} earlier {chainedItems === 1 ? "item comes" : "items come"} from that turn&apos;s captured request and output. Raw shows only the new items this request sent.</span>
   </p>;
   if (chainBroken) return <p className="flex items-center gap-2 px-1 text-xs text-muted">
-    <Icon name="history"/>
+    <RowIcon icon={HistoryIcon}/>
     <span>This request continues a response that was not captured, so only the new items it sent are shown.</span>
   </p>;
   return null;
@@ -1352,8 +1347,7 @@ function StructuredRequest({ earlierTurns, onSelectToken, selection, turn }: { e
   const rowProps = { onSelectToken, selection, turnId };
   const contextChanges = (byLayer.get("context") || []).filter((entry) => entry.inputClass.label === "Environment" && (entry.section?.changes?.(capturedText(entry.part), previousEnvironment) || []).length).length;
 
-  return <div className="space-y-4 p-3 sm:p-4">
-
+  return <div className="tf-pad space-y-4">
     <ChainNote turn={turn}/>
 
     {LAYER_ORDER.map((layer) => {
@@ -1366,7 +1360,7 @@ function StructuredRequest({ earlierTurns, onSelectToken, selection, turn }: { e
         </LayerSection>;
       }
       if (!layerEntries.length) return null;
-      const badge = layer === "context" && contextChanges ? <Badge tone="changed">{contextChanges} changed</Badge> : undefined;
+      const badge = layer === "context" && contextChanges ? <Badge tone="warning">{contextChanges} changed</Badge> : undefined;
       return <LayerSection badge={badge} entries={layerEntries} key={layer} layer={layer} selection={selection} turnId={turnId}>
         {layer === "conversation"
           ? <ConversationRows entries={layerEntries} lastPromptKey={lastPromptKey} {...rowProps}/>
@@ -1376,9 +1370,9 @@ function StructuredRequest({ earlierTurns, onSelectToken, selection, turn }: { e
       </LayerSection>;
     })}
 
-    {!hasContent ? <div className="rounded-control border border-dashed border-line p-5 text-center text-xs text-muted">No message content was captured.</div> : null}
+    {!hasContent ? <EmptyState framed title="No message content">This request was captured without message content. Raw shows exactly what was recorded.</EmptyState> : null}
 
-    {selection?.turnId === turnId && selection.label === "Unattributed input" ? <div className="rounded-control border border-dashed border-line p-4 text-xs text-muted"><strong className="text-ink">No exact request section</strong><p className="mt-1">This remainder was not attributed to a captured input block, so Token Flow does not guess a destination.</p></div> : null}
+    {selection?.turnId === turnId && selection.label === "Unattributed input" ? <EmptyState framed title="No exact request section">This remainder was not attributed to a captured input block, so Token Flow does not guess a destination.</EmptyState> : null}
 
     <RequestSettings body={body} record={record}/>
   </div>;
@@ -1389,7 +1383,7 @@ function RequestBody({ earlierTurns, focusPath, mode, onSelectToken, selection, 
   const turnId = turn.id;
   const selectedPath = useMemo(() => focusPath || selectedJsonPath(record, selection, turnId), [focusPath, record, selection, turnId]);
   if (mode === "structured") return <StructuredRequest earlierTurns={earlierTurns} onSelectToken={onSelectToken} selection={selection} turn={turn}/>;
-  return <div className="p-3 sm:p-4"><div className="overflow-hidden rounded-control border border-line"><RawJsonTree selectedBlockId={selection?.turnId === turnId ? selection.blockId : undefined} selectedPath={selectedPath} turnId={turnId} value={record}/></div></div>;
+  return <div className="tf-pad"><div className="tf-card overflow-hidden"><RawJsonTree selectedBlockId={selection?.turnId === turnId ? selection.blockId : undefined} selectedPath={selectedPath} turnId={turnId} value={record}/></div></div>;
 }
 
 
@@ -1413,30 +1407,30 @@ function SelectionChip({ onJump, onSelectToken, selection }: { onJump: (selectio
     <CategorySwatch label={selection.label} layer={selection.layer}/>
     <span className="max-w-40 truncate font-medium text-ink">{selection.label}{selection.layer ? " layer" : ""}</span>
     {ids.length > 1 ? <span className="flex items-center font-mono text-xs text-muted">
-      <button aria-label="Previous matching block" className="grid size-11 place-items-center rounded-full hover:bg-panel hover:text-ink" onClick={() => move(-1)} type="button">‹</button>
+      <button aria-label="Previous matching block" className="grid size-11 place-items-center rounded-full hover:bg-fill-hover hover:text-ink" onClick={() => move(-1)} type="button"><ChevronLeftIcon className="size-4"/></button>
       {position + 1}/{ids.length}
-      <button aria-label="Next matching block" className="grid size-11 place-items-center rounded-full hover:bg-panel hover:text-ink" onClick={() => move(1)} type="button">›</button>
+      <button aria-label="Next matching block" className="grid size-11 place-items-center rounded-full hover:bg-fill-hover hover:text-ink" onClick={() => move(1)} type="button"><ChevronRightIcon className="size-4"/></button>
     </span> : null}
-    <button aria-label="Clear selection" className="grid size-11 place-items-center rounded-full text-muted hover:bg-panel hover:text-ink" onClick={() => onSelectToken(null)} type="button">×</button>
+    <button aria-label="Clear selection" className="grid size-11 place-items-center rounded-full text-muted hover:bg-fill-hover hover:text-ink" onClick={() => onSelectToken(null)} type="button"><CloseIcon className="size-4"/></button>
   </span>;
 }
 
 function SearchResults({ current, hits, onPick, query }: { current: number; hits: SearchHit[]; onPick: (index: number) => void; query: string }) {
   return <div className="t-dropdown-enter border-t border-line">
-    <div className="flex items-center justify-between gap-3 px-3 py-1.5 text-xs text-muted sm:px-4">
+    <div className="tf-inset flex items-center justify-between gap-3 py-1.5 text-xs text-muted">
       <span>{hits.length >= SEARCH_HIT_LIMIT ? `${SEARCH_HIT_LIMIT}+` : hits.length} {hits.length === 1 ? "match" : "matches"}{current >= 0 ? ` · ${current + 1} of ${hits.length}` : ""}</span>
       <span className="hidden sm:inline">Enter next · Shift+Enter previous · Esc clears</span>
     </div>
     {hits.length ? <ol className="max-h-64 overflow-y-auto border-t border-line">{hits.map((hit, index) => <li key={hit.key}>
-      <button aria-current={index === current ? "true" : undefined} className={`grid w-full gap-0.5 px-3 py-2 text-left hover:bg-canvas/70 sm:px-4 ${index === current ? "bg-canvas" : ""}`} onClick={() => onPick(index)} type="button">
+      <button aria-current={index === current ? "true" : undefined} className={`tf-inset tf-focus-inset grid w-full gap-0.5 py-2 text-left ${index === current ? "bg-fill-selected" : "hover:bg-fill-hover"}`} onClick={() => onPick(index)} type="button">
         <span className="flex min-w-0 items-center gap-2 text-xs">
-          <i className="size-2.5 shrink-0 rounded-[3px]" style={{ background: hit.color || "var(--line)" }}/>
+          <Swatch color={hit.color || "var(--line)"}/>
           <span className="truncate font-medium text-ink">{hit.location}</span>
           <code className="ml-auto hidden max-w-[45%] truncate font-mono text-xs text-muted sm:block">{hit.pathText.replace(/^trace\.?/, "")}</code>
         </span>
-        <span className="truncate pl-[18px] text-xs text-muted">{hit.before}<mark className="rounded-sm bg-warning/40 px-0.5 text-ink">{hit.match}</mark>{hit.after}</span>
+        <span className="truncate pl-[18px] text-xs text-muted">{hit.before}<mark className="rounded-mark bg-warning/40 px-0.5 text-ink">{hit.match}</mark>{hit.after}</span>
       </button>
-    </li>)}</ol> : <p className="border-t border-line px-4 py-3 text-xs text-muted">Nothing in this turn&apos;s captured request or response contains “{query}”.</p>}
+    </li>)}</ol> : <p className="tf-inset border-t border-line py-3 text-xs text-muted">Nothing in this turn&apos;s captured request or response contains “{query}”.</p>}
   </div>;
 }
 
@@ -1569,34 +1563,29 @@ export function RequestView({ jumpToBlock, onNavigate, onSelectToken, selection,
     }
   };
 
-  return <section aria-label={`Turn ${turn.label}`} className="rounded-panel border border-line bg-panel shadow-sm">
-    <div className="sticky top-0 z-20 rounded-t-2xl border-b border-line bg-panel lg:top-14" data-search-ignore="">
-      <div className="flex flex-wrap items-center gap-1 px-2 py-2 sm:px-3">
-        <button aria-label="Back to overview" className="tf-icon-control grid place-items-center rounded-control text-muted hover:bg-canvas hover:text-ink" onClick={() => onNavigate(null)} title="Overview (Esc)" type="button">←</button>
+  return <section aria-label={`Turn ${turn.label}`} className="tf-panel">
+    <div className="sticky top-0 z-(--z-sticky) rounded-t-panel border-b border-line bg-panel lg:top-(--tf-toolbar-height)" data-search-ignore="">
+      <div className="tf-inset flex flex-wrap items-center gap-1 py-2">
+        <IconButton className="-ml-2" label="Back to overview" onClick={() => onNavigate(null)} title="Overview (Esc)"><ArrowLeftIcon/></IconButton>
         <div className="flex items-center">
-          <button aria-label="Previous turn" className="tf-icon-control grid place-items-center rounded-control text-muted hover:bg-canvas hover:text-ink disabled:opacity-30" disabled={selectedIndex <= 0} onClick={() => step(-1)} title="Previous turn (↑)" type="button">‹</button>
+          <IconButton disabled={selectedIndex <= 0} label="Previous turn" onClick={() => step(-1)} title="Previous turn (↑)"><ChevronLeftIcon/></IconButton>
           <span className="whitespace-nowrap px-1 text-sm"><span className="font-medium">Turn {turn.label}</span><span className="text-muted"> of {turns.length}</span></span>
-          <button aria-label="Next turn" className="tf-icon-control grid place-items-center rounded-control text-muted hover:bg-canvas hover:text-ink disabled:opacity-30" disabled={selectedIndex >= turns.length - 1} onClick={() => step(1)} title="Next turn (↓)" type="button">›</button>
+          <IconButton disabled={selectedIndex >= turns.length - 1} label="Next turn" onClick={() => step(1)} title="Next turn (↓)"><ChevronRightIcon/></IconButton>
         </div>
         {selection?.turnId === turn.id ? <SelectionChip onJump={(next) => setLocalJump({ ...next, nonce: Date.now() })} onSelectToken={onSelectToken} selection={selection}/> : null}
         <div className="ml-auto flex items-center gap-1">
           <Segmented label="Request view" onChange={setView} options={[["structured", "Structured"], ["raw", "Raw"], ["changes", "Changes"]]} value={view}/>
-          <button aria-expanded={searchOpen || Boolean(query)} aria-label="Search this turn" className={`tf-icon-control grid place-items-center rounded-control hover:bg-canvas ${searchOpen || query ? "text-ink" : "text-muted"}`} onClick={() => { if (searchOpen || query) { setSearchOpen(false); setQuery(""); } else openSearch(); }} title="Search this turn" type="button"><SearchIcon className="size-[18px]"/></button>
+          <IconButton active={searchOpen || Boolean(query)} aria-expanded={searchOpen || Boolean(query)} className="-mr-2" label="Search this turn" onClick={() => { if (searchOpen || query) { setSearchOpen(false); setQuery(""); } else openSearch(); }}><SearchIcon/></IconButton>
         </div>
       </div>
-      {scope === "turn" && (searchOpen || query) ? <div className="flex items-center gap-2 px-3 pb-2.5 sm:px-4">
-        <label className="relative block min-w-0 flex-1">
-          <span className="sr-only">Search this turn</span>
-          <SearchIcon className="pointer-events-none absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-muted"/>
-          <input className="tf-control w-full rounded-control border border-line bg-canvas pl-8 pr-8 text-sm outline-none placeholder:text-muted focus:border-muted" onChange={(event) => { setQuery(event.target.value); setListOpen(true); }} onKeyDown={onSearchKey} autoFocus placeholder="Search this turn's request and response" ref={searchRef} type="search" value={query}/>
-          {query ? <button aria-label="Clear search" className="absolute right-0.5 top-0 grid size-11 place-items-center text-sm text-muted hover:text-ink" onClick={() => setQuery("")} type="button">×</button> : null}
-        </label>
-        {searching && hits.length ? <button aria-expanded={listOpen} className="tf-control shrink-0 rounded-control px-2 text-sm font-medium text-muted hover:bg-canvas hover:text-ink" onClick={() => setListOpen(!listOpen)} type="button">{listOpen ? "Hide list" : `Show ${hits.length}`}</button> : null}
+      {scope === "turn" && (searchOpen || query) ? <div className="tf-inset flex items-center gap-2 pb-2">
+        <SearchField autoFocus inputRef={searchRef} label="Search this turn" onChange={(value) => { setQuery(value); setListOpen(true); }} onKeyDown={onSearchKey} placeholder="Search this turn's request and response" value={query}/>
+        {searching && hits.length ? <Button aria-expanded={listOpen} className="-mr-2" compact onClick={() => setListOpen(!listOpen)} variant="ghost">{listOpen ? "Hide list" : `Show ${hits.length}`}</Button> : null}
       </div> : null}
       {searching && listOpen ? <SearchResults current={current} hits={hits} onPick={goTo} query={query}/> : null}
     </div>
     <div data-row-motion={rowMotion ? "enter" : undefined} ref={bodyRef}>
-      <div className="px-3 pt-3 sm:px-4 sm:pt-4"><RequestHeader turn={turn}/></div>
+      <div className="tf-inset pt-3 sm:pt-4"><RequestHeader turn={turn}/></div>
       {scope === "changes" ? <RequestChanges current={turn} previous={previous}/> : <RequestBody earlierTurns={turns.slice(0, Math.max(0, selectedIndex))} focusPath={mode === "raw" ? jump?.path : null} mode={mode} onSelectToken={onSelectToken} selection={selection} turn={turn}/>}
     </div>
   </section>;

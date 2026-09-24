@@ -76,6 +76,10 @@ Supported clients are plugins; never branch on a client id outside its plugin.
   `ui/components/workspace/section-views.tsx`, not in plugins.
 - `.agents/docs/standards/product-design-system.md` is the product and
   interaction contract for every user-facing surface.
+- UI styling goes through the design system: tokens in `ui/styles/tokens.css`,
+  roles in `ui/styles/globals.css`, primitives in `ui/components/ui/`. Views
+  compose primitives rather than restyling them, and lint rejects raw palette
+  classes, `dark:` variants, and pixel radii or type sizes in class strings.
 - `/Users/songhaifan/Documents/Token Flow/claude-tap` is a read-only upstream
   reference checkout. Token Flow must never import from it or require it at
   runtime. Copy only behavior that has been deliberately selected and adapted.

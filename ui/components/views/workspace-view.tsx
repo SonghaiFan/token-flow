@@ -4,9 +4,10 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { deleteSession, fetchSessionRecords, fetchTokenEstimates } from "@/lib/api";
 import { buildTurns, estimateTexts, type TokenEstimates } from "@/lib/token-model";
 import type { SessionRecordsPayload, TokenSelection } from "@/lib/types";
-import { AppShell } from "../app-shell";
-import { DeleteDialog } from "../delete-dialog";
-import { MenuItem } from "../menu";
+import { AppShell, LiveStatus, type LiveState } from "../app-shell";
+import { ConfirmDialog } from "../ui/dialog";
+import { EmptyState, Notice } from "../ui/feedback";
+import { MenuItem } from "../ui/menu";
 import { ConversationOverview } from "../workspace/conversation-overview";
 import type { CategoryFocus } from "../workspace/input-units";
 import { RequestView } from "../workspace/request-view";
@@ -24,7 +25,7 @@ export function WorkspaceView({ sessionId, onBack }: { sessionId: string; onBack
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [deleteError, setDeleteError] = useState("");
   const [deleting, setDeleting] = useState(false);
-  const [liveState, setLiveState] = useState<"connecting" | "watching" | "reconnecting" | "stale">("connecting");
+  const [liveState, setLiveState] = useState<LiveState>("connecting");
 
   useEffect(() => {
     const controller = new AbortController();
@@ -133,29 +134,27 @@ export function WorkspaceView({ sessionId, onBack }: { sessionId: string; onBack
     }
   }, [onBack, sessionId]);
 
-  if (error) return <AppShell onBack={onBack} title="Conversation"><main className="mx-auto max-w-3xl p-6"><div className="rounded-panel border border-red-200 bg-red-50 p-5 text-red-700">{error}</div></main></AppShell>;
-  if (!data) return <AppShell onBack={onBack} title="Conversation"><main className="grid min-h-[70dvh] place-items-center text-sm text-muted">Loading conversation…</main></AppShell>;
+  if (error) return <AppShell onBack={onBack} title="Conversation"><main className="tf-gutter mx-auto max-w-3xl py-6"><Notice title="This conversation could not be loaded" tone="danger">{error}</Notice></main></AppShell>;
+  if (!data) return <AppShell onBack={onBack} title="Conversation"><main className="grid min-h-[70dvh] place-items-center"><EmptyState>Loading conversation…</EmptyState></main></AppShell>;
 
-  const liveLabel = liveState === "watching" ? "Watching" : liveState === "stale" ? "Updates paused" : liveState === "reconnecting" ? "Reconnecting" : "Connecting";
   const active = data.session.live || data.session.status === "active";
-  const meta = <span className="inline-flex items-center gap-2"><i className={`size-2 rounded-full ${liveState === "watching" ? "bg-emerald-500" : "bg-amber-500"}`}/>{liveLabel}</span>;
   const menu = (close: () => void) => <>
     <MenuItem onSelect={() => { close(); window.location.href = `/api/sessions/${encodeURIComponent(sessionId)}/export/compact`; }}>Export conversation</MenuItem>
     <MenuItem danger disabled={active} onSelect={() => { close(); setDeleteOpen(true); }}>{active ? "Active conversations can't be deleted" : "Delete conversation…"}</MenuItem>
   </>;
 
-  return <AppShell menu={menu} meta={meta} onBack={onBack} title={title}>
-    <main className="mx-auto grid min-w-0 w-full max-w-[1600px] gap-3 py-3 lg:grid-cols-[minmax(24rem,32rem)_minmax(0,1fr)] lg:px-4">
+  return <AppShell menu={menu} meta={<LiveStatus state={liveState}/>} onBack={onBack} title={title}>
+    <main className="mx-auto grid w-full min-w-0 max-w-page gap-3 py-3 lg:grid-cols-[minmax(var(--tf-rail-min),var(--tf-rail-max))_minmax(0,1fr)] lg:px-3">
       <TurnFlow focus={turn ? null : focusCategory} onSelectNode={selectNode} onSelectTurn={selectTurn} selected={selected} selection={tokenSelection} turns={turns}/>
       {/* On narrow screens the selected turn opens over the flow; closing it returns to the same place. */}
       {/* Opening a turn slides forward from the overview and closing it slides back
           (page side-by-side); on narrow screens the turn rises over the flow instead. */}
-      <div className={`t-page-enter ${turn ? "fixed inset-0 z-50 overflow-y-auto bg-canvas p-2 lg:static lg:z-auto lg:overflow-visible lg:bg-transparent lg:p-0" : "min-w-0 px-3 pb-5 lg:px-0"}`} data-overlay={turn ? "true" : undefined} key={turn ? "turn" : "overview"} style={{ "--t-page-dir": turn ? 1 : -1 } as React.CSSProperties}>
+      <div className={`t-page-enter ${turn ? "fixed inset-0 z-(--z-sheet) overflow-y-auto bg-canvas p-2 lg:static lg:z-auto lg:overflow-visible lg:bg-transparent lg:p-0" : "min-w-0 px-3 pb-5 lg:px-0"}`} data-overlay={turn ? "true" : undefined} key={turn ? "turn" : "overview"} style={{ "--t-page-dir": turn ? 1 : -1 } as React.CSSProperties}>
         {turn
           ? <RequestView jumpToBlock={requestJump?.turnId === turn.id ? requestJump : null} onNavigate={selectTurn} onSelectToken={setTokenSelection} selection={tokenSelection} turn={turn} turns={turns}/>
-          : <section className="rounded-panel border border-line bg-panel shadow-sm"><ConversationOverview focus={focusCategory} onFocus={setFocusCategory} onSelectNode={selectNode} onSelectTurn={selectTurn} session={data.session} turns={turns}/></section>}
+          : <section className="tf-panel"><ConversationOverview focus={focusCategory} onFocus={setFocusCategory} onSelectNode={selectNode} onSelectTurn={selectTurn} session={data.session} turns={turns}/></section>}
       </div>
     </main>
-    <DeleteDialog busy={deleting} description={`This permanently deletes “${title}” and its captured records.`} error={deleteError} onCancel={closeDeleteDialog} onConfirm={() => void confirmDelete()} open={deleteOpen} title="Delete this conversation?"/>
+    <ConfirmDialog busy={deleting} busyLabel="Deleting…" confirmLabel="Delete" description={`This permanently deletes “${title}” and its captured records.`} error={deleteError} onCancel={closeDeleteDialog} onConfirm={() => void confirmDelete()} open={deleteOpen} title="Delete this conversation?"/>
   </AppShell>;
 }

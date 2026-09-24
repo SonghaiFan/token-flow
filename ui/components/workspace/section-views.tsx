@@ -4,9 +4,9 @@
    (`ui/lib/agents`) parse their own section formats and render with these, so
    every agent's evidence reads the same way. */
 
-import type { ReactNode } from "react";
 import { Streamdown, type Components } from "streamdown";
 import { asObject } from "@/lib/json";
+import { Badge } from "../ui/badge";
 
 const markdownComponents: Components = {
   h1: ({ children }) => <h1 className="mb-3 mt-5 text-xl font-semibold tracking-[-0.03em] first:mt-0">{children}</h1>,
@@ -18,11 +18,11 @@ const markdownComponents: Components = {
   li: ({ children }) => <li className="pl-0.5">{children}</li>,
   blockquote: ({ children }) => <blockquote className="my-3 border-l-2 border-line pl-4 text-muted">{children}</blockquote>,
   a: ({ children, href }) => <a className="font-medium underline decoration-line underline-offset-4 hover:decoration-ink" href={href} rel="noreferrer" target="_blank">{children}</a>,
-  code: ({ children }) => <code className="rounded bg-canvas px-1 py-0.5 font-mono text-[0.9em]">{children}</code>,
-  pre: ({ children }) => <pre className="tf-code my-3 max-h-[32rem] overflow-auto rounded-lg border border-line bg-canvas p-3">{children}</pre>,
+  code: ({ children }) => <code className="rounded-tag bg-canvas px-1 py-0.5 font-mono text-[0.9em]">{children}</code>,
+  pre: ({ children }) => <pre className="tf-code tf-well my-3 max-h-[32rem] overflow-auto border border-line p-3">{children}</pre>,
   // Captured markdown tables are evidence to read, so render a plain table without
   // Streamdown's copy, download, and fullscreen chrome. Only wide tables scroll.
-  table: ({ children }) => <div className="my-3 overflow-x-auto"><table className="w-full border-collapse text-left text-[12px] leading-5">{children}</table></div>,
+  table: ({ children }) => <div className="my-3 overflow-x-auto"><table className="w-full border-collapse text-left text-xs leading-5">{children}</table></div>,
   thead: ({ children }) => <thead className="border-b border-line">{children}</thead>,
   tbody: ({ children }) => <tbody className="divide-y divide-line">{children}</tbody>,
   tr: ({ children }) => <tr>{children}</tr>,
@@ -80,23 +80,12 @@ export function humanizeField(value: string): string {
   return labels[value] || value.replaceAll("_", " ").replace(/^./, (character) => character.toUpperCase());
 }
 
-export function Pill({ children, tone = "neutral" }: { children: ReactNode; tone?: "neutral" | "system" | "user" | "assistant" | "danger" }) {
-  const tones = {
-    neutral: "border-line bg-canvas text-muted",
-    system: "border-amber-200 bg-amber-50 text-amber-800 dark:border-amber-900 dark:bg-amber-950 dark:text-amber-300",
-    user: "border-blue-200 bg-blue-50 text-blue-700 dark:border-blue-900 dark:bg-blue-950 dark:text-blue-300",
-    assistant: "border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-900 dark:bg-emerald-950 dark:text-emerald-300",
-    danger: "border-red-200 bg-red-50 text-danger dark:border-red-900 dark:bg-red-950",
-  };
-  return <span className={`inline-flex max-w-full items-center whitespace-nowrap rounded-full border px-2 py-0.5 font-mono text-xs font-medium ${tones[tone]}`}>{children}</span>;
-}
-
 export function RichText({ children }: { children: string }) {
   return <Streamdown animated={false} className="min-w-0 break-words text-sm text-ink" components={markdownComponents} dir="auto" mode="static">{escapeCapturedTags(children)}</Streamdown>;
 }
 
 export function ReadableText({ value }: { value: string }) {
-  return <div className="max-h-[36rem] overflow-auto rounded-lg bg-canvas/60 px-4 py-3"><RichText>{value}</RichText></div>;
+  return <div className="tf-well max-h-[36rem] overflow-auto px-4 py-3"><RichText>{value}</RichText></div>;
 }
 
 /* An agent's environment block reduced to comparable facts. */
@@ -148,7 +137,7 @@ export function EnvironmentView({ earlier, facts }: { earlier: EnvironmentFacts 
     </dl>
     {facts.entries.length ? <details className="text-xs">
       <summary className="cursor-pointer text-xs text-muted hover:text-ink">{facts.entries.length} access rules</summary>
-      <div className="mt-2 overflow-hidden rounded-lg border border-line"><table className="w-full table-fixed text-left text-xs"><tbody className="divide-y divide-line">{facts.entries.map((entry, index) => <tr key={`${entry.target}-${index}`}><td className="w-20 px-3 py-1.5 align-top"><Pill tone={entry.access === "deny" ? "danger" : "neutral"}>{entry.access}</Pill></td><td className="break-all px-3 py-1.5 font-mono text-ink">{entry.target}{entry.special ? <span className="ml-2 font-sans text-xs text-muted">special</span> : null}{entry.escalatable === "false" ? <span className="ml-2 font-sans text-xs text-muted">not escalatable</span> : null}</td></tr>)}</tbody></table></div>
+      <div className="mt-2 overflow-hidden rounded-inset border border-line"><table className="w-full table-fixed text-left text-xs"><tbody className="divide-y divide-line">{facts.entries.map((entry, index) => <tr key={`${entry.target}-${index}`}><td className="w-20 px-3 py-1.5 align-top"><Badge mono tone={entry.access === "deny" ? "danger" : "neutral"}>{entry.access}</Badge></td><td className="break-all px-3 py-1.5 font-mono text-ink">{entry.target}{entry.special ? <span className="ml-2 font-sans text-xs text-muted">special</span> : null}{entry.escalatable === "false" ? <span className="ml-2 font-sans text-xs text-muted">not escalatable</span> : null}</td></tr>)}</tbody></table></div>
     </details> : null}
   </div>;
 }

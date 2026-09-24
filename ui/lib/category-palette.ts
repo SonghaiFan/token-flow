@@ -48,3 +48,6 @@ export const CATEGORY_COLORS: Record<string, string> = {
 export function categoryColor(label: string, layer: InputLayer = "unknown"): string {
   return CATEGORY_COLORS[label] || LAYER_COLORS[layer];
 }
+
+/* Opacity of chart marks outside the current selection or focus, in every chart. */
+export const FADED_MARK_OPACITY = 0.22;

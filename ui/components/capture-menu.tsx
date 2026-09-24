@@ -4,8 +4,10 @@ import { useState } from "react";
 import { useCapture } from "@/lib/capture-store";
 import type { CaptureClient } from "@/lib/types";
 import { AgentMark } from "./agent-mark";
-import { ChevronRightIcon, PlusIcon } from "./icons";
-import { Menu, MenuItem, MenuLabel, MenuSeparator } from "./menu";
+import { StatusDot } from "./ui/badge";
+import { Button } from "./ui/button";
+import { ChevronRightIcon, PlusIcon } from "./ui/icons";
+import { Menu, MenuItem, MenuLabel, MenuSeparator } from "./ui/menu";
 
 function since(value: string | null | undefined): string {
   const started = value ? Date.parse(value) : NaN;
@@ -35,14 +37,10 @@ export function CaptureButton() {
   const where = capture.client?.terminal ? "Running in a Terminal window" : "Running in the desktop app";
 
   return <div className="relative shrink-0">
-    <Menu label="Capture with" trigger={(props) => <button
-      {...props}
-      className={`tf-control inline-flex items-center gap-2 whitespace-nowrap rounded-control border px-4 text-sm font-medium transition-colors active:translate-y-px ${capture.active ? "border-emerald-300 bg-emerald-50 text-emerald-800 hover:bg-emerald-100 dark:border-emerald-800 dark:bg-emerald-950 dark:text-emerald-300" : "border-ink bg-ink text-panel hover:opacity-90"}`}
-      type="button"
-    >
-      {capture.active ? <span aria-hidden="true" className="size-2 rounded-full bg-emerald-600"/> : <PlusIcon aria-hidden="true" className="size-4"/>}
+    <Menu label="Capture with" trigger={(props) => <Button {...props} variant={capture.active ? "live" : "primary"}>
+      {capture.active ? <StatusDot tone="success"/> : <PlusIcon className="size-4"/>}
       {capture.active ? `Capturing ${capture.clientLabel}` : "Capture"}
-    </button>} width={280}>
+    </Button>} width={280}>
       {(close) => <>
         {capture.active ? <>
           <div className="flex items-center gap-2.5 px-2.5 pb-1 pt-2">
@@ -66,18 +64,18 @@ export function CaptureButton() {
           <MenuSeparator/>
           <MenuItem onSelect={() => setShowMore((open) => !open)}>
             <span className="flex-1 text-muted">More agents…</span>
-            <ChevronRightIcon aria-hidden="true" className={`size-4 text-muted transition-transform ${showMore ? "rotate-90" : ""}`}/>
+            <ChevronRightIcon className={`size-4 text-muted transition-transform ${showMore ? "rotate-90" : ""}`}/>
           </MenuItem>
-          {showMore ? <ul className="pb-1">{missing.map((client) => <li className="flex min-h-10 items-center gap-3 px-2.5" key={client.id}>
+          {showMore ? <ul className="pb-1">{missing.map((client) => <li className="flex min-h-11 items-center gap-3 px-2.5" key={client.id}>
             <span className="opacity-50"><AgentMark label={client.label}/></span>
-            <span className="min-w-0 flex-1"><span className="block truncate text-sm">{client.label}</span><span className="block truncate font-mono text-[11px] text-muted">{missingNote(client)}</span></span>
-            {client.install_url && client.reason !== "platform" ? <a className="shrink-0 rounded px-1 text-xs text-muted underline decoration-line underline-offset-4 hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ink/30" href={client.install_url} rel="noreferrer" target="_blank">Install ↗</a> : null}
+            <span className="min-w-0 flex-1"><span className="block truncate text-sm">{client.label}</span><span className="block truncate font-mono text-xs text-muted">{missingNote(client)}</span></span>
+            {client.install_url && client.reason !== "platform" ? <a className="shrink-0 rounded-tag px-1 text-xs text-muted underline decoration-line underline-offset-4 hover:text-ink" href={client.install_url} rel="noreferrer" target="_blank">Install ↗</a> : null}
           </li>)}</ul> : null}
         </> : null}
-        {status.cwd && ready.some((client) => client.terminal) ? <p className="border-t border-line px-2.5 pb-1 pt-2 text-[11px] leading-4 text-muted">Terminal agents start in <code className="break-all font-mono">{status.cwd}</code></p> : null}
+        {status.cwd && ready.some((client) => client.terminal) ? <p className="-mx-1 border-t border-line px-3.5 pb-1 pt-2 text-xs text-muted">Terminal agents start in <code className="break-all font-mono">{status.cwd}</code></p> : null}
       </>}
     </Menu>
-    {capture.error ? <p className="absolute right-0 top-[calc(100%+0.5rem)] z-[60] w-72 rounded-control border border-red-200 bg-panel p-3 text-xs leading-5 text-red-700 shadow-lg dark:border-red-900 dark:text-red-300" role="alert">{capture.error}</p> : null}
+    {capture.error ? <p className="absolute right-0 top-[calc(100%+0.5rem)] z-(--z-popover) w-72 rounded-control border border-danger-line bg-panel p-3 text-xs text-danger-ink shadow-overlay" role="alert">{capture.error}</p> : null}
   </div>;
 }
 
@@ -85,16 +83,16 @@ export function CaptureButton() {
 export function CaptureIndicator() {
   const capture = useCapture();
   if (!capture.active) return null;
-  return <button
+  return <Button
     aria-label={`Stop ${capture.clientLabel} capture`}
-    className="tf-control inline-flex items-center gap-2 whitespace-nowrap rounded-control border border-emerald-300 bg-emerald-50 px-3 text-sm font-medium text-emerald-800 hover:bg-emerald-100 disabled:cursor-wait disabled:opacity-60 dark:border-emerald-800 dark:bg-emerald-950 dark:text-emerald-300"
+    compact
     disabled={capture.busy || capture.status.state !== "capturing"}
     onClick={() => void capture.stop()}
     title={`Stop recording ${capture.clientLabel} conversations`}
-    type="button"
+    variant="live"
   >
-    <span aria-hidden="true" className="size-2 rounded-full bg-emerald-600"/>
+    <StatusDot tone="success"/>
     <span className="hidden sm:inline">Capturing {capture.clientLabel} · Stop</span>
     <span className="sm:hidden">Stop</span>
-  </button>;
+  </Button>;
 }

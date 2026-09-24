@@ -33,7 +33,7 @@ export function AgentMark({ label }: { label: string }) {
   if (!icon) return null;
 
   return (
-    <span aria-hidden="true" className="grid size-6 shrink-0 place-items-center rounded-md border border-line/70 bg-white p-0.5">
+    <span aria-hidden="true" className="grid size-6 shrink-0 place-items-center rounded-tag border border-line/70 bg-white p-0.5">
       <img alt="" className="size-full object-contain" src={`/assets/agents/${icon}.svg`} />
     </span>
   );

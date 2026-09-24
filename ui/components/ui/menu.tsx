@@ -73,7 +73,7 @@ export function Menu({ children, label, trigger, width = 240 }: {
     {trigger({ "aria-expanded": open, "aria-haspopup": "menu", onClick: toggle, ref: setTriggerElement })}
     {open && position ? createPortal(<div
       aria-label={label}
-      className="fixed z-[90] max-h-[min(70dvh,32rem)] overflow-y-auto rounded-control border border-line bg-panel p-1 shadow-xl"
+      className="fixed z-(--z-popover) max-h-[min(70dvh,32rem)] overflow-y-auto rounded-control border border-line bg-panel p-1 shadow-overlay"
       ref={panelRef}
       role="menu"
       style={{ ...position, width }}
@@ -83,7 +83,7 @@ export function Menu({ children, label, trigger, width = 240 }: {
 
 export function MenuItem({ children, danger = false, disabled = false, onSelect }: { children: ReactNode; danger?: boolean; disabled?: boolean; onSelect: () => void }) {
   return <button
-    className={`flex min-h-10 w-full items-center gap-3 rounded-lg px-2.5 text-left text-sm disabled:cursor-not-allowed disabled:opacity-45 ${danger ? "text-red-700 hover:bg-red-50 dark:text-red-300 dark:hover:bg-red-950" : "text-ink hover:bg-canvas"} focus-visible:bg-canvas focus-visible:outline-none`}
+    className={`tf-focus-inset flex min-h-11 w-full items-center gap-3 rounded-inset px-2.5 text-left text-sm disabled:cursor-not-allowed disabled:opacity-(--tf-opacity-disabled) ${danger ? "text-danger-ink hover:bg-danger-soft" : "text-ink hover:bg-fill-hover"}`}
     disabled={disabled}
     onClick={onSelect}
     role="menuitem"
@@ -96,5 +96,5 @@ export function MenuLabel({ children }: { children: ReactNode }) {
 }
 
 export function MenuSeparator() {
-  return <hr className="my-1 border-line"/>;
+  return <hr className="-mx-1 my-1 border-line"/>;
 }

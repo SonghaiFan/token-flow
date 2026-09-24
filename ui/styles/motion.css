@@ -1,0 +1,236 @@
+/* ── Motion (transitions.dev) ─────────────────────────────────────────────
+   Shared motion-token scale plus the recipes this product uses. Recipes keep
+   their shipped values and t-* names; each carries a reduced-motion guard. */
+:root {
+  /* Durations */
+  --duration-stagger: 40ms;
+  --duration-micro: 80ms;
+  --duration-quick: 150ms;
+  --duration-fast: 250ms;
+  --duration-medium: 350ms;
+  --duration-slow: 400ms;
+  --duration-very-slow: 500ms;
+  /* Easings */
+  --ease-smooth-out: cubic-bezier(0.22, 1, 0.36, 1);
+  --ease-in-out: ease-in-out;
+  --ease-out: ease-out;
+  --ease-linear: linear;
+  /* Distances, scales, blur */
+  --distance-micro: 4px;
+  --distance-base: 8px;
+  --distance-medium: 12px;
+  --scale-large: 0.96;
+  --scale-medium: 0.97;
+  --scale-tiny: 0.99;
+  --blur-small: 2px;
+  --blur-medium: 3px;
+
+  /* Tabs sliding */
+  --tabs-dur: 250ms;
+  --tabs-ease: cubic-bezier(0.22, 1, 0.36, 1);
+  /* Accordion expand */
+  --acc-expand: 250ms;
+  --acc-collapse: 250ms;
+  --acc-chevron: 250ms;
+  --acc-ease: cubic-bezier(0.22, 1, 0.36, 1);
+  /* Page side-by-side */
+  --page-slide-dur: 250ms;
+  --page-fade-dur: 250ms;
+  --page-slide-distance: 8px;
+  --page-blur: 3px;
+  --page-slide-ease: cubic-bezier(0.22, 1, 0.36, 1);
+  --page-fade-ease: cubic-bezier(0.22, 1, 0.36, 1);
+  /* Panel reveal */
+  --panel-open-dur: 400ms;
+  --panel-translate-y: 100px;
+  --panel-blur: 2px;
+  --panel-ease: cubic-bezier(0.22, 1, 0.36, 1);
+  /* Row enter */
+  --row-move-dur: 300ms;
+  --row-enter-dur: 900ms;
+  --row-enter-tint: color-mix(in srgb, var(--success) 12%, transparent);
+  --row-ease: cubic-bezier(0.22, 1, 0.36, 1);
+  /* Menu dropdown */
+  --dropdown-open-dur: 250ms;
+  --dropdown-pre-scale: 0.97;
+  --dropdown-ease: cubic-bezier(0.22, 1, 0.36, 1);
+  /* Modal open / close */
+  --modal-open-dur: 250ms;
+  --modal-close-dur: 150ms;
+  --modal-scale: 0.96;
+  --modal-scale-close: 0.96;
+  --modal-ease: cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+/* Tabs sliding: the pill's transform and width are written by JS. */
+.t-tabs { position: relative; }
+.t-tab {
+  position: relative;
+  z-index: 1;
+  transition: color var(--tabs-dur) var(--tabs-ease);
+}
+.t-tabs-pill {
+  position: absolute;
+  top: var(--tabs-inset, 4px);
+  bottom: var(--tabs-inset, 4px);
+  left: 0;
+  width: 0;
+  transform: translateX(0);
+  transition:
+    transform var(--tabs-dur) var(--tabs-ease),
+    width     var(--tabs-dur) var(--tabs-ease);
+  will-change: transform, width;
+  z-index: 0;
+  pointer-events: none;
+}
+
+/* Accordion expand: grid-rows 0fr ↔ 1fr, scoped with child combinators so a
+   nested accordion never inherits its parent's open state. */
+.t-acc > .t-acc-panel {
+  display: grid;
+  grid-template-rows: 0fr;
+  transition: grid-template-rows var(--acc-collapse) var(--acc-ease);
+}
+.t-acc[data-open="true"] > .t-acc-panel {
+  grid-template-rows: 1fr;
+  transition: grid-template-rows var(--acc-expand) var(--acc-ease);
+}
+.t-acc > .t-acc-panel > .t-acc-panel-inner {
+  min-height: 0;
+  overflow: hidden;
+  opacity: 0;
+  filter: blur(2px);
+  transition:
+    opacity var(--acc-collapse) var(--acc-ease),
+    filter var(--acc-collapse) var(--acc-ease);
+}
+.t-acc[data-open="true"] > .t-acc-panel > .t-acc-panel-inner {
+  opacity: 1;
+  filter: blur(0);
+  transition:
+    opacity var(--acc-expand) var(--acc-ease),
+    filter var(--acc-expand) var(--acc-ease);
+}
+.t-acc > .t-acc-head .t-acc-chevron {
+  display: inline-block;
+  transform-origin: center;
+  transition: transform var(--acc-chevron) var(--acc-ease), color var(--acc-chevron) var(--acc-ease);
+}
+.t-acc[data-open="true"] > .t-acc-head .t-acc-chevron {
+  transform: rotate(90deg);
+}
+
+/* Page side-by-side, entering only: the inspector's next view slides in from
+   the side it comes from (--t-page-dir is 1 forward, -1 back). */
+.t-page-enter {
+  transition:
+    opacity   var(--page-fade-dur)  var(--page-fade-ease),
+    transform var(--page-slide-dur) var(--page-slide-ease),
+    filter    var(--page-slide-dur) var(--page-slide-ease);
+}
+@starting-style {
+  .t-page-enter {
+    opacity: 0;
+    transform: translateX(calc(var(--page-slide-distance) * var(--t-page-dir, 1)));
+    filter: blur(var(--page-blur));
+  }
+}
+
+/* Panel reveal: on narrow screens the turn inspector rises over the flow. */
+@media (max-width: 1023.98px) {
+  .t-page-enter[data-overlay="true"] {
+    transition:
+      transform var(--panel-open-dur) var(--panel-ease),
+      opacity   var(--panel-open-dur) var(--panel-ease),
+      filter    var(--panel-open-dur) var(--panel-ease);
+  }
+  @starting-style {
+    .t-page-enter[data-overlay="true"] {
+      opacity: 0;
+      transform: translateY(var(--panel-translate-y));
+      filter: blur(var(--panel-blur));
+    }
+  }
+}
+
+/* Menu dropdown, opening: search results grow from the search field. */
+.t-dropdown-enter {
+  transform-origin: top center;
+  transition:
+    transform var(--dropdown-open-dur) var(--dropdown-ease),
+    opacity   var(--dropdown-open-dur) var(--dropdown-ease);
+}
+@starting-style {
+  .t-dropdown-enter {
+    transform: scale(var(--dropdown-pre-scale));
+    opacity: 0;
+  }
+}
+
+/* Modal open / close. */
+.t-modal {
+  transform-origin: center;
+  transition:
+    transform var(--modal-open-dur) var(--modal-ease),
+    opacity   var(--modal-open-dur) var(--modal-ease);
+  will-change: transform, opacity;
+}
+@starting-style {
+  .t-modal { transform: scale(var(--modal-scale)); opacity: 0; }
+}
+.t-modal.is-closing {
+  transform: scale(var(--modal-scale-close));
+  opacity: 0;
+  pointer-events: none;
+  transition:
+    transform var(--modal-close-dur) var(--modal-ease),
+    opacity   var(--modal-close-dur) var(--modal-ease);
+}
+.t-modal-backdrop {
+  transition: opacity var(--modal-open-dur) var(--modal-ease);
+}
+@starting-style {
+  .t-modal-backdrop { opacity: 0; }
+}
+.t-modal-backdrop.is-closing {
+  opacity: 0;
+  transition: opacity var(--modal-close-dur) var(--modal-ease);
+}
+
+/* Selection emphasis: dimming and restoring marks follows the token scale. */
+.t-fade {
+  transition:
+    opacity var(--duration-fast) var(--ease-smooth-out),
+    fill-opacity var(--duration-fast) var(--ease-smooth-out),
+    background-color var(--duration-fast) var(--ease-smooth-out);
+}
+
+/* Row enter: stepping to another turn updates the request in place. Rows that
+   persist keep their place; rows the new turn brings in settle into place and
+   hold a brief tint, so what changed reads at a glance. The container sets
+   data-row-motion only while a turn change settles, so opening a row or
+   switching views never replays it. */
+.t-row {
+  transition:
+    opacity          var(--row-move-dur)  var(--row-ease),
+    transform        var(--row-move-dur)  var(--row-ease),
+    filter           var(--row-move-dur)  var(--row-ease),
+    background-color var(--row-enter-dur) var(--row-ease);
+}
+@starting-style {
+  [data-row-motion="enter"] .t-row {
+    opacity: 0;
+    transform: translateY(calc(var(--distance-micro) * -1));
+    filter: blur(var(--blur-small));
+    background-color: var(--row-enter-tint);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .t-row,
+  .t-tabs-pill, .t-tab,
+  .t-acc > .t-acc-panel, .t-acc > .t-acc-panel > .t-acc-panel-inner, .t-acc > .t-acc-head .t-acc-chevron,
+  .t-page-enter, .t-dropdown-enter, .t-modal, .t-modal-backdrop, .t-fade {
+    transition: none !important;
+  }
+}

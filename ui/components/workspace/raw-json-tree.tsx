@@ -1,6 +1,8 @@
 "use client";
 
 import { useRef, useState, type ReactNode } from "react";
+import { Button } from "../ui/button";
+import { ChevronRightIcon } from "../ui/icons";
 
 type JsonPathPart = number | string;
 
@@ -18,14 +20,14 @@ function pathStartsWith(path: JsonPathPart[], prefix: JsonPathPart[]): boolean {
 
 function Primitive({ value }: { value: unknown }) {
   if (value === null) return <span className="text-muted">null</span>;
-  if (typeof value === "string") return <span className="text-emerald-700 dark:text-emerald-400">{JSON.stringify(value)}</span>;
-  if (typeof value === "number") return <span className="text-amber-700 dark:text-amber-400">{String(value)}</span>;
-  if (typeof value === "boolean") return <span className="text-red-700 dark:text-red-400">{String(value)}</span>;
+  if (typeof value === "string") return <span className="text-syntax-string">{JSON.stringify(value)}</span>;
+  if (typeof value === "number") return <span className="text-syntax-number">{String(value)}</span>;
+  if (typeof value === "boolean") return <span className="text-syntax-boolean">{String(value)}</span>;
   return <span className="text-muted">{JSON.stringify(String(value))}</span>;
 }
 
 function JsonKey({ children }: { children: ReactNode }) {
-  return <span className="text-violet-700 dark:text-violet-400">{children}</span>;
+  return <span className="text-syntax-key">{children}</span>;
 }
 
 function RawJsonNode({ blockId, isLast = true, keyName, path, selectedPath, turnId, value }: { blockId?: string; isLast?: boolean; keyName?: JsonPathPart; path: JsonPathPart[]; selectedPath?: JsonPathPart[] | null; turnId: string; value: unknown }) {
@@ -40,7 +42,7 @@ function RawJsonNode({ blockId, isLast = true, keyName, path, selectedPath, turn
   const objectLike = value !== null && typeof value === "object";
 
   if (!objectLike) {
-    return <div className={`raw-json-line rounded px-1 ${selected ? "raw-json-selected" : ""}`} data-json-path={pathString} {...itemProps}>{key}<Primitive value={value}/>{comma}</div>;
+    return <div className={`raw-json-line rounded-tag px-1 ${selected ? "raw-json-selected" : ""}`} data-json-path={pathString} {...itemProps}>{key}<Primitive value={value}/>{comma}</div>;
   }
 
   const isArray = Array.isArray(value);
@@ -50,8 +52,8 @@ function RawJsonNode({ blockId, isLast = true, keyName, path, selectedPath, turn
   const countLabel = `${entries.length} ${isArray ? (entries.length === 1 ? "item" : "items") : (entries.length === 1 ? "key" : "keys")}`;
 
   return <div className="raw-json-branch" data-json-path={pathString}>
-    <div className={`raw-json-line flex min-w-0 items-start rounded px-1 ${selected ? "raw-json-selected" : ""}`} data-json-path={pathString} {...itemProps}>
-      <button aria-expanded={open} aria-label={`${open ? "Collapse" : "Expand"} ${pathString}`} className="mr-1 mt-[0.15em] inline-flex size-4 shrink-0 items-center justify-center rounded text-[9px] text-muted hover:bg-panel hover:text-ink" onClick={() => setCollapsed(open)} type="button">{open ? "▼" : "▶"}</button>
+    <div className={`raw-json-line flex min-w-0 items-start rounded-tag px-1 ${selected ? "raw-json-selected" : ""}`} data-json-path={pathString} {...itemProps}>
+      <button aria-expanded={open} aria-label={`${open ? "Collapse" : "Expand"} ${pathString}`} className="mr-1 mt-[0.15em] inline-flex size-4 shrink-0 items-center justify-center rounded-tag text-muted hover:bg-fill-hover hover:text-ink" onClick={() => setCollapsed(open)} type="button"><ChevronRightIcon className={`size-3 transition-transform ${open ? "rotate-90" : ""}`} strokeWidth={2.25}/></button>
       <span className="min-w-0 break-words">{key}<span className="text-muted">{openMark}</span>{open ? null : <><span className="ml-1 text-muted">… {countLabel}</span><span className="text-muted">{closeMark}</span>{comma}</>}</span>
     </div>
     {open ? <>
@@ -78,12 +80,12 @@ export function RawJsonTree({ selectedBlockId, selectedPath, turnId, value }: { 
     }
   };
 
-  return <div className="border-t border-line">
-    <div className="flex flex-wrap items-center justify-between gap-2 border-b border-line bg-panel px-3 py-2 sm:px-4">
+  return <div>
+    <div className="tf-inset flex flex-wrap items-center justify-between gap-2 border-b border-line bg-panel py-2">
       <p className="text-xs text-muted">Exact captured JSON · expanded by default · fold nodes in place</p>
-      <button className="tf-control rounded-control border border-line bg-canvas px-3 text-sm font-medium text-muted hover:border-muted hover:text-ink" onClick={() => void copyRaw()} type="button">{copied ? "Copied" : "Copy raw JSON"}</button>
+      <Button compact onClick={() => void copyRaw()}>{copied ? "Copied" : "Copy raw JSON"}</Button>
     </div>
-    <div aria-label="Raw captured JSON tree" className="token-flow-raw-json tf-code max-h-[68dvh] overflow-auto bg-canvas p-3 text-ink sm:p-4" role="region">
+    <div aria-label="Raw captured JSON tree" className="token-flow-raw-json tf-code tf-pad max-h-[68dvh] overflow-auto bg-canvas text-ink" role="region">
       <RawJsonNode blockId={selectedBlockId} path={["trace"]} selectedPath={selectedPath} turnId={turnId} value={value}/>
     </div>
   </div>;

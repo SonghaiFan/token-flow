@@ -1,6 +1,6 @@
 ---
 owner: token-flow-maintainers
-last_reviewed: 2026-09-23
+last_reviewed: 2026-09-24
 source_of_truth: AGENTS.md
 ---
 
@@ -327,9 +327,89 @@ Never present missing capture data as a successful zero.
   14px body text, 12px metadata and formatted JSON/code, 44px standard controls,
   12px control corners, and 16px panel corners. Keep smaller type and targets
   only for chart annotations and dense in-place tree controls.
-- Shared layout tokens define toolbar height, control height, touch target,
-  content width, turn-rail width, radii, spacing, and motion. New UI should use
-  semantic tokens instead of introducing isolated literals.
+- Every value comes from the design system below. New UI uses its tokens and
+  primitives instead of isolated literals.
+
+## Design system
+
+The visual language is implemented once and reused everywhere:
+`ui/styles/tokens.css` holds the tokens, `ui/styles/globals.css` the utility
+roles, `ui/styles/motion.css` the motion recipes, and `ui/components/ui/` the
+primitives. Views compose primitives; they do not restyle them.
+
+### Tokens
+
+| Group | Tokens | Use |
+| --- | --- | --- |
+| Surface | `canvas`, `panel`, `line` | Page background, panes and cards, every divider and border |
+| Text | `ink`, `muted` | Primary text and values; labels, metadata, secondary text |
+| Interaction | `fill-hover`, `fill-selected`, `--focus` | Hover and selected rows and controls on any surface; the focus ring |
+| Status | `success`, `warning`, `danger`, each with `-soft`, `-line`, `-ink` | Fill, border, and readable text of a toned badge, notice, or button |
+| Syntax | `syntax-key`, `-string`, `-number`, `-boolean` | Raw JSON only |
+| Radius | `panel` 16, `control` 12, `inset` 8, `tag` 6, `mark` 3 | Panes; controls and cards; wells and menu items; badges; swatches |
+| Elevation | `shadow-raised`, `shadow-overlay` | Panes; menus, popovers, and dialogs |
+| Layer | `--z-sticky`, `--z-toolbar`, `--z-sheet`, `--z-popover`, `--z-modal` | Sticky headers up to dialogs, in that order |
+| Layout | `--tf-toolbar-height`, `--tf-control-height`, `--tf-rail-min/max`, `max-w-page`, `max-w-content` | Toolbar, controls, turn-rail width, page and dashboard widths |
+| Emphasis | `--tf-opacity-dimmed`, `--tf-opacity-disabled`, `FADED_MARK_OPACITY` | Content that steps back; disabled controls; chart marks outside a selection |
+
+Colors are written once with `light-dark()`. The theme is `color-scheme` on
+`<html>`, taken from the OS or from the saved `data-theme`, so native controls
+follow it too. Status tones are derived from their base color, so a tone that
+reads in one theme reads in the other.
+
+### Roles
+
+| Role | Utility | Use |
+| --- | --- | --- |
+| Display | `tf-display` | The dashboard title only |
+| Title | `tf-title` | The object a pane shows: the overview's conversation, the inspector's turn, a dialog |
+| Heading | `tf-heading` | A section inside a pane: a layer, request settings, a catalog |
+| Eyebrow | `tf-eyebrow` | A quiet label above a group: table columns, "Where the input went" |
+| Code | `tf-code` | Captured JSON and code |
+| Pane | `tf-panel` | The turn flow, the overview, the inspector |
+| Card | `tf-card` | A bounded group inside a pane |
+| Well | `tf-well` | A recessed surface for captured text and code |
+| Gutter | `tf-gutter` | Page edges; the toolbar uses it too, so their edges align |
+| Inset | `tf-inset` | Horizontal padding of a band inside a pane: toolbars, headers, rows |
+| Pad | `tf-pad` | Padding of a pane's body |
+| Dimmed | `tf-dimmed` | A row or section outside the current selection; hovering restores it |
+| Inset focus | `tf-focus-inset` | Draws the focus ring inside full-width rows |
+
+### Primitives
+
+| Primitive | Use it for |
+| --- | --- |
+| `Button` | Text actions. `primary` is the page's one main action; `secondary` sits beside content or in a dialog; `ghost` is quiet, in toolbars and lists; `danger` confirms destruction; `live` is a running process that can be stopped |
+| `IconButton` | Icon-only actions. Always named; the name is its tooltip unless a title with a shortcut is given |
+| `Chip` | A pill-shaped shortcut in a wrap of facts: a filter, a jump to a turn |
+| `Segmented` | The one view switch for adjacent content |
+| `SearchField`, `Select` | Every search input and every filter |
+| `Badge` | A static state or exception: `new` (success), `changed` (warning), `failed`/`Error` (danger), `Empty` (warning), facts (neutral). `mono` for identifiers and counts |
+| `StatusDot` | Live and health state beside its label |
+| `Swatch` | The color key of a layer or category |
+| `Notice` | A message about the current scope: an error, a completed action, a truncated capture |
+| `EmptyState` | What is absent, why, and what to do next; `framed` inside a pane |
+| `Stat`, `StatList` | The quiet line of counts on the dashboard and the overview |
+| `Menu` | The `•••` menus and the Capture menu |
+| `ConfirmDialog` | Confirming a destructive action |
+| Icons (`ui/icons.tsx`) | Every control glyph: 18px in controls, 16px beside text. Never use text characters (`←`, `›`, `×`) as icons |
+
+### Rules
+
+- One control height (44px) for buttons, fields, selects, and segmented
+  controls. Rows that act as controls are at least 44px tall.
+- Hover is `fill-hover`, selection is `fill-selected` plus the element's own
+  selection mark; never lighten or darken with ad hoc opacity.
+- One focus ring: 2px `--focus`, offset 2px, drawn inside full-width rows.
+- Disclosures put their chevron first; rows without a body keep its space, so
+  summaries align; a row's body aligns with its summary.
+- Icon buttons at a band's edge take a negative margin, so the icon, not its
+  hit area, aligns with the band's inset.
+- Tag and status colors come only from the status tones; category colors come
+  only from `category-palette.ts`.
+- `npm run lint` rejects Tailwind palette classes, `dark:` variants, and
+  arbitrary pixel radii and type sizes in class strings. A needed exception is
+  a missing token: add it to `tokens.css` and this table.
 
 ## Responsive behavior
 

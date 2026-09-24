@@ -1,0 +1,142 @@
+/* ── Token Flow design tokens ────────────────────────────────────────────────
+   The one source for color, type, shape, elevation, layering, and layout. The
+   contract is .agents/docs/standards/product-design-system.md; components use
+   these through Tailwind utilities (bg-panel, rounded-control, shadow-raised…)
+   or the primitives in ui/components/ui. Never add raw palette classes.
+
+   Each color is written once as light-dark(light, dark). `color-scheme` picks
+   the side: the OS preference by default, or the saved theme on <html>, so
+   native controls (select menus, scrollbars) follow the same theme. */
+
+:root {
+  color-scheme: light dark;
+
+  /* Surfaces and text */
+  --canvas: light-dark(#f5f6f8, #0d1117);
+  --panel: light-dark(#ffffff, #161b22);
+  --ink: light-dark(#171a1f, #f0f3f6);
+  --muted: light-dark(#667085, #8b949e);
+  --line: light-dark(#e4e7ec, #30363d);
+  --accent: var(--ink);
+
+  /* Interaction fills: tints of ink, so they read on the canvas and on panels. */
+  --fill-hover: color-mix(in srgb, var(--ink) 5%, transparent);
+  --fill-selected: color-mix(in srgb, var(--ink) 8%, transparent);
+  --focus: var(--ink);
+
+  /* Status. Each tone has a soft fill, a line, and an ink that stays readable
+     on that fill in both themes (mixed toward --ink, so it darkens in light
+     and lightens in dark). Color never carries meaning alone. */
+  --success: #0d9f6e;
+  --warning: #f79009;
+  --danger: #e5484d;
+  --success-soft: color-mix(in srgb, var(--success) 10%, var(--panel));
+  --success-line: color-mix(in srgb, var(--success) 32%, var(--panel));
+  --success-ink: color-mix(in srgb, var(--success) 62%, var(--ink));
+  --warning-soft: color-mix(in srgb, var(--warning) 12%, var(--panel));
+  --warning-line: color-mix(in srgb, var(--warning) 36%, var(--panel));
+  --warning-ink: color-mix(in srgb, var(--warning) 55%, var(--ink));
+  --danger-soft: color-mix(in srgb, var(--danger) 10%, var(--panel));
+  --danger-line: color-mix(in srgb, var(--danger) 32%, var(--panel));
+  --danger-ink: color-mix(in srgb, var(--danger) 62%, var(--ink));
+
+  /* Raw JSON syntax: evidence colors, not status colors. */
+  --syntax-key: light-dark(#6d28d9, #a78bfa);
+  --syntax-string: light-dark(#047857, #34d399);
+  --syntax-number: light-dark(#b45309, #fbbf24);
+  --syntax-boolean: light-dark(#b91c1c, #f87171);
+
+  /* Type: 14px body, 12px metadata and code; larger roles are named utilities. */
+  --font-token-flow-sans: -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", sans-serif;
+  --font-token-flow-mono: "SFMono-Regular", "SF Mono", "Cascadia Code", monospace;
+  --tf-font-body: 14px;
+  --tf-font-meta: 12px;
+  --tf-font-code: 12px;
+  --tf-font-title: 18px;
+  --tf-font-display: 36px;
+  --tf-line-body: 1.5;
+  --tf-line-code: 1.6;
+
+  /* Shape: panels hold controls, controls hold inset surfaces, inset surfaces
+     hold tags; each level is one step rounder than what it holds. */
+  --tf-radius-panel: 16px;
+  --tf-radius-control: 12px;
+  --tf-radius-inset: 8px;
+  --tf-radius-tag: 6px;
+  --tf-radius-mark: 3px;
+
+  /* Sizes and layout */
+  --tf-control-height: 44px;
+  --tf-toolbar-height: 56px;
+  --tf-rail-min: 24rem;
+  --tf-rail-max: 32rem;
+
+  /* Emphasis: what steps back while something else is selected. */
+  --tf-opacity-dimmed: 0.45;
+  --tf-opacity-disabled: 0.4;
+
+  /* Layers, lowest to highest. */
+  --z-sticky: 20;
+  --z-toolbar: 50;
+  --z-sheet: 60;
+  --z-popover: 90;
+  --z-modal: 100;
+}
+
+:root[data-theme="light"] { color-scheme: light; }
+:root[data-theme="dark"] { color-scheme: dark; }
+
+@theme inline {
+  --font-sans: var(--font-token-flow-sans);
+  --font-mono: var(--font-token-flow-mono);
+
+  --color-ink: var(--ink);
+  --color-muted: var(--muted);
+  --color-line: var(--line);
+  --color-canvas: var(--canvas);
+  --color-panel: var(--panel);
+  --color-accent: var(--accent);
+  --color-fill-hover: var(--fill-hover);
+  --color-fill-selected: var(--fill-selected);
+  --color-success: var(--success);
+  --color-success-soft: var(--success-soft);
+  --color-success-line: var(--success-line);
+  --color-success-ink: var(--success-ink);
+  --color-warning: var(--warning);
+  --color-warning-soft: var(--warning-soft);
+  --color-warning-line: var(--warning-line);
+  --color-warning-ink: var(--warning-ink);
+  --color-danger: var(--danger);
+  --color-danger-soft: var(--danger-soft);
+  --color-danger-line: var(--danger-line);
+  --color-danger-ink: var(--danger-ink);
+  --color-syntax-key: var(--syntax-key);
+  --color-syntax-string: var(--syntax-string);
+  --color-syntax-number: var(--syntax-number);
+  --color-syntax-boolean: var(--syntax-boolean);
+
+  --radius-panel: var(--tf-radius-panel);
+  --radius-control: var(--tf-radius-control);
+  --radius-inset: var(--tf-radius-inset);
+  --radius-tag: var(--tf-radius-tag);
+  --radius-mark: var(--tf-radius-mark);
+
+  --shadow-raised: 0 1px 2px 0 rgb(0 0 0 / 0.05);
+  --shadow-overlay: 0 16px 32px -8px rgb(0 0 0 / 0.18), 0 4px 8px -4px rgb(0 0 0 / 0.08);
+
+  --container-page: 1600px;
+  --container-content: 1280px;
+}
+
+/* `dark:` follows the app theme, not only the OS, should a variant ever be needed.
+   Prefer tokens: a component that needs `dark:` is missing a token. */
+@custom-variant dark {
+  &:where([data-theme="dark"], [data-theme="dark"] *) {
+    @slot;
+  }
+  @media (prefers-color-scheme: dark) {
+    &:where(:root:not([data-theme="light"]), :root:not([data-theme="light"]) *) {
+      @slot;
+    }
+  }
+}
