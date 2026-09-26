@@ -484,6 +484,11 @@ function laneFor(record: TraceRecord): string {
   return String(metadata.thread_id || body.prompt_cache_key || headers["thread-id"] || headers["session-id"] || "");
 }
 
+function threadOf(record: TraceRecord, agent: AgentPlugin): TurnModel["thread"] {
+  const declared = agent.thread?.(record) || {};
+  return { id: declared.id || laneFor(record), parentId: declared.parentId, label: declared.label };
+}
+
 export type LayerTotals = Record<InputLayer, { cached: number; tokens: number }>;
 
 export function layerTotals(turn: TurnModel): LayerTotals {
@@ -556,6 +561,7 @@ export function buildTurns(records: TraceRecord[], estimates?: TokenEstimates): 
         added: cacheLinks[index]?.added || 0,
       },
       lane: laneFor(record),
+      thread: threadOf(record, agent),
       protocol: protocol.id,
       agent: agent.id,
       record,

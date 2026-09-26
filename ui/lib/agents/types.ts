@@ -1,7 +1,7 @@
 import type { ReactNode } from "react";
 import type { AnyObject } from "../json";
 import type { CallSource, OutputFormat } from "../output-format";
-import type { InputClass } from "../types";
+import type { InputClass, TraceRecord, TurnThread } from "../types";
 
 export interface SectionFact {
   mono: boolean;
@@ -43,6 +43,9 @@ export interface AgentPlugin {
   /* How a tool's result reads, for tools the generic rules do not cover (see
      `ui/lib/output-format.ts`). Return undefined to keep the generic answer. */
   outputFormat?(source: CallSource): OutputFormat | undefined;
+  /* The thread a request belongs to and the thread that spawned it, when the
+     client says so. Without it, turns group by their captured lane. */
+  thread?(record: TraceRecord): Partial<TurnThread> | undefined;
   /* Views by section label. */
   sections?: Record<string, SectionView>;
 }

@@ -4,18 +4,22 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { categoryColor, FADED_MARK_OPACITY } from "@/lib/category-palette";
 import { formatCompact, formatDuration, formatNumber, formatTime } from "@/lib/format";
 import { LAYER_META, LAYER_ORDER, layerTotals } from "@/lib/token-model";
+import { threadIndices, threadTree, type ThreadNode } from "@/lib/threads";
 import { queryGroups } from "@/lib/turn-order";
 import type { InputLayer, TokenSelection, TurnModel } from "@/lib/types";
 import { Badge, Swatch } from "../ui/badge";
 import { IconButton } from "../ui/button";
 import { EmptyState } from "../ui/feedback";
 import { SearchField } from "../ui/field";
-import { SearchIcon } from "../ui/icons";
+import { ChevronRightIcon, SearchIcon } from "../ui/icons";
 import { Segmented } from "../ui/segmented";
 
 /* Fixed geometry keeps every Sankey node and ribbon aligned with its HTML row. */
 const ROW = 56;
 const HEADER = 30;
+const THREAD_HEADER = 40;
+const BRANCH = 36;
+const AUXILIARY = "auxiliary";
 const NODE_TOP = 20;
 const NODE = 14;
 const GAP = 6;
@@ -26,8 +30,10 @@ const SEARCH_THRESHOLD = 7;
 type Granularity = "layers" | "categories";
 
 type FlowItem =
+  | { kind: "thread"; key: string; label: string; top: number }
   | { kind: "query"; key: string; label: string; top: number }
-  | { kind: "turn"; key: string; index: number; top: number };
+  | { kind: "branch"; depth: number; detail: string; key: string; label: string; open: boolean; threadId: string; top: number }
+  | { kind: "turn"; depth: number; key: string; index: number; top: number };
 
 interface NodeData {
   aggregate?: boolean;
@@ -129,8 +135,23 @@ export function TurnFlow({ focus = null, onSelectNode, onSelectTurn, selected, s
   const canvasRef = useRef<HTMLDivElement | null>(null);
   const rowRefs = useRef(new Map<number, HTMLButtonElement>());
   const normalized = query.trim().toLowerCase();
-  const visible = useMemo(() => turns.map((_, index) => index).filter((index) => matchesTurn(turns[index], normalized)), [normalized, turns]);
-  const groups = useMemo(() => queryGroups(turns), [turns]);
+  const tree = useMemo(() => threadTree(turns), [turns]);
+  // Branches open on demand; the branch holding the selected turn is always open.
+  const [openThreads, setOpenThreads] = useState<Set<string>>(() => new Set());
+  const openIds = useMemo(() => {
+    const ids = new Set(openThreads);
+    if (selected !== null) {
+      for (const id of tree.pathOf.get(selected) || []) ids.add(id);
+      if (tree.auxiliary.includes(selected)) ids.add(AUXILIARY);
+    }
+    return ids;
+  }, [openThreads, selected, tree]);
+  const toggleThread = (id: string) => setOpenThreads((current) => {
+    const next = new Set(current);
+    if (next.has(id)) next.delete(id);
+    else next.add(id);
+    return next;
+  });
   const totalInput = useMemo(() => turns.reduce((sum, turn) => sum + turn.input, 0), [turns]);
 
   // The diagram is drawn in real pixels so hatching, labels, and strokes stay undistorted.
@@ -142,25 +163,67 @@ export function TurnFlow({ focus = null, onSelectNode, onSelectTurn, selected, s
     return () => observer.disconnect();
   }, []);
 
+  /* Rows by thread: each top-level thread is a section, a sub-agent thread is a
+     branch row after the parent turn it followed, and auxiliary requests sit at
+     the end. A search lists matching turns flat, in capture order. */
   const layout = useMemo(() => {
-    const groupOf = new Map<number, { id: string; label: string }>();
-    for (const group of groups) for (const index of group.indices) groupOf.set(index, group);
-    const showHeaders = !normalized && groups.length > 1;
     const items: FlowItem[] = [];
     let top = 0;
-    let lastGroup = "";
-    for (const index of visible) {
-      const group = groupOf.get(index);
-      if (showHeaders && group && group.id !== lastGroup) {
-        items.push({ key: `query-${group.id}-${index}`, kind: "query", label: group.label, top });
-        top += HEADER;
-        lastGroup = group.id;
-      }
-      items.push({ index, key: turns[index].id, kind: "turn", top });
+    const pushTurn = (index: number, depth: number) => {
+      items.push({ depth, index, key: turns[index].id, kind: "turn", top });
       top += ROW;
+    };
+    if (normalized) {
+      turns.forEach((turn, index) => {
+        if (matchesTurn(turn, normalized)) pushTurn(index, 0);
+      });
+      return { height: top, items };
+    }
+    const inputOf = (indices: number[]) => indices.reduce((sum, index) => sum + turns[index].input, 0);
+    const pushBranch = (id: string, label: string, indices: number[], depth: number, note?: string) => {
+      const open = openIds.has(id);
+      items.push({ depth, detail: note || `${indices.length} ${indices.length === 1 ? "turn" : "turns"} · ${formatCompact(inputOf(indices))}`, key: `branch-${id}`, kind: "branch", label, open, threadId: id, top });
+      top += BRANCH;
+      return open;
+    };
+    const emit = (node: ThreadNode, depth: number) => {
+      // Query headers mark a new user request in a top-level thread.
+      const groupOf = new Map<number, { id: string; label: string }>();
+      if (depth === 0) {
+        const groups = queryGroups(node.indices.map((index) => turns[index]));
+        if (groups.length > 1) for (const group of groups) for (const position of group.indices) groupOf.set(node.indices[position], group);
+      }
+      const branchesAfter = (index: number) => node.branches.filter((branch) => branch.after === index);
+      const emitBranch = ({ node: child }: { node: ThreadNode }) => {
+        if (pushBranch(child.id, child.label || "Thread", threadIndices(child), depth)) emit(child, depth + 1);
+      };
+      branchesAfter(-1).forEach(emitBranch);
+      let lastGroup = "";
+      for (const index of node.indices) {
+        const group = groupOf.get(index);
+        if (group && group.id !== lastGroup) {
+          items.push({ key: `query-${group.id}`, kind: "query", label: group.label, top });
+          top += HEADER;
+          lastGroup = group.id;
+        }
+        pushTurn(index, depth);
+        branchesAfter(index).forEach(emitBranch);
+      }
+    };
+    tree.roots.forEach((root, position) => {
+      if (tree.roots.length > 1) {
+        const asked = root.indices.map((index) => turns[index].queryText).find(Boolean);
+        items.push({ key: `thread-${root.id}`, kind: "thread", label: `Conversation ${position + 1}${asked ? ` · ${asked}` : ""}`, top });
+        top += THREAD_HEADER;
+      }
+      emit(root, 0);
+    });
+    if (tree.auxiliary.length && pushBranch(AUXILIARY, "Auxiliary requests", tree.auxiliary, 0, `${tree.auxiliary.length} · title generation and empty requests`)) {
+      for (const index of tree.auxiliary) pushTurn(index, 1);
     }
     return { height: top, items };
-  }, [groups, normalized, turns, visible]);
+  }, [normalized, openIds, tree, turns]);
+  const visible = useMemo(() => layout.items.flatMap((item) => (item.kind === "turn" ? [item.index] : [])), [layout.items]);
 
   const graph = useMemo(() => {
     // Auxiliary requests such as title generation stay in the list but outside the flow.
@@ -280,7 +343,16 @@ export function TurnFlow({ focus = null, onSelectNode, onSelectTurn, selected, s
       <div className="relative" style={{ height: layout.height }}>
         <ol>
           {layout.items.map((item) => {
+            if (item.kind === "thread") return <li className="tf-inset absolute inset-x-0 flex items-end truncate border-t border-line pb-1.5 text-sm font-semibold text-ink" key={item.key} style={{ height: THREAD_HEADER, top: item.top }} title={item.label}>{item.label}</li>;
             if (item.kind === "query") return <li className="tf-inset absolute inset-x-0 flex items-end truncate pb-1 text-xs font-medium text-muted" key={item.key} style={{ height: HEADER, top: item.top }} title={item.label}>{item.label}</li>;
+            if (item.kind === "branch") return <li className="absolute inset-x-0" key={item.key} style={{ height: BRANCH, top: item.top }}>
+              <button aria-expanded={item.open} className="tf-focus-inset tf-inset flex h-full w-full items-center gap-1.5 border-t border-line text-left text-xs text-muted transition-colors hover:bg-fill-hover hover:text-ink" onClick={() => toggleThread(item.threadId)} type="button">
+                {item.depth ? <span aria-hidden="true" className="shrink-0" style={{ width: item.depth * 14 }}/> : null}
+                <ChevronRightIcon className={`size-3.5 shrink-0 transition-transform ${item.open ? "rotate-90" : ""}`}/>
+                <span className="shrink-0 font-medium text-ink">↳ {item.label}</span>
+                <span className="truncate">{item.detail}</span>
+              </button>
+            </li>;
             const turn = turns[item.index];
             const active = item.index === selected;
             const failed = turn.status >= 400;
@@ -297,7 +369,7 @@ export function TurnFlow({ focus = null, onSelectNode, onSelectTurn, selected, s
               >
                 {/* All row text stays in the left column; the right column belongs to the Sankey,
                     whose overlay starts at this row's inset plus the text column and gap. */}
-                <span className="min-w-0 pt-2.5">
+                <span className="min-w-0 pt-2.5" style={item.depth ? { paddingLeft: item.depth * 14 } : undefined}>
                   <span className="flex items-center gap-1.5">
                     <strong className="whitespace-nowrap text-sm">Turn {turn.label}</strong>
                     {auxiliary ? <span className="hidden sm:inline-flex"><Badge title="Auxiliary request in its own thread, outside the flow">Meta</Badge></span> : null}

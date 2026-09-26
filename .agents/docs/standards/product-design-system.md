@@ -124,9 +124,33 @@ The workspace answers a second question: **What happened in this conversation?**
   worth opening. Selecting a square or a category follows it through the flow.
   Do not add instructions for obvious controls.
 - The turn inspector has one toolbar: back, `Turn N of M` with previous and
-  next, one view switch (Structured, Raw, Changes), and a search icon that
+  next, one view switch (Timeline, Tokens, Raw, Changes), and a search icon that
   reveals search. Layer sections show their name and tokens; their
   descriptions are tooltips.
+- The flow is organized by agent thread (`ui/lib/threads.ts`), because one
+  capture can hold several: the main conversation, other conversations opened
+  in the same app, scheduled tasks, and sub-agents. Each top-level thread is a
+  section ("Conversation N · first request"; no header when there is one). A
+  thread whose parent was captured (Codex `x-codex-parent-thread-id`) is a
+  branch row after the parent turn it followed, folded to "↳ Guardian review ·
+  5 turns · 183K" and opened on demand; the branch holding the selected turn
+  opens itself. Title generation and empty requests fold into "Auxiliary
+  requests" at the end. Ribbons connect turns of one thread only, so a thread
+  reads continuously past folded branches. A search lists matching turns flat.
+  Agent plugins name threads through `thread()`; turn numbers stay in capture
+  order.
+- **Timeline** is the inspector's default view: the trajectory up to the turn,
+  in order, as steps by role. *User* is the typed prompt; *Model* is reasoning,
+  messages, and tool calls, each call with its result beneath it; *Tool* is a
+  result whose call came earlier (the usual new input of a turn); *Context* is
+  what the harness injected. Harness instructions and tool definitions belong
+  to *Tokens*, not the timeline. A step is carried when the previous turn in the
+  same thread already had it in its input or its output (by item id, or else by
+  shared prefix compared on content, not on serialization). Carried steps fold
+  into *Earlier* (before the query's prompt) and *So far* (after it); the prompt
+  stays visible; new steps open; the turn's own output closes the timeline as
+  *Response*, with its measured output tokens. Protocols that pack steps into
+  one message's content blocks split them through `ProtocolAdapter.expand`.
 - Stepping between turns updates the inspector in place; it is never replaced
   or slid out. Rows keep their identity (captured item id, else position), so
   what persists stays put with its open state, and only rows the new turn

@@ -138,6 +138,12 @@ export interface TokenSelection {
   layer?: InputLayer;
 }
 
+export interface TurnThread {
+  id: string;
+  parentId?: string;
+  label?: string;
+}
+
 export interface TurnModel {
   id: string;
   index: number;
@@ -179,6 +185,9 @@ export interface TurnModel {
   };
   /* Captured thread identity; the token flow only connects turns in the same lane. */
   lane: string;
+  /* The agent thread this request belongs to. A thread with a parent is a sub-agent
+     branch of that thread; `label` names what kind of thread it is. */
+  thread: TurnThread;
   /* Plugins that read this turn: the wire protocol and the agent harness. */
   protocol: string;
   agent: string;

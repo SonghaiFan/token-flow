@@ -1,6 +1,12 @@
 import { environmentChanges, environmentPreview, EnvironmentView, previewText, ReadableText, type EnvironmentFacts } from "@/components/workspace/section-views";
 import { asObject } from "../json";
 import type { InputClass } from "../types";
+
+/* Codex names sub-agents in `x-openai-subagent`; these are the kinds seen so far. */
+const SUBAGENT_LABELS: Record<string, string> = {
+  collab_spawn: "Sub-agent",
+  guardian: "Guardian review",
+};
 import type { AgentPlugin } from "./types";
 
 /* Codex App labels each content part with `internal_chat_message_metadata_passthrough
@@ -63,6 +69,18 @@ export const codex: AgentPlugin = {
   id: "codex",
   clients: ["codex", "codexapp"],
   declaredKind: codexContentKind,
+  // Every request names its thread; a sub-agent's requests also name the thread
+  // that spawned it and the kind of sub-agent.
+  thread(record) {
+    const metadata = asObject(asObject(record.request?.body).client_metadata);
+    const text = (key: string) => (typeof metadata[key] === "string" && metadata[key] ? (metadata[key] as string) : undefined);
+    const role = text("x-openai-subagent");
+    return {
+      id: text("thread_id"),
+      parentId: text("x-codex-parent-thread-id"),
+      label: role ? SUBAGENT_LABELS[role] || role.replaceAll("_", " ") : undefined,
+    };
+  },
   contentKinds: CONTENT_KINDS,
   textPatterns: [
     [/^You are Codex, an agent/i, CONTENT_KINDS["model.base_instructions"]],
