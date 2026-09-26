@@ -235,6 +235,25 @@ def test_chat_completions_reasoning_details_buffer_is_mirrored_as_thinking() -> 
     assert snap["content"][1] == {"type": "text", "text": "Done."}
 
 
+def test_chat_completions_reasoning_details_deltas_are_concatenated() -> None:
+    """OpenRouter streams `reasoning_details[].text` as fragments of one entry."""
+    r = SSEReassembler()
+    r.feed_bytes(
+        b'data: {"id":"gen-1","model":"moonshotai/kimi-k2.6","choices":[{"delta":{"role":"assistant",'
+        b'"reasoning_details":[{"type":"reasoning.text","text":"The user said","format":"unknown","index":0}]}}]}\n\n'
+        b'data: {"id":"gen-1","choices":[{"delta":{"reasoning_details":'
+        b'[{"type":"reasoning.text","text":" hello.","format":"unknown","index":0}]}}]}\n\n'
+        b'data: {"id":"gen-1","choices":[{"delta":{"content":"Hi!"}}]}\n\n'
+        b"data: [DONE]\n\n"
+    )
+
+    snap = r.reconstruct()
+    assert snap is not None
+    msg = snap["choices"][0]["message"]
+    assert msg["reasoning_details"] == [{"type": "reasoning.text", "text": "The user said hello.", "format": "unknown", "index": 0}]
+    assert snap["content"][0] == {"type": "thinking", "thinking": "The user said hello."}
+
+
 def test_chat_completions_tool_call_accumulation() -> None:
     """Tool calls stream as indexed deltas with name/arguments concatenated
     across multiple chunks. Final snapshot must have the assembled call."""

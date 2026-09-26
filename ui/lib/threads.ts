@@ -12,6 +12,8 @@ import type { TurnModel } from "./types";
 export interface ThreadNode {
   id: string;
   label?: string;
+  /* The agent's task path, when it was spawned for one. */
+  name?: string;
   /* This thread's own turn indices, in capture order. */
   indices: number[];
   /* Branches, each after a turn index of this thread (-1: before its first turn). */
@@ -38,9 +40,10 @@ export function threadTree(turns: TurnModel[]): ThreadTree {
       return;
     }
     const id = turn.thread.id;
-    const node = nodes.get(id) || { branches: [], id, indices: [], label: turn.thread.label, parentId: turn.thread.parentId };
+    const node = nodes.get(id) || { branches: [], id, indices: [], label: turn.thread.label, name: turn.thread.name, parentId: turn.thread.parentId };
     node.indices.push(index);
     node.label ||= turn.thread.label;
+    node.name ||= turn.thread.name;
     node.parentId ||= turn.thread.parentId;
     nodes.set(id, node);
   });

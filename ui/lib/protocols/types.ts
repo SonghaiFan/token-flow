@@ -46,6 +46,9 @@ export interface ProtocolAdapter {
   output?(record: TraceRecord): unknown[];
   /* Harness instructions sent beside the conversation, if any. */
   system(body: AnyObject): unknown;
+  /* Tool declarations the model can call, one entry per tool with its `name`.
+     Defaults to `body.tools`. */
+  tools?(body: AnyObject): unknown[];
   /* Conversation items in the order the model reads them. */
   items(body: AnyObject): unknown[];
   /* Class of a typed content block inside a message (tool call, result, thinking). */

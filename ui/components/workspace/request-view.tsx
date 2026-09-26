@@ -4,6 +4,8 @@ import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { formatDuration, formatNumber } from "@/lib/format";
 import type { SectionView } from "@/lib/agents";
 import { callReadSource, cleanWebText, inferOutputFormat, type OutputFormat, type OutputKind } from "@/lib/output-format";
+import { genericResultParts, scriptToolCalls, type ResultPart, type ToolCall } from "@/lib/tool-results";
+import { toolDeclarations } from "@/lib/protocols";
 import { classifyInput, LAYER_META, LAYER_ORDER, turnPlugins } from "@/lib/token-model";
 import type { InputClass, InputLayer, ItemState, TokenSelection, TraceRecord, TurnModel } from "@/lib/types";
 import { categoryColor } from "@/lib/category-palette";
@@ -221,42 +223,9 @@ function parseJsonValue(value: string): unknown | undefined {
   }
 }
 
-function matchingBrace(value: string, start: number): number {
-  let depth = 0;
-  let quote = "";
-  let escaped = false;
-  for (let index = start; index < value.length; index += 1) {
-    const character = value[index];
-    if (quote) {
-      if (escaped) escaped = false;
-      else if (character === "\\") escaped = true;
-      else if (character === quote) quote = "";
-      continue;
-    }
-    if (character === '"' || character === "'") {
-      quote = character;
-      continue;
-    }
-    if (character === "{") depth += 1;
-    if (character === "}") {
-      depth -= 1;
-      if (depth === 0) return index;
-    }
-  }
-  return -1;
-}
-
 function parseWrappedToolCall(value: string): ParsedWrappedToolCall | null {
-  const call = /tools\.([A-Za-z_$][\w$]*)\s*\(\s*\{/.exec(value);
-  if (!call || call.index === undefined) return null;
-  const start = value.indexOf("{", call.index + call[0].length - 1);
-  const end = matchingBrace(value, start);
-  if (start < 0 || end < 0) return null;
-  const objectLiteral = value.slice(start, end + 1)
-    .replace(/([{,]\s*)([A-Za-z_$][\w$]*)(\s*:)/g, '$1"$2"$3');
-  const parsed = parseJsonValue(objectLiteral);
-  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return null;
-  return { input: asRecord(parsed), name: call[1] };
+  const call = scriptToolCalls(value)[0];
+  return call?.input ? { input: asRecord(call.input), name: call.name } : null;
 }
 
 function parseToolResult(value: string): ParsedToolResult {
@@ -495,7 +464,8 @@ function lineCount(value: string): string {
 function TextOutput({ label = "Output", value }: { label?: string; value: string }) {
   const lines = value.split("\n");
   if (!value) return <EmptyState framed>The tool completed without captured output.</EmptyState>;
-  if (/too many requests|rate limit/i.test(value)) return <Notice compact title="Rate limited" tone="warning">{value.trim()}</Notice>;
+  // A rate-limit reply is short; a long output that mentions rate limits is output.
+  if (value.length < 400 && /too many requests|rate limit/i.test(value)) return <Notice compact title="Rate limited" tone="warning">{value.trim()}</Notice>;
   return <section><BlockHeading aside={lineCount(value)}>{label}</BlockHeading><ol className="tf-code tf-well max-h-[28rem] overflow-auto py-2 text-ink">{lines.map((line, index) => <li className="grid grid-cols-[2.5rem_minmax(0,1fr)] px-3" key={index}><span className="select-none pr-3 text-right text-muted/70">{index + 1}</span><span className="whitespace-pre-wrap break-words">{line || " "}</span></li>)}</ol></section>;
 }
 
@@ -534,20 +504,27 @@ const VIEW_LABELS: Record<OutputView, string> = {
    cleaned. Without that evidence it stays plain text; only JSON that parses and
    complete HTML documents are recognized from content. The reader can always
    switch between the inferred view, Plain, and Markdown. */
-function ToolOutputView({ format, value }: { format: OutputFormat; value: string }) {
+/* `title` names this output when it is one part of a result; it replaces the
+   format evidence on the switch line. */
+function ToolOutputView({ format, title, value }: { format: OutputFormat; title?: ReactNode; value: string }) {
   const trimmed = value.trim();
-  const structured = useMemo(() => (format.kind === "text" ? parseStructuredText(trimmed) : null), [format.kind, trimmed]);
+  // Only output that is JSON from its first character reads as structured; JSON
+  // printed partway through (a `cat package.json` after other commands) is text.
+  const structured = useMemo(() => {
+    const parsed = format.kind === "text" ? parseStructuredText(trimmed) : null;
+    return parsed && !parsed.prefix ? parsed : null;
+  }, [format.kind, trimmed]);
   const auto: OutputView = /^<!doctype\s+html|^<html\b/i.test(trimmed) ? "html" : format.kind !== "text" ? format.kind : structured ? "structured" : "text";
   const [chosen, setChosen] = useState<OutputView | null>(null);
   const view = chosen ?? auto;
   const options = [...new Set<OutputView>([auto, "text", "markdown"])];
   const language = format.kind === "code" ? format.language : undefined;
   return <div className="space-y-2">
-    {trimmed ? <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted">
-      <span className="min-w-0 truncate">{format.reason ? <>From <code className="font-mono text-ink">{format.reason}</code></> : "No format declared by the call"}</span>
-      <span aria-label="Output view" className="ml-auto inline-flex rounded-md border border-line p-0.5" role="group">
+    {trimmed || title ? <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted">
+      {title ?? <span className="min-w-0 truncate">{format.reason ? <>From <code className="font-mono text-ink">{format.reason}</code></> : "No format declared by the call"}</span>}
+      {trimmed ? <span aria-label="Output view" className="ml-auto inline-flex rounded-md border border-line p-0.5" role="group" title={title && format.reason ? `Format from ${format.reason}` : undefined}>
         {options.map((option) => <button aria-pressed={view === option} className={`rounded px-2 py-0.5 ${view === option ? "bg-canvas font-medium text-ink" : "hover:text-ink"}`} key={option} onClick={() => setChosen(option)} type="button">{option === "code" && language ? language : VIEW_LABELS[option]}</button>)}
-      </span>
+      </span> : null}
     </div> : null}
     {view === "html" ? <HtmlOutput value={trimmed}/>
       : view === "structured" && structured ? <StructuredOutput parsed={structured}/>
@@ -588,7 +565,10 @@ function splitBlockId(blockId: string): { itemId: string; partIndex: number | nu
 function selectedJsonPath(record: TraceRecord, selection: TokenSelection | null, turnId: string): Array<number | string> | null {
   if (!selection || selection.turnId !== turnId) return null;
   const body = asRecord(record.request?.body);
-  if (selection.label === "Tool definitions" && Array.isArray(body.tools)) return ["trace", "request", "body", "tools"];
+  if (selection.label === "Tool definitions") {
+    if (Array.isArray(body.tools)) return ["trace", "request", "body", "tools"];
+    if (Array.isArray(asRecord(body.request).tools)) return ["trace", "request", "body", "request", "tools"];
+  }
 
   const sourceKey = ["input", "messages", "contents"].find((key) => Array.isArray(body[key]));
   if (!sourceKey) return null;
@@ -634,7 +614,8 @@ function systemParts(turn: TurnModel, system: unknown): unknown {
   if (!Array.isArray(system)) return system;
   return system.flatMap((raw) => {
     const block = asRecord(raw);
-    if (block.type !== "text" || typeof block.text !== "string") return [raw];
+    // Gemini text parts are `{text}` without a type.
+    if ((block.type !== undefined && block.type !== "text") || typeof block.text !== "string") return [raw];
     const sections = split(block.text);
     return sections.length > 1 ? sections.map((text) => ({ ...block, text })) : [raw];
   });
@@ -672,7 +653,7 @@ function requestToolNames(turn: TurnModel): string[] {
       }
     }
   };
-  addTools(body.tools);
+  addTools(toolDeclarations(turnPlugins(turn).protocol, body));
   for (const item of collectInput(turn)) {
     const record = asRecord(item);
     if (record.type === "additional_tools") addTools(record.tools);
@@ -836,11 +817,25 @@ interface InputEntry {
   rowState?: ItemState;
   /* How the tool result of this call (or answering this result's call) is shown. */
   outputFormat?: OutputFormat;
+  /* A tool result captured as parts, read part by part. */
+  readout?: ResultReadout;
   /* The agent's view for this section label, when it has one. */
   section?: SectionView;
   state?: ItemState;
   tokens?: { cached: number; tokens: number };
 }
+
+type TokenCount = { cached: number; tokens: number };
+
+/* A multi-part tool result: the header part's status, then each output part with
+   the format of the call that produced it. */
+interface ResultReadout {
+  elapsed: string;
+  parts: Array<ResultPart & { format: OutputFormat; tokens?: TokenCount }>;
+  status: string;
+}
+
+const TEXT_FORMAT: OutputFormat = { kind: "text" };
 
 function isMessagePartItem(message: UnknownRecord): boolean {
   return !toolEventKind(message) && Boolean(textValue(message.role)) && textValue(message.type) !== "additional_tools";
@@ -864,10 +859,13 @@ function inputEntries(turn: TurnModel, items: unknown[]): InputEntry[] {
   const { agent } = turnPlugins(turn);
   const withView = (entry: InputEntry): InputEntry => ({ ...entry, section: agent.sections?.[entry.inputClass.label] });
   // A result's format comes from the call that produced it: its command or the file it reads.
+  const formatForCall = (call: ToolCall): OutputFormat => {
+    const source = callReadSource(call.name, call.input);
+    return agent.outputFormat?.(source) ?? inferOutputFormat(source);
+  };
   const formatFor = (item: UnknownRecord): OutputFormat => {
     const presentation = toolCallPresentation(item);
-    const source = callReadSource([presentation.name, presentation.wrapperName].filter(Boolean).join(" "), presentation.input);
-    return agent.outputFormat?.(source) ?? inferOutputFormat(source);
+    return formatForCall({ input: presentation.input, name: [presentation.name, presentation.wrapperName].filter(Boolean).join(" ") });
   };
   const entries: InputEntry[] = items.flatMap((raw, itemIndex) => {
     const item = asRecord(raw);
@@ -886,11 +884,42 @@ function inputEntries(turn: TurnModel, items: unknown[]): InputEntry[] {
   });
   const mixed = entries.some((entry) => entry.state && entry.state !== "new");
   const callFormats = new Map(entries.filter((entry) => entry.outputFormat).map((entry) => [textValue(entry.item.call_id), entry.outputFormat as OutputFormat] as const));
-  return entries.map((entry) => ({
-    ...entry,
-    outputFormat: entry.outputFormat ?? (toolEventKind(entry.item) === "result" ? callFormats.get(textValue(entry.item.call_id)) : undefined),
-    rowState: mixed ? entry.state : undefined,
-  }));
+  const callItems = new Map(entries.filter((entry) => toolEventKind(entry.item) === "call").map((entry) => [textValue(entry.item.call_id), entry.item] as const));
+  // A result captured as parts reads part by part; the first part can be a header
+  // (status and wall time) before the output parts.
+  const readout = (entry: InputEntry, outer: OutputFormat | undefined): ResultReadout | undefined => {
+    const captured = entry.item.output ?? entry.item.content;
+    // A single text result is read by part only when the agent says how.
+    const list = Array.isArray(captured) ? captured : typeof captured === "string" && agent.resultParts ? [captured] : undefined;
+    if (!list) return undefined;
+    const parts = list.map((part, partIndex) => ({ part, partIndex }));
+    const first = capturedText(list[0]);
+    const head = parseToolResult(first);
+    // Metadata lines before an `Output:` line are the header, not output.
+    if (/^Output:\s*$/im.test(first)) {
+      if (head.output) parts[0] = { part: head.output, partIndex: 0 };
+      else parts.shift();
+    }
+    const callItem = callItems.get(textValue(entry.item.call_id));
+    const call = callItem ? { input: callItem.arguments ?? callItem.input, name: textValue(callItem.name) } : undefined;
+    const declared = agent.resultParts?.(call, parts);
+    if (!declared && !Array.isArray(captured)) return undefined;
+    const read = declared ?? genericResultParts(parts);
+    return {
+      elapsed: head.elapsed,
+      parts: read.map((part) => ({
+        ...part,
+        format: part.call ? formatForCall(part.call) : read.length === 1 && outer ? outer : TEXT_FORMAT,
+        tokens: entry.itemId ? tokens.get(`${entry.itemId}:${part.partIndex}`) : undefined,
+      })),
+      status: head.status,
+    };
+  };
+  return entries.map((entry) => {
+    const result = toolEventKind(entry.item) === "result";
+    const outputFormat = entry.outputFormat ?? (result ? callFormats.get(textValue(entry.item.call_id)) : undefined);
+    return { ...entry, outputFormat, readout: result ? readout(entry, outputFormat) : undefined, rowState: mixed ? entry.state : undefined };
+  });
 }
 
 function sumTokens(entries: InputEntry[]): { cached: number; tokens: number } | undefined {
@@ -1125,7 +1154,7 @@ function PartRow({ defaultOpen = false, entry, onSelectToken, previous, selectio
   const marks = rowMarks([entry], label, entry.inputClass.layer, selection, turnId);
   return <Row accent={marks.accent} defaultOpen={defaultOpen || marks.open || isFresh(entry)} dimmed={marks.dimmed} hint={isPrompt ? undefined : sectionPreview(entry.section, text)} summary={<>
     <LinkSwatch blockIds={blockIds} icon={isPrompt ? UserIcon : label === "Assistant messages" ? ChatIcon : undefined} label={label} layer={entry.inputClass.layer} onSelectToken={onSelectToken} selection={selection} turnId={turnId}/>
-    {isPrompt ? <span className="min-w-0 flex-1 truncate font-medium text-ink">{previewText(entry.part) || "Empty prompt"}</span> : <>
+    {isPrompt ? <span className="min-w-0 flex-1 truncate font-medium text-ink">{entry.section?.preview?.(text) || previewText(entry.part) || "Empty prompt"}</span> : <>
       <span className="shrink-0 text-ink">{label === "Assistant messages" ? "Assistant" : label}</span>
       <Meta mono={fact.mono}>{fact.value}</Meta>
     </>}
@@ -1188,20 +1217,23 @@ function ToolExchangeRow({ call, defaultOpen = false, inResponse = false, onSele
   const callItem = call?.item;
   const resultItem = result?.item;
   const presentation = callItem ? toolCallPresentation(callItem) : null;
-  const outcome = resultItem ? parseToolResult(capturedText(resultItem.output ?? resultItem.content ?? resultItem.text)) : null;
+  const readout = result?.readout;
+  const plain = resultItem && !readout ? parseToolResult(capturedText(resultItem.output ?? resultItem.content ?? resultItem.text)) : null;
+  const outcome = readout ?? plain;
   const failed = Boolean(outcome && /failed|error|timed out/i.test(outcome.status));
+  const failedParts = readout?.parts.filter((part) => part.failure).length ?? 0;
   const namespace = textValue(callItem?.namespace);
-  const title = textValue(asRecord(presentation?.input).title) || presentation?.preview || outcome?.status || "";
+  // Some clients have the model label its own call (Antigravity's `toolSummary`).
+  const title = textValue(asRecord(presentation?.input).title) || textValue(asRecord(presentation?.input).toolSummary) || presentation?.preview || outcome?.status || "";
   const tokens = sumTokens([call, result].filter((entry): entry is InputEntry => Boolean(entry)));
   const blockIds = entryBlockIds([call, result]);
   const state = result?.rowState ?? call?.rowState;
-  const resultParts = resultItem ? inputItemParts(resultItem).length : 0;
   const marks = rowMarks([call, result], result && selectionHits([result], selection, turnId) ? "Tool results" : "Tool calls", "conversation", selection, turnId);
   return <Row accent={marks.accent} defaultOpen={defaultOpen || marks.open || isFresh(call, result)} dimmed={marks.dimmed} summary={<>
     <LinkSwatch blockIds={blockIds} icon={TerminalIcon} label={call ? "Tool calls" : "Tool results"} layer="conversation" onSelectToken={onSelectToken} selection={selection} turnId={turnId}/>
     <span className="shrink-0 font-mono text-sm text-ink">{namespace ? <span className="text-muted">{namespace}.</span> : null}{presentation?.name || "Tool result"}</span>
     <Meta>{title}</Meta>
-    <RowEnd badge={failed ? <Badge tone="danger">failed</Badge> : <StateBadge state={state}/>} tokens={tokens}/>
+    <RowEnd badge={failed ? <Badge tone="danger">failed</Badge> : failedParts ? <Badge tone="danger">{readout && readout.parts.length > 1 ? `${failedParts} failed` : "failed"}</Badge> : <StateBadge state={state}/>} tokens={tokens}/>
   </>}>
     <div className="space-y-4">
       {call && callItem && presentation ? <BlockAnchor blockIds={entryBlockIds([call])} turnId={turnId}>
@@ -1209,11 +1241,50 @@ function ToolExchangeRow({ call, defaultOpen = false, inResponse = false, onSele
         <CallInput value={presentation.input}/>
       </BlockAnchor> : null}
       {result && resultItem && outcome ? <BlockAnchor blockIds={entryBlockIds([result])} turnId={turnId}>
-        <BlockHeading aside={tokenAside(result.tokens)}>{["Result", outcome.status, outcome.elapsed && `wall ${outcome.elapsed}`, resultParts > 1 ? `${resultParts} parts` : ""].filter(Boolean).join(" · ")}</BlockHeading>
-        <ToolOutputView format={call?.outputFormat ?? result.outputFormat ?? { kind: "text" }} key={outcome.output.length} value={outcome.output}/>
+        <BlockHeading aside={tokenAside(result.tokens)}>{["Result", outcome.status, outcome.elapsed && `wall ${outcome.elapsed}`, readout && readout.parts.length > 1 ? `${readout.parts.length} outputs` : ""].filter(Boolean).join(" · ")}</BlockHeading>
+        {readout ? <ResultPartsView parts={readout.parts}/>
+          : <ToolOutputView format={call?.outputFormat ?? result.outputFormat ?? TEXT_FORMAT} key={plain?.output.length} value={plain?.output ?? ""}/>}
       </BlockAnchor> : <p className="text-xs text-muted">{inResponse ? "The model called this tool in its response; the result is part of the next turn." : "The result is not part of this request."}</p>}
     </div>
   </Row>;
+}
+
+/* The command a nested call runs, as its first line. */
+function callCommand(call: ToolCall): string {
+  const input = asRecord(call.input);
+  const source = CALL_SOURCE_KEYS.map((key) => input[key]).find((value): value is string => typeof value === "string") ?? "";
+  const lines = source.trim().split("\n");
+  return lines.length > 1 ? `${lines[0]} …` : lines[0];
+}
+
+/* Each output of a multi-part result under its own line: the nested call that
+   produced it, its command, and only the facts worth a glance. */
+function ResultPartsView({ parts }: { parts: ResultReadout["parts"] }) {
+  if (!parts.length) return <EmptyState framed>The tool completed without captured output.</EmptyState>;
+  const numbered = parts.length > 1;
+  return <div className="space-y-4">{parts.map((part, position) => {
+    const command = part.call ? callCommand(part.call) : "";
+    const fullCommand = part.call ? textValue(CALL_SOURCE_KEYS.map((key) => asRecord(part.call?.input)[key]).find((value) => typeof value === "string")) : "";
+    const headed = numbered || part.call || part.failure || part.facts.length || part.truncated;
+    const title = headed ? <span className="flex min-w-0 flex-1 items-center gap-2">
+      {numbered ? <span className="w-4 shrink-0 text-right font-mono">{position + 1}</span> : null}
+      {part.call ? <span className="shrink-0 font-mono text-ink">{part.call.name}</span> : null}
+      {command ? <span className="min-w-0 truncate font-mono" title={fullCommand}>{command}</span> : null}
+      {part.failure ? <Badge tone="danger">{part.failure}</Badge> : null}
+      {part.truncated ? <span className="shrink-0" title={[part.truncated.tokens && `Original ${part.truncated.tokens.toLocaleString()} tokens`, part.truncated.lines && `${part.truncated.lines.toLocaleString()} lines`].filter(Boolean).join(" · ")}><Badge tone="warning">truncated</Badge></span> : null}
+      {part.facts.length ? <span className="shrink-0">{part.facts.join(" · ")}</span> : null}
+      {part.tokens ? <span className="ml-auto shrink-0 font-mono">{part.tokens.tokens.toLocaleString()} tok</span> : null}
+    </span> : undefined;
+    const body = part.body;
+    return <div className={position ? "border-t border-line pt-4" : undefined} key={part.partIndex}>
+      {body.kind === "text" ? <ToolOutputView format={part.format} key={body.text.length} title={title} value={body.text}/>
+        : <div className="space-y-2">
+          {title ? <div className="flex items-center text-xs text-muted">{title}</div> : null}
+          {body.kind === "value" ? <StructuredValue value={body.value}/>
+            : <div className="flex flex-wrap items-center gap-2"><Badge mono>{body.type}</Badge><span className="text-xs text-muted">Attachment metadata is available in Raw JSON.</span></div>}
+        </div>}
+    </div>;
+  })}</div>;
 }
 
 function GenericRow({ defaultOpen = false, entry, onSelectToken, selection, turnId }: RowProps & { entry: InputEntry }) {
@@ -1449,7 +1520,7 @@ function StructuredRequest({ earlierTurns, onSelectToken, selection, turn }: { e
   const input = useMemo(() => collectInput(turn), [turn]);
   const entries = useMemo(() => inputEntries(turn, input), [turn, input]);
   const previousEnvironment = useMemo(() => earlierEnvironment(earlierTurns), [earlierTurns]);
-  const topLevelTools = asArray(body.tools);
+  const topLevelTools = toolDeclarations(turnPlugins(turn).protocol, body);
   const byLayer = new Map<InputLayer, InputEntry[]>();
   for (const entry of entries) byLayer.set(entry.inputClass.layer, [...(byLayer.get(entry.inputClass.layer) || []), entry]);
   const lastPromptKey = [...entries].reverse().find((entry) => entry.inputClass.label === "User prompt")?.key || "";

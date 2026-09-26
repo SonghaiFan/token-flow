@@ -1,7 +1,8 @@
 import { agentById, agentForRecord, type AgentPlugin } from "./agents";
 import { categoryColor, LAYER_COLORS } from "./category-palette";
 import { asNumber, asObject, textOf, textParts, type AnyObject } from "./json";
-import { protocolById, protocolFor, turnProtocol, type ProtocolAdapter } from "./protocols";
+import { protocolById, protocolFor, toolDeclarations, turnProtocol, type ProtocolAdapter } from "./protocols";
+import { messageReasoning } from "./protocols/chat-completions";
 import { responseBody } from "./protocols/usage";
 import type { InputClass, InputLayer, ItemState, TokenCategory, TraceRecord, TurnModel } from "./types";
 
@@ -56,7 +57,9 @@ function hasToolResult(item: AnyObject, protocol: ProtocolAdapter): boolean {
   return Array.isArray(content) && Boolean(protocol.isToolResultPart) && content.some((part) => protocol.isToolResultPart?.(asObject(part)));
 }
 
-function turnIdentity(items: unknown[], agent: AgentPlugin, protocol: ProtocolAdapter): { title: string; kind: "user" | "metadata" | "tool" | "unknown" } {
+function turnIdentity(record: TraceRecord, items: unknown[], agent: AgentPlugin, protocol: ProtocolAdapter): { title: string; kind: "user" | "metadata" | "tool" | "unknown" } {
+  const declared = agent.metadataRequest?.(record);
+  if (declared) return { title: declared, kind: "metadata" };
   let hasToolOutput = false;
 
   for (let itemIndex = items.length - 1; itemIndex >= 0; itemIndex -= 1) {
@@ -125,7 +128,9 @@ function classify(agent: AgentPlugin, item: AnyObject | undefined, text: string,
   if (declared) return declared;
   const matched = (agent.textPatterns || []).find(([pattern]) => pattern.test(value));
   if (matched) return matched[1];
-  if (item?.role === "assistant") return { layer: "conversation", label: "Assistant messages" };
+  if (item?.role === "tool") return { layer: "conversation", label: "Tool results" };
+  if (item?.role === "assistant" && !value && Array.isArray(item.tool_calls) && item.tool_calls.length) return { layer: "conversation", label: "Tool calls" };
+  if (item?.role === "assistant" || item?.role === "model") return { layer: "conversation", label: "Assistant messages" };
   if (item?.role === "developer" || item?.role === "system") return { layer: "instructions", label: "Developer instructions" };
   if (item?.role === "user") return { layer: "conversation", label: "User prompt" };
   return UNATTRIBUTED;
@@ -257,7 +262,8 @@ function systemTexts(system: unknown, agent: AgentPlugin): string[] {
 function promptBlocks(record: TraceRecord, protocol: ProtocolAdapter, agent: AgentPlugin): PromptBlock[] {
   const body = asObject(record.request?.body);
   const blocks: PromptBlock[] = [];
-  if (Array.isArray(body.tools) && body.tools.length) blocks.push({ inputClass: { layer: "capabilities", label: "Tool definitions" }, item: -1, text: contentSignature(body.tools) });
+  const tools = toolDeclarations(protocol, body);
+  if (tools.length) blocks.push({ inputClass: { layer: "capabilities", label: "Tool definitions" }, item: -1, text: contentSignature(tools) });
   const system = protocol.system(body);
   if (system !== undefined) {
     const systemItem = { type: "instructions", role: "system" };
@@ -266,11 +272,14 @@ function promptBlocks(record: TraceRecord, protocol: ProtocolAdapter, agent: Age
   protocol.items(body).forEach((raw, index) => {
     const item = asObject(raw);
     const content = item.content ?? item.parts;
-    if (!Array.isArray(content)) {
-      blocks.push({ inputClass: classifyPart(agent, protocol, item), item: index, text: blockText(content ?? item) });
-      return;
-    }
-    content.forEach((part, partIndex) => blocks.push({ inputClass: classifyPart(agent, protocol, item, part, partIndex), item: index, text: blockText(part) }));
+    // Chat Completions carries an assistant turn's reasoning and tool calls beside
+    // its text; each is its own block.
+    const reasoning = item.role === "assistant" ? messageReasoning(item) : undefined;
+    const toolCalls = Array.isArray(item.tool_calls) && item.tool_calls.length ? item.tool_calls : undefined;
+    if (reasoning?.text) blocks.push({ inputClass: { layer: "conversation", label: "Reasoning" }, item: index, text: reasoning.text });
+    if (Array.isArray(content)) content.forEach((part, partIndex) => blocks.push({ inputClass: classifyPart(agent, protocol, item, part, partIndex), item: index, text: blockText(part) }));
+    else if ((content !== undefined && content !== null && content !== "") || (!reasoning && !toolCalls)) blocks.push({ inputClass: classifyPart(agent, protocol, item), item: index, text: blockText(content ?? item) });
+    if (toolCalls) blocks.push({ inputClass: { layer: "conversation", label: "Tool calls" }, item: index, text: contentSignature(toolCalls) });
   });
   return blocks;
 }
@@ -362,7 +371,7 @@ function allocateTurns(records: TraceRecord[], protocols: ProtocolAdapter[], age
 
     const body = asObject(record.request?.body);
     const items = protocol.items(body);
-    const head = promptSignature([protocol.system(body), body.tools]);
+    const head = promptSignature([protocol.system(body), toolDeclarations(protocol, body)]);
     const signatures = items.map(promptSignature);
     let fromIndex: number | undefined;
     for (let earlierIndex = index - 1; cache.read > 0 && earlierIndex >= 0; earlierIndex -= 1) {
@@ -484,9 +493,9 @@ function laneFor(record: TraceRecord): string {
   return String(metadata.thread_id || body.prompt_cache_key || headers["thread-id"] || headers["session-id"] || "");
 }
 
-function threadOf(record: TraceRecord, agent: AgentPlugin): TurnModel["thread"] {
-  const declared = agent.thread?.(record) || {};
-  return { id: declared.id || laneFor(record), parentId: declared.parentId, label: declared.label };
+function threadOf(record: TraceRecord, agent: AgentPlugin, records: TraceRecord[], index: number): TurnModel["thread"] {
+  const declared = agent.thread?.(record, { index, records }) || {};
+  return { id: declared.id || laneFor(record), label: declared.label, name: declared.name, parentId: declared.parentId };
 }
 
 export type LayerTotals = Record<InputLayer, { cached: number; tokens: number }>;
@@ -513,7 +522,8 @@ export function buildTurns(records: TraceRecord[], estimates?: TokenEstimates): 
     });
   const protocols = turnRecords.map((entry) => entry.protocol);
   const agents = turnRecords.map((entry) => agentForRecord(entry.record));
-  const contexts = turnContexts(turnRecords.map((entry) => entry.record), protocols);
+  const allRecords = turnRecords.map((entry) => entry.record);
+  const contexts = turnContexts(allRecords, protocols);
   const catalog = buildCatalog(contexts, agents);
   const states = itemStatesByTurn(contexts);
   const cacheLinks = allocateTurns(turnRecords.map((entry) => entry.record), protocols, agents, estimates);
@@ -524,7 +534,7 @@ export function buildTurns(records: TraceRecord[], estimates?: TokenEstimates): 
     const requestBody = asObject(record.request?.body);
     const items = context.chainedItems ? context.input : protocol.items(requestBody);
     const response = responseBody(record);
-    const identity = turnIdentity(items, agent, protocol);
+    const identity = turnIdentity(record, items, agent, protocol);
     const query = queryInputInfo(items, agent, protocol);
     return {
       id: stableTurnId(record, index),
@@ -561,7 +571,7 @@ export function buildTurns(records: TraceRecord[], estimates?: TokenEstimates): 
         added: cacheLinks[index]?.added || 0,
       },
       lane: laneFor(record),
-      thread: threadOf(record, agent),
+      thread: threadOf(record, agent, allRecords, index),
       protocol: protocol.id,
       agent: agent.id,
       record,

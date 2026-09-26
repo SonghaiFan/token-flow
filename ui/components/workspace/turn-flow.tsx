@@ -32,7 +32,7 @@ type Granularity = "layers" | "categories";
 type FlowItem =
   | { kind: "thread"; key: string; label: string; top: number }
   | { kind: "query"; key: string; label: string; top: number }
-  | { kind: "branch"; depth: number; detail: string; key: string; label: string; open: boolean; threadId: string; top: number }
+  | { kind: "branch"; depth: number; detail: string; key: string; label: string; name?: string; open: boolean; threadId: string; top: number }
   | { kind: "turn"; depth: number; key: string; index: number; top: number };
 
 interface NodeData {
@@ -180,9 +180,11 @@ export function TurnFlow({ focus = null, onSelectNode, onSelectTurn, selected, s
       return { height: top, items };
     }
     const inputOf = (indices: number[]) => indices.reduce((sum, index) => sum + turns[index].input, 0);
-    const pushBranch = (id: string, label: string, indices: number[], depth: number, note?: string) => {
+    const pushBranch = (id: string, label: string, indices: number[], depth: number, note?: string, name?: string) => {
       const open = openIds.has(id);
-      items.push({ depth, detail: note || `${indices.length} ${indices.length === 1 ? "turn" : "turns"} · ${formatCompact(inputOf(indices))}`, key: `branch-${id}`, kind: "branch", label, open, threadId: id, top });
+      const counts = `${indices.length} ${indices.length === 1 ? "turn" : "turns"} · ${formatCompact(inputOf(indices))}`;
+      // A spawned agent reads by its task; the kind of thread moves into the detail.
+      items.push({ depth, detail: note || (name ? `${label} · ${counts}` : counts), key: `branch-${id}`, kind: "branch", label, name, open, threadId: id, top });
       top += BRANCH;
       return open;
     };
@@ -195,7 +197,7 @@ export function TurnFlow({ focus = null, onSelectNode, onSelectTurn, selected, s
       }
       const branchesAfter = (index: number) => node.branches.filter((branch) => branch.after === index);
       const emitBranch = ({ node: child }: { node: ThreadNode }) => {
-        if (pushBranch(child.id, child.label || "Thread", threadIndices(child), depth)) emit(child, depth + 1);
+        if (pushBranch(child.id, child.label || "Thread", threadIndices(child), depth, undefined, child.name)) emit(child, depth + 1);
       };
       branchesAfter(-1).forEach(emitBranch);
       let lastGroup = "";
@@ -349,7 +351,9 @@ export function TurnFlow({ focus = null, onSelectNode, onSelectTurn, selected, s
               <button aria-expanded={item.open} className="tf-focus-inset tf-inset flex h-full w-full items-center gap-1.5 border-t border-line text-left text-xs text-muted transition-colors hover:bg-fill-hover hover:text-ink" onClick={() => toggleThread(item.threadId)} type="button">
                 {item.depth ? <span aria-hidden="true" className="shrink-0" style={{ width: item.depth * 14 }}/> : null}
                 <ChevronRightIcon className={`size-3.5 shrink-0 transition-transform ${item.open ? "rotate-90" : ""}`}/>
-                <span className="shrink-0 font-medium text-ink">↳ {item.label}</span>
+                {item.name
+                  ? <span className="shrink-0 text-ink" title={item.name}>↳ <span className="font-mono font-medium">{item.name.startsWith("/") ? item.name.split("/").pop() : item.name}</span></span>
+                  : <span className="shrink-0 font-medium text-ink">↳ {item.label}</span>}
                 <span className="truncate">{item.detail}</span>
               </button>
             </li>;

@@ -141,7 +141,10 @@ export interface TokenSelection {
 export interface TurnThread {
   id: string;
   parentId?: string;
+  /* What kind of thread it is, such as "Sub-agent" or "Guardian review". */
   label?: string;
+  /* The agent's own name when it was spawned for a task, such as "/root/release_docs". */
+  name?: string;
 }
 
 export interface TurnModel {

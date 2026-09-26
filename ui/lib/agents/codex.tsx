@@ -1,5 +1,6 @@
 import { environmentChanges, environmentPreview, EnvironmentView, previewText, ReadableText, type EnvironmentFacts } from "@/components/workspace/section-views";
 import { asObject } from "../json";
+import { codexResultParts } from "./codex-results";
 import type { InputClass } from "../types";
 
 /* Codex names sub-agents in `x-openai-subagent`; these are the kinds seen so far. */
@@ -75,12 +76,23 @@ export const codex: AgentPlugin = {
     const metadata = asObject(asObject(record.request?.body).client_metadata);
     const text = (key: string) => (typeof metadata[key] === "string" && metadata[key] ? (metadata[key] as string) : undefined);
     const role = text("x-openai-subagent");
+    // A spawned agent carries its task path (`/root/release_docs`) as agent_name in
+    // the turn metadata; the root agent and guardian reviews are just `/root`.
+    let name: string | undefined;
+    try {
+      const turn = asObject(JSON.parse(text("x-codex-turn-metadata") || "{}"));
+      if (typeof turn.agent_name === "string" && turn.agent_name.includes("/", 1)) name = turn.agent_name;
+    } catch {
+      name = undefined;
+    }
     return {
       id: text("thread_id"),
       parentId: text("x-codex-parent-thread-id"),
       label: role ? SUBAGENT_LABELS[role] || role.replaceAll("_", " ") : undefined,
+      name,
     };
   },
+  resultParts: codexResultParts,
   contentKinds: CONTENT_KINDS,
   textPatterns: [
     [/^You are Codex, an agent/i, CONTENT_KINDS["model.base_instructions"]],

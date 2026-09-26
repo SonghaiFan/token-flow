@@ -566,7 +566,13 @@ class SSEReassembler:
             block["thinking"] = reasoning
 
     def _merge_chat_completion_reasoning_details(self, msg: dict, details) -> str:
-        """Merge MiniMax reasoning_details buffers and return display text."""
+        """Merge streamed reasoning_details entries and return display text.
+
+        Providers stream them two ways. MiniMax resends each entry's whole text
+        so far; OpenRouter sends only the new fragment. A chunk whose text
+        extends the accumulated text is a buffer and replaces it; any other
+        chunk is a fragment and is appended. Other fields (type, format,
+        signature) keep their latest value."""
         if not isinstance(details, list):
             return ""
         existing = msg.setdefault("reasoning_details", [])
@@ -582,7 +588,12 @@ class SSEReassembler:
                 index = fallback_index
             while len(existing) <= index:
                 existing.append({})
-            existing[index] = copy.deepcopy(detail)
+            current = existing[index] if isinstance(existing[index], dict) else {}
+            merged = {**current, **copy.deepcopy(detail)}
+            old_text, new_text = current.get("text"), detail.get("text")
+            if isinstance(old_text, str) and old_text and isinstance(new_text, str) and not new_text.startswith(old_text):
+                merged["text"] = old_text + new_text
+            existing[index] = merged
 
         texts = [
             detail["text"]

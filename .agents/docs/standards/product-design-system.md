@@ -132,8 +132,15 @@ The workspace answers a second question: **What happened in this conversation?**
   in the same app, scheduled tasks, and sub-agents. Each top-level thread is a
   section ("Conversation N · first request"; no header when there is one). A
   thread whose parent was captured (Codex `x-codex-parent-thread-id`) is a
-  branch row after the parent turn it followed, folded to "↳ Guardian review ·
-  5 turns · 183K" and opened on demand; the branch holding the selected turn
+  branch row after the parent turn it followed, folded to one line and opened
+  on demand. A spawned agent reads by its task (Codex turn metadata
+  `agent_name`, "↳ `release_docs` Sub-agent · 21 turns · 1.1M", full path in the
+  tooltip); a thread without one reads by its kind ("↳ Guardian review · 5 turns
+  · 183K"). A request that names no parent joins one only on captured
+  evidence: an Antigravity `web_search` request is a branch of the agent turn
+  whose `search_web` call carried its exact query, and reads by that query
+  ("↳ `Google stock price GOOGL` Web search · 1 turn · 70"). The branch holding
+  the selected turn
   opens itself. Title generation and empty requests fold into "Auxiliary
   requests" at the end. Ribbons connect turns of one thread only, so a thread
   reads continuously past folded branches. A search lists matching turns flat.
@@ -317,7 +324,18 @@ commands, listings, searches, and anything without evidence stay plain text.
 Only JSON that parses and complete HTML documents are recognized from content.
 Each result names its evidence ("From README.md") and offers a switch between
 the inferred view, Plain, and Markdown. Agent plugins may describe their own
-tools through `outputFormat`.
+tools through `outputFormat`. Only output that is JSON from its first character
+reads as structured; JSON printed partway through other output is text.
+
+A result captured as several parts is several results, never one joined text
+(`ui/lib/tool-results.ts`). Each part reads full width under one line: its
+number, the nested call that produced it and that call's command when the call
+names it, then only exceptions and facts worth a glance (a failure, a
+truncation, a long wall time, a session still running). Agent plugins unwrap
+their harness's payload envelopes through `resultParts` (Codex `exec`:
+`{i, status, value}` settled results, `exec_command` chunks, MCP content;
+Antigravity: `Created At`/`Completed At` timing and tool errors), so the
+output itself is the body, not a nested value grid.
 
 The turn inspector has two evidence-preserving representations. `Structured`
 uses domain-specific renderers for known trace shapes. `Raw` preserves the exact

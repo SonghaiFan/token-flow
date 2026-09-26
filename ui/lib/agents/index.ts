@@ -1,5 +1,6 @@
 import { asObject } from "../json";
 import type { TraceRecord } from "../types";
+import { antigravity } from "./antigravity";
 import { claude } from "./claude";
 import { codex } from "./codex";
 import { pi } from "./pi";
@@ -9,7 +10,7 @@ export type { AgentPlugin, SectionFact, SectionView } from "./types";
 
 /* Add an agent by writing a plugin and listing it here. Its capture side is the
    matching `token_tap/agents/<id>.py`. */
-const AGENTS: AgentPlugin[] = [codex, pi, claude];
+const AGENTS: AgentPlugin[] = [codex, pi, claude, antigravity];
 
 /* Agents without their own plugin, and records captured before `capture.client`
    existed, keep the conventions every known harness uses. Those rules only match
