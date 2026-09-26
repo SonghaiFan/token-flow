@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { formatDuration, formatNumber } from "@/lib/format";
 import type { SectionView } from "@/lib/agents";
+import { callReadSource, cleanWebText, inferOutputFormat, type OutputFormat, type OutputKind } from "@/lib/output-format";
 import { classifyInput, LAYER_META, LAYER_ORDER, turnPlugins } from "@/lib/token-model";
 import type { InputClass, InputLayer, ItemState, TokenSelection, TraceRecord, TurnModel } from "@/lib/types";
 import { categoryColor } from "@/lib/category-palette";
@@ -349,14 +350,85 @@ function ToolResultCatalog({ tools }: { tools: ToolResultDefinition[] }) {
   </section>;
 }
 
-function StructuredValue({ value }: { value: unknown }) {
-  if (Array.isArray(value) && value.length && value.every(isToolResultDefinition)) return <ToolResultCatalog tools={value}/>;
-  if (Array.isArray(value)) return <section className="space-y-2"><div className="flex items-center gap-2"><strong className="text-xs">Structured list</strong><Badge mono>{value.length} items</Badge></div>{value.map((item, index) => <Disclosure key={index} summary={<><strong className="text-xs">Item {index + 1}</strong><span className="min-w-0 truncate text-xs text-muted">{previewText(item)}</span></>}><StructuredValue value={item}/></Disclosure>)}</section>;
-  if (value && typeof value === "object") {
-    const entries = Object.entries(asRecord(value));
-    return <dl className="tf-card divide-y divide-line overflow-hidden">{entries.map(([key, item]) => <div className="tf-inset grid gap-1 py-3 text-xs sm:grid-cols-[10rem_minmax(0,1fr)]" key={key}><dt className="break-all font-mono text-xs font-medium text-muted">{key}</dt><dd className="min-w-0 break-words text-ink">{item && typeof item === "object" ? <Disclosure summary={<><span className="text-xs">{Array.isArray(item) ? `${item.length} items` : `${Object.keys(asRecord(item)).length} fields`}</span><span className="min-w-0 truncate text-xs text-muted">{previewText(item)}</span></>}><StructuredValue value={item}/></Disclosure> : <span className="whitespace-pre-wrap">{textValue(item) || (item === null ? "null" : "")}</span>}</dd></div>)}</dl>;
+/* Structured values render by size, not by shape, so nothing small hides behind
+   a disclosure: a single-field object is its value, short items sit on one line,
+   short lists are numbered rows, and objects are a plain key/value grid. Only a
+   large or deeply nested element folds, and its summary previews its content. */
+const INLINE_CHARS = 140;
+const FOLD_CHARS = 600;
+
+function isScalar(value: unknown): boolean {
+  return value === null || typeof value !== "object";
+}
+
+/* The value an object stands for when it has one field, followed through nesting. */
+function soleValue(value: unknown): unknown {
+  let current = value;
+  while (current && typeof current === "object" && !Array.isArray(current)) {
+    const entries = Object.entries(current as UnknownRecord);
+    if (entries.length !== 1) break;
+    current = entries[0][1];
   }
-  return <span className="whitespace-pre-wrap text-xs text-ink">{textValue(value) || (value === null ? "null" : "")}</span>;
+  return current;
+}
+
+/* One line for a value that fits on one: a scalar, or an object of scalars. */
+function inlineText(value: unknown): string | null {
+  const sole = soleValue(value);
+  if (isScalar(sole)) {
+    const text = sole === null ? "null" : textValue(sole);
+    return text.length <= INLINE_CHARS && !text.includes("\n") ? text : null;
+  }
+  if (Array.isArray(sole)) return null;
+  const entries = Object.entries(sole as UnknownRecord);
+  if (!entries.every(([, item]) => isScalar(item))) return null;
+  const text = entries.map(([key, item]) => `${key}: ${item === null ? "null" : textValue(item)}`).join(" · ");
+  return text.length <= INLINE_CHARS ? text : null;
+}
+
+function ScalarView({ value }: { value: unknown }) {
+  const text = value === null ? "null" : textValue(value);
+  if (/^https?:\/\/\S+$/.test(text)) {
+    return <a className="break-all underline decoration-line underline-offset-4 hover:decoration-ink" href={text} rel="noreferrer" target="_blank" title={text}>{text.replace(/^https?:\/\//, "")}</a>;
+  }
+  return <span className="whitespace-pre-wrap break-words">{text}</span>;
+}
+
+function InlineValue({ value }: { value: unknown }) {
+  const sole = soleValue(value);
+  if (isScalar(sole)) return <span title={sole === value ? undefined : Object.keys(asRecord(value)).join(" › ")}><ScalarView value={sole}/></span>;
+  const entries = Object.entries(asRecord(sole));
+  return <span>{entries.map(([key, item], index) => <span key={key}>{index ? <span className="text-muted"> · </span> : null}<span className="text-muted">{key}</span> <ScalarView value={item}/></span>)}</span>;
+}
+
+function StructuredValue({ depth = 0, value }: { depth?: number; value: unknown }) {
+  if (Array.isArray(value) && value.length && value.every(isToolResultDefinition)) return <ToolResultCatalog tools={value}/>;
+  const sole = soleValue(value);
+  if (isScalar(sole)) return <span className="text-xs text-ink"><ScalarView value={sole}/></span>;
+  if (Array.isArray(sole)) {
+    if (!sole.length) return <span className="text-xs text-muted">Empty list</span>;
+    return <ol className="space-y-1 text-xs text-ink">{sole.map((item, index) => {
+      const inline = inlineText(item);
+      const size = stableValue(item).length;
+      return <li className="grid grid-cols-[1.25rem_minmax(0,1fr)] gap-2" key={index}>
+        <span className="select-none text-right font-mono text-muted">{index + 1}</span>
+        <div className="min-w-0">{inline !== null ? <InlineValue value={item}/>
+          : size > FOLD_CHARS || depth >= 2 ? <Disclosure summary={<span className="min-w-0 truncate text-xs text-muted">{previewText(item) || `${size.toLocaleString()} characters`}</span>}><StructuredValue depth={depth + 1} value={item}/></Disclosure>
+            : <StructuredValue depth={depth + 1} value={item}/>}</div>
+      </li>;
+    })}</ol>;
+  }
+  const entries = Object.entries(asRecord(sole));
+  return <dl className="grid grid-cols-[minmax(0,7.5rem)_minmax(0,1fr)] gap-x-4 gap-y-1.5 text-xs">{entries.map(([key, item]) => {
+    const inline = inlineText(item);
+    const size = stableValue(item).length;
+    return <div className="contents" key={key}>
+      <dt className="truncate font-mono text-muted" title={key}>{key}</dt>
+      <dd className="min-w-0 text-ink">{inline !== null ? <InlineValue value={item}/>
+        : size > FOLD_CHARS || depth >= 2 ? <Disclosure summary={<span className="min-w-0 truncate text-xs text-muted">{previewText(item) || `${size.toLocaleString()} characters`}</span>}><StructuredValue depth={depth + 1} value={item}/></Disclosure>
+          : <StructuredValue depth={depth + 1} value={item}/>}</dd>
+    </div>;
+  })}</dl>;
 }
 
 function StructuredText({ children }: { children: string }) {
@@ -415,53 +487,76 @@ function HtmlOutput({ value }: { value: string }) {
   </section>;
 }
 
-function TextOutput({ value }: { value: string }) {
+function lineCount(value: string): string {
+  const count = value.split("\n").length;
+  return `${count} ${count === 1 ? "line" : "lines"}`;
+}
+
+function TextOutput({ label = "Output", value }: { label?: string; value: string }) {
   const lines = value.split("\n");
   if (!value) return <EmptyState framed>The tool completed without captured output.</EmptyState>;
   if (/too many requests|rate limit/i.test(value)) return <Notice compact title="Rate limited" tone="warning">{value.trim()}</Notice>;
-  return <section><BlockHeading aside={`${lines.length} ${lines.length === 1 ? "line" : "lines"}`}>Output</BlockHeading><ol className="tf-code tf-well max-h-[28rem] overflow-auto py-2 text-ink">{lines.map((line, index) => <li className="grid grid-cols-[2.5rem_minmax(0,1fr)] px-3" key={index}><span className="select-none pr-3 text-right text-muted/70">{index + 1}</span><span className="whitespace-pre-wrap break-words">{line || " "}</span></li>)}</ol></section>;
-}
-
-function looksLikeMarkdown(value: string): boolean {
-  const headingCount = value.match(/^#{1,6}\s+\S/gm)?.length || 0;
-  if (headingCount >= 2 || /^\s*(?:```|~~~)/m.test(value)) return true;
-  const signals = [
-    /^\s*[-*+]\s+\S/m.test(value),
-    /^\s*\d+\.\s+\S/m.test(value),
-    /^\s*>\s+\S/m.test(value),
-    /\[[^\]\n]+\]\([^\s)]+(?:\s+["'][^"']*["'])?\)/.test(value),
-    /(?:^|[^*])\*\*[^*\n]+\*\*/m.test(value),
-    /^\s*\|.+\|\s*$/m.test(value) && /^\s*\|?\s*:?-{3,}/m.test(value),
-  ].filter(Boolean).length;
-  return headingCount + signals >= 2;
+  return <section><BlockHeading aside={lineCount(value)}>{label}</BlockHeading><ol className="tf-code tf-well max-h-[28rem] overflow-auto py-2 text-ink">{lines.map((line, index) => <li className="grid grid-cols-[2.5rem_minmax(0,1fr)] px-3" key={index}><span className="select-none pr-3 text-right text-muted/70">{index + 1}</span><span className="whitespace-pre-wrap break-words">{line || " "}</span></li>)}</ol></section>;
 }
 
 function MarkdownOutput({ value }: { value: string }) {
-  const lineCount = value.split("\n").length;
-  return <section><BlockHeading aside={`${lineCount} ${lineCount === 1 ? "line" : "lines"}`}>Rendered Markdown · exact source in Raw</BlockHeading><div className="tf-well max-h-[40rem] overflow-auto px-4 py-3"><RichText>{value}</RichText></div></section>;
+  return <section><BlockHeading aside={lineCount(value)}>Rendered Markdown</BlockHeading><div className="tf-well max-h-[40rem] overflow-auto px-4 py-3"><RichText>{value}</RichText></div></section>;
 }
 
-type DetectedToolOutput =
-  | { kind: "html"; value: string }
-  | { kind: "markdown"; value: string }
-  | { kind: "structured"; value: ParsedStructuredText }
-  | { kind: "text"; value: string };
+function DiffOutput({ value }: { value: string }) {
+  const tone = (line: string) => line.startsWith("+++") || line.startsWith("---") || /^(?:diff |index |commit |Author:|Date:)/.test(line) ? "font-semibold text-ink"
+    : line.startsWith("@@") ? "text-muted"
+      : line.startsWith("+") ? "bg-success-soft text-success-ink"
+        : line.startsWith("-") ? "bg-danger-soft text-danger-ink" : "text-ink";
+  return <section><BlockHeading aside={lineCount(value)}>Diff</BlockHeading><pre className="tf-code tf-well max-h-[32rem] overflow-auto py-2">{value.split("\n").map((line, index) => <div className={`whitespace-pre-wrap break-words px-3 ${tone(line)}`} key={index}>{line || " "}</div>)}</pre></section>;
+}
 
-function detectToolOutput(value: string): DetectedToolOutput {
+/* A fetched web page reads as prose once citation markers are removed. */
+function WebOutput({ value }: { value: string }) {
+  const text = cleanWebText(value).trim();
+  return <section><BlockHeading aside={lineCount(text)}>Web page · citation markers removed</BlockHeading><div className="tf-well max-h-[32rem] overflow-auto whitespace-pre-wrap break-words px-4 py-3 text-sm leading-6 text-ink">{text}</div></section>;
+}
+
+type OutputView = OutputKind | "structured" | "html";
+
+const VIEW_LABELS: Record<OutputView, string> = {
+  code: "Code",
+  diff: "Diff",
+  html: "Document",
+  markdown: "Markdown",
+  structured: "Structured",
+  text: "Plain",
+  web: "Web page",
+};
+
+/* A tool result, shown the way the call that produced it says it should be: a
+   Markdown file renders, source reads as code, a diff is colored, a web page is
+   cleaned. Without that evidence it stays plain text; only JSON that parses and
+   complete HTML documents are recognized from content. The reader can always
+   switch between the inferred view, Plain, and Markdown. */
+function ToolOutputView({ format, value }: { format: OutputFormat; value: string }) {
   const trimmed = value.trim();
-  if (/^<!doctype\s+html|^<html\b/i.test(trimmed)) return { kind: "html", value: trimmed };
-  const structured = parseStructuredText(trimmed);
-  if (structured) return { kind: "structured", value: structured };
-  if (looksLikeMarkdown(trimmed)) return { kind: "markdown", value: trimmed };
-  return { kind: "text", value: trimmed };
-}
-
-function ToolOutputView({ value }: { value: string }) {
-  const output = detectToolOutput(value);
-  if (output.kind === "html") return <HtmlOutput value={output.value}/>;
-  if (output.kind === "structured") return <StructuredOutput parsed={output.value}/>;
-  if (output.kind === "markdown") return <MarkdownOutput value={output.value}/>;
-  return <TextOutput value={output.value}/>;
+  const structured = useMemo(() => (format.kind === "text" ? parseStructuredText(trimmed) : null), [format.kind, trimmed]);
+  const auto: OutputView = /^<!doctype\s+html|^<html\b/i.test(trimmed) ? "html" : format.kind !== "text" ? format.kind : structured ? "structured" : "text";
+  const [chosen, setChosen] = useState<OutputView | null>(null);
+  const view = chosen ?? auto;
+  const options = [...new Set<OutputView>([auto, "text", "markdown"])];
+  const language = format.kind === "code" ? format.language : undefined;
+  return <div className="space-y-2">
+    {trimmed ? <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted">
+      <span className="min-w-0 truncate">{format.reason ? <>From <code className="font-mono text-ink">{format.reason}</code></> : "No format declared by the call"}</span>
+      <span aria-label="Output view" className="ml-auto inline-flex rounded-md border border-line p-0.5" role="group">
+        {options.map((option) => <button aria-pressed={view === option} className={`rounded px-2 py-0.5 ${view === option ? "bg-canvas font-medium text-ink" : "hover:text-ink"}`} key={option} onClick={() => setChosen(option)} type="button">{option === "code" && language ? language : VIEW_LABELS[option]}</button>)}
+      </span>
+    </div> : null}
+    {view === "html" ? <HtmlOutput value={trimmed}/>
+      : view === "structured" && structured ? <StructuredOutput parsed={structured}/>
+        : view === "markdown" ? <MarkdownOutput value={trimmed}/>
+          : view === "diff" ? <DiffOutput value={trimmed}/>
+            : view === "web" ? <WebOutput value={trimmed}/>
+              : view === "code" ? <TextOutput label={language || "Code"} value={trimmed}/>
+                : <TextOutput value={trimmed}/>}
+  </div>;
 }
 
 function Disclosure({ children, defaultOpen = false, summary }: { children: ReactNode; defaultOpen?: boolean; summary: ReactNode }) {
@@ -739,6 +834,8 @@ interface InputEntry {
   result?: InputEntry;
   /* State shown on the row; omitted when every item is new so rows stay quiet. */
   rowState?: ItemState;
+  /* How the tool result of this call (or answering this result's call) is shown. */
+  outputFormat?: OutputFormat;
   /* The agent's view for this section label, when it has one. */
   section?: SectionView;
   state?: ItemState;
@@ -766,13 +863,19 @@ function inputEntries(turn: TurnModel, items: unknown[]): InputEntry[] {
   const tokens = tokenIndex(turn);
   const { agent } = turnPlugins(turn);
   const withView = (entry: InputEntry): InputEntry => ({ ...entry, section: agent.sections?.[entry.inputClass.label] });
+  // A result's format comes from the call that produced it: its command or the file it reads.
+  const formatFor = (item: UnknownRecord): OutputFormat => {
+    const presentation = toolCallPresentation(item);
+    const source = callReadSource([presentation.name, presentation.wrapperName].filter(Boolean).join(" "), presentation.input);
+    return agent.outputFormat?.(source) ?? inferOutputFormat(source);
+  };
   const entries: InputEntry[] = items.flatMap((raw, itemIndex) => {
     const item = asRecord(raw);
     const itemId = textValue(item.id);
     const state = itemId ? turn.itemStates[itemId] : undefined;
     const key = itemId || `item-${itemIndex}`;
     if (!isMessagePartItem(item)) {
-      return [withView({ blockId: itemId || undefined, inputClass: classifyInput(turn.record, item), item, itemId, key, state, tokens: itemId ? tokens.get(`item:${itemId}`) : undefined })];
+      return [withView({ blockId: itemId || undefined, inputClass: classifyInput(turn.record, item), item, itemId, key, outputFormat: toolEventKind(item) === "call" ? formatFor(item) : undefined, state, tokens: itemId ? tokens.get(`item:${itemId}`) : undefined })];
     }
     const parts = inputItemParts(item);
     return parts.map((part, partIndex) => {
@@ -782,7 +885,12 @@ function inputEntries(turn: TurnModel, items: unknown[]): InputEntry[] {
     });
   });
   const mixed = entries.some((entry) => entry.state && entry.state !== "new");
-  return entries.map((entry) => ({ ...entry, rowState: mixed ? entry.state : undefined }));
+  const callFormats = new Map(entries.filter((entry) => entry.outputFormat).map((entry) => [textValue(entry.item.call_id), entry.outputFormat as OutputFormat] as const));
+  return entries.map((entry) => ({
+    ...entry,
+    outputFormat: entry.outputFormat ?? (toolEventKind(entry.item) === "result" ? callFormats.get(textValue(entry.item.call_id)) : undefined),
+    rowState: mixed ? entry.state : undefined,
+  }));
 }
 
 function sumTokens(entries: InputEntry[]): { cached: number; tokens: number } | undefined {
@@ -1100,7 +1208,7 @@ function ToolExchangeRow({ call, onSelectToken, result, selection, turnId }: Row
       </BlockAnchor> : null}
       {result && resultItem && outcome ? <BlockAnchor blockIds={entryBlockIds([result])} turnId={turnId}>
         <BlockHeading aside={tokenAside(result.tokens)}>{["Result", outcome.status, outcome.elapsed && `wall ${outcome.elapsed}`, resultParts > 1 ? `${resultParts} parts` : ""].filter(Boolean).join(" · ")}</BlockHeading>
-        <ToolOutputView value={outcome.output}/>
+        <ToolOutputView format={call?.outputFormat ?? result.outputFormat ?? { kind: "text" }} key={outcome.output.length} value={outcome.output}/>
       </BlockAnchor> : <p className="text-xs text-muted">The result is not part of this request.</p>}
     </div>
   </Row>;

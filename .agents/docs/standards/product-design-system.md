@@ -272,12 +272,28 @@ summary, and state visible so disclosure never becomes information loss.
 ### Structured machine output
 
 In the turn inspector, parse valid JSON embedded in captured text into readable
-objects and lists. Preserve any warning or truncation preamble as visible
+objects and lists. Render structured values by size, not by shape: a
+single-field object shows its value, items that fit on one line stay inline,
+short lists are numbered rows, objects are a plain key/value grid, and only a
+large or deeply nested element folds, with a summary that previews its content
+rather than "Item N". URLs read as links without the scheme. Preserve any warning or truncation preamble as visible
 metadata. Tool-definition collections use one collapsed entry per captured tool:
 show its name and plain-language summary first, then place its declaration and
 additional fields in nested disclosures. Large collections render lazily. When
 captured JSON is malformed, recover only a known, unambiguous structure; do not
 invent missing fields. Raw JSON always retains the exact captured evidence.
+
+A tool result is shown the way the call that produced it declares, never by
+guessing from how the output looks (`ui/lib/output-format.ts`). A command that
+prints one file (`cat`, `sed -n`, `head`, `tail`, optionally piped through
+those) or a read tool takes the file's type: `.md` renders as Markdown, source
+reads as code, `.diff`/`.patch` as a diff. `git diff`/`git show` render as a
+diff; web tools read as prose with citation markers removed. Compound
+commands, listings, searches, and anything without evidence stay plain text.
+Only JSON that parses and complete HTML documents are recognized from content.
+Each result names its evidence ("From README.md") and offers a switch between
+the inferred view, Plain, and Markdown. Agent plugins may describe their own
+tools through `outputFormat`.
 
 The turn inspector has two evidence-preserving representations. `Structured`
 uses domain-specific renderers for known trace shapes. `Raw` preserves the exact

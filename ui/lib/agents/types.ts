@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 import type { AnyObject } from "../json";
+import type { CallSource, OutputFormat } from "../output-format";
 import type { InputClass } from "../types";
 
 export interface SectionFact {
@@ -39,6 +40,9 @@ export interface AgentPlugin {
   cleanPrompt?(text: string): string;
   /* Split one system text into the sections the harness assembled it from. */
   splitSystemText?(text: string): string[];
+  /* How a tool's result reads, for tools the generic rules do not cover (see
+     `ui/lib/output-format.ts`). Return undefined to keep the generic answer. */
+  outputFormat?(source: CallSource): OutputFormat | undefined;
   /* Views by section label. */
   sections?: Record<string, SectionView>;
 }
