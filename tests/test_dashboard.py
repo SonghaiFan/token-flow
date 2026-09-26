@@ -35,6 +35,7 @@ from token_tap.server.dashboard import (
     _request_user_text,
     _response_events,
     _response_text,
+    build_stored_session_summary,
     dashboard_trace_snapshot,
     list_trace_agents,
     list_trace_sessions,
@@ -1394,6 +1395,72 @@ def test_dashboard_preview_skips_one_token_quota_probe(trace_db, tmp_path: Path)
 
     assert summary["first_user"] == "hello"
     assert summary["status"] == "complete"
+
+
+@pytest.mark.asyncio
+async def test_dashboard_skips_forward_proxy_non_model_requests(trace_db) -> None:
+    store = get_trace_store()
+    session_id = store.create_session(client="pi", proxy_mode="forward")
+    writer = TraceWriter(session_id, store=store, metadata={"client": "pi", "proxy_mode": "forward"})
+
+    def upstream_failure(method: str, path: str, error: str) -> dict:
+        return {
+            "timestamp": "2026-09-20T08:00:00+00:00",
+            "request": {"method": method, "path": path, "headers": {}, "body": None},
+            "response": {"status": 502, "headers": {"Content-Type": "text/plain"}, "body": {"error": error}},
+        }
+
+    noise = [
+        upstream_failure("GET", "/", "/"),
+        upstream_failure("GET", "/favicon.ico", "/favicon.ico"),
+        upstream_failure("GET", "/apple-touch-icon.png", "/apple-touch-icon.png"),
+        upstream_failure("HEAD", "/", "/"),
+        upstream_failure("\x16\x03\x01\x02\x00\x01\x00\x01\ufffd\x03\x03", "\ufffd\ufffd\x13\x01", "InvalidURL"),
+    ]
+    try:
+        await writer.write(noise[0])
+        await writer.write(
+            {
+                "timestamp": "2026-09-20T08:00:01+00:00",
+                "request": {
+                    "method": "POST",
+                    "path": "/v1/chat/completions",
+                    "body": {"model": "gpt-5", "messages": [{"role": "user", "content": "ping"}]},
+                },
+                "response": {
+                    "status": 200,
+                    "body": {
+                        "model": "gpt-5",
+                        "choices": [{"message": {"content": "pong"}}],
+                        "usage": {"prompt_tokens": 12, "completion_tokens": 3},
+                    },
+                },
+            }
+        )
+        for record in noise[1:]:
+            await writer.write(record)
+    finally:
+        writer.close()
+
+    assert select_trace_turn_records(noise) == []
+
+    conn = store._connect()
+    row = conn.execute("SELECT status, summary_json FROM sessions WHERE id = ?", (session_id,)).fetchone()
+    summary = json.loads(row["summary_json"])
+    assert row["status"] == "complete"
+    assert summary["turn_count"] == 1
+    assert summary["error"] == ""
+
+    rebuilt = build_stored_session_summary(store.load_session_row(session_id), store.load_records(session_id))
+    assert rebuilt["status"] == "complete"
+    assert rebuilt["turn_count"] == 1
+    assert rebuilt["error"] == ""
+    assert rebuilt["first_user"] == "ping"
+    assert rebuilt["last_response"] == "pong"
+
+    payload = load_trace_session(session_id)
+    assert payload is not None
+    assert len(payload["records"]) == 6
 
 
 @pytest.mark.asyncio

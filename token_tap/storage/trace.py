@@ -3,13 +3,13 @@
 from __future__ import annotations
 
 import asyncio
-import re
 import sqlite3
 import sys
 import uuid
 from datetime import datetime
 from typing import TYPE_CHECKING
 
+from token_tap.core.model_traffic import is_model_probe_path, is_non_model_request
 from token_tap.core.usage import normalize_usage
 from token_tap.storage.trace_store import TraceStore, get_trace_store
 
@@ -114,7 +114,7 @@ class TraceWriter:
         self.total_cache_create_tokens += usage.get("cache_creation_input_tokens", 0)
 
         response = record.get("response")
-        if isinstance(response, dict):
+        if isinstance(response, dict) and not is_non_model_request(record):
             status = response.get("status")
             if isinstance(status, int):
                 is_probe = _is_auxiliary_status_probe(record)
@@ -165,10 +165,4 @@ def create_trace_writer(
 def _is_auxiliary_status_probe(record: dict) -> bool:
     request = record.get("request")
     path = request.get("path") if isinstance(request, dict) else ""
-    if not isinstance(path, str):
-        return False
-    clean_path = path.lower().split("?", 1)[0].rstrip("/")
-    if clean_path in {"/models", "/v1/models", "/v1alpha/models", "/v1beta/models"}:
-        return True
-    match = re.fullmatch(r"/(?:v1/)?models/([^/:]+)", clean_path)
-    return match is not None
+    return isinstance(path, str) and is_model_probe_path(path)
