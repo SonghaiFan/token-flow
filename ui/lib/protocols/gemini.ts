@@ -24,6 +24,13 @@ export const gemini: ProtocolAdapter = {
       output: asNumber(metadata.candidatesTokenCount) + asNumber(metadata.thoughtsTokenCount),
     };
   },
+  // Gemini's reply role is "model"; timelines read it as the assistant.
+  output: (record) => {
+    const body = responseBody(record);
+    const candidates = body.candidates ?? asObject(body.response).candidates;
+    const content = Array.isArray(candidates) ? asObject(asObject(candidates[0]).content) : {};
+    return Object.keys(content).length ? [{ ...content, role: "assistant" }] : [];
+  },
   system: (body) => {
     const request = geminiRequest(body);
     return request.system_instruction ?? request.systemInstruction;

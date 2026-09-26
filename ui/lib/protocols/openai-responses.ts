@@ -29,6 +29,10 @@ export const openaiResponses: ProtocolAdapter = {
   usage: (record) => promptUsage(usageObject(record), false),
   // Codex reports input tokens per captured item id in `usage.attribution.items`.
   blockTokens: (record) => asObject(asObject(usageObject(record).attribution).items),
+  output: (record) => {
+    const output = responsePayload(record).output;
+    return Array.isArray(output) ? output : [];
+  },
   system: (body) => body.instructions,
   items(body) {
     const input = body.input;

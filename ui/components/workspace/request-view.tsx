@@ -20,7 +20,7 @@ import { humanizeField, previewText, ReadableText, RichText, stableValue } from 
 import { clearCurrentMatch, clearHighlights, focusMatch, highlightMatches, MIN_QUERY, SEARCH_HIT_LIMIT, searchRecord, type JsonPathPart, type SearchHit } from "./request-search";
 
 type UnknownRecord = Record<string, unknown>;
-type RequestMode = "structured" | "raw";
+type RequestMode = "timeline" | "structured" | "raw";
 type RequestScope = "turn" | "changes";
 
 function asRecord(value: unknown): UnknownRecord {
@@ -1048,6 +1048,8 @@ function LayerSection({ badge, children, entries, layer, selection, turnId }: { 
 
 interface RowProps {
   defaultOpen?: boolean;
+  /* The row is part of this turn's response, so a call's result comes next turn. */
+  inResponse?: boolean;
   onSelectToken: (selection: TokenSelection | null) => void;
   selection: TokenSelection | null;
   turnId: string;
@@ -1137,13 +1139,13 @@ function reasoningSummary(item: UnknownRecord): string {
   return asArray(item.summary).map((part) => textValue(asRecord(part).text) || textValue(part)).filter(Boolean).join("\n\n");
 }
 
-function ReasoningRow({ entry, onSelectToken, selection, turnId }: RowProps & { entry: InputEntry }) {
+function ReasoningRow({ defaultOpen = false, entry, onSelectToken, selection, turnId }: RowProps & { entry: InputEntry }) {
   const summary = reasoningSummary(entry.item);
   const encrypted = Boolean(textValue(entry.item.encrypted_content));
   const blockIds = entryBlockIds([entry]);
   const detail = [encrypted ? "encrypted" : "", summary ? previewText(summary) : "no summary"].filter(Boolean).join(" · ");
   const marks = rowMarks([entry], "Reasoning", "conversation", selection, turnId);
-  return <Row accent={marks.accent} defaultOpen={marks.open || isFresh(entry)} dimmed={marks.dimmed} summary={<>
+  return <Row accent={marks.accent} defaultOpen={defaultOpen || marks.open || isFresh(entry)} dimmed={marks.dimmed} summary={<>
     <LinkSwatch blockIds={blockIds} icon={SparkleIcon} label="Reasoning" layer="conversation" onSelectToken={onSelectToken} selection={selection} turnId={turnId}/>
     <span className="shrink-0 text-ink">Reasoning</span>
     <Meta>{detail}</Meta>
@@ -1182,7 +1184,7 @@ function tokenAside(tokens: { cached: number; tokens: number } | undefined): str
   return tokens ? `${tokens.tokens.toLocaleString()} tok` : undefined;
 }
 
-function ToolExchangeRow({ call, onSelectToken, result, selection, turnId }: RowProps & { call?: InputEntry; result?: InputEntry }) {
+function ToolExchangeRow({ call, defaultOpen = false, inResponse = false, onSelectToken, result, selection, turnId }: RowProps & { call?: InputEntry; result?: InputEntry }) {
   const callItem = call?.item;
   const resultItem = result?.item;
   const presentation = callItem ? toolCallPresentation(callItem) : null;
@@ -1195,7 +1197,7 @@ function ToolExchangeRow({ call, onSelectToken, result, selection, turnId }: Row
   const state = result?.rowState ?? call?.rowState;
   const resultParts = resultItem ? inputItemParts(resultItem).length : 0;
   const marks = rowMarks([call, result], result && selectionHits([result], selection, turnId) ? "Tool results" : "Tool calls", "conversation", selection, turnId);
-  return <Row accent={marks.accent} defaultOpen={marks.open || isFresh(call, result)} dimmed={marks.dimmed} summary={<>
+  return <Row accent={marks.accent} defaultOpen={defaultOpen || marks.open || isFresh(call, result)} dimmed={marks.dimmed} summary={<>
     <LinkSwatch blockIds={blockIds} icon={TerminalIcon} label={call ? "Tool calls" : "Tool results"} layer="conversation" onSelectToken={onSelectToken} selection={selection} turnId={turnId}/>
     <span className="shrink-0 font-mono text-sm text-ink">{namespace ? <span className="text-muted">{namespace}.</span> : null}{presentation?.name || "Tool result"}</span>
     <Meta>{title}</Meta>
@@ -1209,15 +1211,15 @@ function ToolExchangeRow({ call, onSelectToken, result, selection, turnId }: Row
       {result && resultItem && outcome ? <BlockAnchor blockIds={entryBlockIds([result])} turnId={turnId}>
         <BlockHeading aside={tokenAside(result.tokens)}>{["Result", outcome.status, outcome.elapsed && `wall ${outcome.elapsed}`, resultParts > 1 ? `${resultParts} parts` : ""].filter(Boolean).join(" · ")}</BlockHeading>
         <ToolOutputView format={call?.outputFormat ?? result.outputFormat ?? { kind: "text" }} key={outcome.output.length} value={outcome.output}/>
-      </BlockAnchor> : <p className="text-xs text-muted">The result is not part of this request.</p>}
+      </BlockAnchor> : <p className="text-xs text-muted">{inResponse ? "The model called this tool in its response; the result is part of the next turn." : "The result is not part of this request."}</p>}
     </div>
   </Row>;
 }
 
-function GenericRow({ entry, onSelectToken, selection, turnId }: RowProps & { entry: InputEntry }) {
+function GenericRow({ defaultOpen = false, entry, onSelectToken, selection, turnId }: RowProps & { entry: InputEntry }) {
   const blockIds = entryBlockIds([entry]);
   const marks = rowMarks([entry], entry.inputClass.label, entry.inputClass.layer, selection, turnId);
-  return <Row accent={marks.accent} defaultOpen={marks.open || isFresh(entry)} dimmed={marks.dimmed} summary={<>
+  return <Row accent={marks.accent} defaultOpen={defaultOpen || marks.open || isFresh(entry)} dimmed={marks.dimmed} summary={<>
     <LinkSwatch blockIds={blockIds} label={entry.inputClass.label} layer={entry.inputClass.layer} onSelectToken={onSelectToken} selection={selection} turnId={turnId}/>
     <span className="shrink-0 text-ink">{entry.inputClass.label}</span>
     <Meta mono>{textValue(entry.item.type) || "input"}</Meta>
@@ -1486,10 +1488,186 @@ function StructuredRequest({ earlierTurns, onSelectToken, selection, turn }: { e
   </div>;
 }
 
+/* ── Timeline ────────────────────────────────────────────────────────────────
+   A turn is the moment the model is called; the conversation is the trajectory
+   before it. The timeline reads that trajectory in order as steps by role: the
+   user's prompt, the model's reasoning, messages, and tool calls (each with its
+   result), results without a captured call, and context the harness injected.
+   Harness instructions and tool definitions belong to Tokens, not the timeline.
+   Steps the previous turn already had fold into "Earlier"; what this turn adds
+   stays open, and the turn's own response closes the timeline. */
+
+type StepRole = "user" | "model" | "tool" | "context";
+
+interface TimelineStep {
+  entries: InputEntry[];
+  fresh: boolean;
+  key: string;
+  role: StepRole;
+}
+
+const STEP_META: Record<StepRole, { icon: IconComponent; label: string }> = {
+  context: { icon: PinIcon, label: "Context" },
+  model: { icon: SparkleIcon, label: "Model" },
+  tool: { icon: TerminalIcon, label: "Tool" },
+  user: { icon: UserIcon, label: "User" },
+};
+
+function stepRole(entry: InputEntry): StepRole {
+  const kind = entry.part === undefined ? toolEventKind(entry.item) : null;
+  if (kind === "result") return "tool";
+  if (kind === "call") return "model";
+  const label = entry.inputClass.label;
+  if (label === "Tool results") return "tool";
+  if (label === "Reasoning" || label === "Assistant messages" || label === "Tool calls") return "model";
+  if (label === "User prompt") return "user";
+  if (entry.inputClass.layer === "context") return "context";
+  const role = textValue(entry.item.role).toLowerCase();
+  return role === "assistant" || role === "model" ? "model" : role === "user" ? "user" : "context";
+}
+
+/* Items the previous turn in the same thread already had: the longest shared
+   prefix of its input and output with this turn's input. Protocols with item ids
+   answer this per item instead (see itemStatesByTurn). */
+/* The turn's items as timeline steps; protocols that pack several steps into one
+   message split them (see ProtocolAdapter.expand). */
+function timelineItems(turn: TurnModel, items: unknown[]): unknown[] {
+  const expand = turnPlugins(turn).protocol?.expand;
+  return expand ? items.flatMap((item) => expand(item)) : items;
+}
+
+function previousInThread(turn: TurnModel, earlierTurns: TurnModel[]): TurnModel | undefined {
+  return [...earlierTurns].reverse().find((candidate) => candidate.lane === turn.lane && candidate.protocol === turn.protocol);
+}
+
+/* Item ids the previous turn in this thread returned. The model's own steps first
+   appear in the next request's input, so by input alone they would read as new. */
+function previousOutputIds(turn: TurnModel, earlierTurns: TurnModel[]): Set<string> {
+  const previous = previousInThread(turn, earlierTurns);
+  const output = previous ? turnPlugins(previous).protocol?.output?.(previous.record) || [] : [];
+  return new Set(output.map((item) => textValue(asRecord(item).id)).filter(Boolean));
+}
+
+function carriedPrefix(turn: TurnModel, earlierTurns: TurnModel[]): number {
+  const previous = previousInThread(turn, earlierTurns);
+  if (!previous) return 0;
+  // Compare what a step says, not how it was serialized: a response and the next
+  // request carry the same step with different envelopes (thinking signatures,
+  // cache breakpoints, extra metadata fields).
+  const signature = (value: unknown) => {
+    const item = asRecord(value);
+    return stableValue({ arguments: item.arguments, call: item.call_id, name: item.name, output: item.output, role: item.role, text: capturedText(item.content ?? item.summary ?? item.text), type: item.type });
+  };
+  const before = timelineItems(previous, [...collectInput(previous), ...(turnPlugins(previous).protocol?.output?.(previous.record) || [])]).map(signature);
+  const current = timelineItems(turn, collectInput(turn)).map(signature);
+  let shared = 0;
+  while (shared < current.length && shared < before.length && current[shared] === before[shared]) shared += 1;
+  return shared;
+}
+
+function itemIndexOf(entry: InputEntry): number {
+  const match = /^item-(\d+)/.exec(entry.key);
+  return match ? Number(match[1]) : -1;
+}
+
+function groupSteps(entries: InputEntry[], isFreshEntry: (entry: InputEntry) => boolean, prefix: string): TimelineStep[] {
+  const steps: TimelineStep[] = [];
+  for (const entry of pairToolExchanges(entries.filter((item) => item.inputClass.layer !== "instructions" && item.inputClass.layer !== "capabilities"))) {
+    const resultOnly = Boolean(entry.result && !isFreshEntry(entry) && isFreshEntry(entry.result));
+    // A call from an earlier turn whose result arrives now is this turn's tool step.
+    const role = resultOnly ? "tool" : stepRole(entry);
+    const fresh = isFreshEntry(entry) || resultOnly;
+    const last = steps[steps.length - 1];
+    if (last && last.role === role && last.fresh === fresh) last.entries.push(entry);
+    else steps.push({ entries: [entry], fresh, key: `${prefix}${entry.key}`, role });
+  }
+  return steps;
+}
+
+function stepSummary(step: TimelineStep): string {
+  if (step.role === "user") return "";
+  const calls = step.entries.filter((entry) => entry.part === undefined && toolEventKind(entry.item) === "call").length
+    + step.entries.filter((entry) => entry.inputClass.label === "Tool calls" && entry.part !== undefined).length;
+  const reasoning = step.entries.some((entry) => entry.inputClass.label === "Reasoning");
+  const message = step.entries.some((entry) => entry.inputClass.label === "Assistant messages");
+  if (step.role === "model") return [reasoning ? "reasoning" : "", message ? "message" : "", calls ? `${calls} ${calls === 1 ? "call" : "calls"}` : ""].filter(Boolean).join(" · ");
+  return `${step.entries.length} ${step.entries.length === 1 ? "item" : "items"}`;
+}
+
+function TimelineStepView({ open, outputTokens, rowProps, step, tone }: { open: boolean; outputTokens?: number; rowProps: RowProps; step: TimelineStep; tone?: "carried" | "response" }) {
+  const meta = STEP_META[step.role];
+  // Output has no per-item counts; the response shows the turn's measured output tokens.
+  const tokens = tone === "response" ? (outputTokens ? { cached: 0, tokens: outputTokens } : undefined) : sumTokens(step.entries);
+  const summary = stepSummary(step);
+  return <li className={`t-row relative pl-8 ${tone === "carried" ? "opacity-70" : ""}`}>
+    <span aria-hidden="true" className={`absolute left-0 top-0.5 grid size-6 place-items-center rounded-full border bg-panel ${tone === "response" ? "border-ink text-ink" : "border-line text-muted"}`}><meta.icon className="size-3.5"/></span>
+    <div className="mb-1.5 flex min-h-6 items-center gap-2 text-xs">
+      <span className="font-semibold text-ink">{tone === "response" ? "Response" : meta.label}</span>
+      {summary ? <span className="truncate text-muted">{summary}</span> : null}
+      {step.fresh && tone !== "response" ? <Badge tone="success">new</Badge> : null}
+      {tokens ? <span className="ml-auto font-mono tabular-nums text-muted">{tokens.tokens.toLocaleString()}</span> : null}
+    </div>
+    <div className="divide-y divide-line overflow-hidden rounded-inset border border-line">
+      {step.entries.map((entry) => <EntryRow entry={entry} key={entry.key} {...rowProps} defaultOpen={open && step.role !== "context"} inResponse={tone === "response"}/>)}
+    </div>
+  </li>;
+}
+
+/* A run of steps this request carries from before, folded to one line. */
+function CarriedSteps({ label, note, rowProps, steps }: { label: string; note: string; rowProps: RowProps; steps: TimelineStep[] }) {
+  const [open, setOpen] = useState(false);
+  if (!steps.length) return null;
+  return <li className="relative pl-8">
+    <span aria-hidden="true" className="absolute left-0 top-0 grid size-6 place-items-center rounded-full border border-line bg-panel text-muted"><HistoryIcon className="size-3.5"/></span>
+    <button aria-expanded={open} className="flex min-h-6 items-center gap-2 text-xs text-muted hover:text-ink" onClick={() => setOpen((value) => !value)} type="button">
+      <ChevronRightIcon className={`size-3.5 transition-transform ${open ? "rotate-90" : ""}`}/>
+      <span className="font-semibold">{label}</span>
+      <span>{steps.length} {steps.length === 1 ? "step" : "steps"} {note}</span>
+    </button>
+    {open ? <ol className="mt-3 space-y-5">{steps.map((step) => <TimelineStepView key={step.key} open={false} rowProps={rowProps} step={step} tone="carried"/>)}</ol> : null}
+  </li>;
+}
+
+function TimelineRequest({ earlierTurns, onSelectToken, selection, turn }: { earlierTurns: TurnModel[]; onSelectToken: (selection: TokenSelection | null) => void; selection: TokenSelection | null; turn: TurnModel }) {
+  const input = useMemo(() => timelineItems(turn, collectInput(turn)), [turn]);
+  const entries = useMemo(() => inputEntries(turn, input), [turn, input]);
+  const hasIds = entries.some((entry) => entry.state);
+  const prefix = useMemo(() => (hasIds ? 0 : carriedPrefix(turn, earlierTurns)), [earlierTurns, hasIds, turn]);
+  const returned = useMemo(() => (hasIds ? previousOutputIds(turn, earlierTurns) : new Set<string>()), [earlierTurns, hasIds, turn]);
+  const isFreshEntry = (entry: InputEntry) => (hasIds ? (entry.state === "new" || entry.state === "changed") && !returned.has(entry.itemId) : itemIndexOf(entry) >= prefix);
+  const steps = groupSteps(entries, isFreshEntry, "in:");
+  const output = useMemo(() => timelineItems(turn, turnPlugins(turn).protocol?.output?.(turn.record) || []), [turn]);
+  const response = useMemo(() => groupSteps(inputEntries(turn, output), () => true, "out:"), [output, turn]);
+  const rowProps: RowProps = { onSelectToken, selection, turnId: turn.id };
+
+  // Steps stay in order. Carried steps fold in two runs around the prompt that
+  // started this query, which stays visible so the new steps have their context.
+  const firstFresh = steps.findIndex((step) => step.fresh);
+  const splitAt = firstFresh < 0 ? steps.length : firstFresh;
+  const promptIndex = steps.slice(0, splitAt).map((step) => step.role).lastIndexOf("user");
+  const beforePrompt = promptIndex >= 0 ? steps.slice(0, promptIndex) : steps.slice(0, splitAt);
+  const prompt = promptIndex >= 0 ? steps[promptIndex] : undefined;
+  const sincePrompt = promptIndex >= 0 ? steps.slice(promptIndex + 1, splitAt) : [];
+  const current = steps.slice(splitAt);
+
+  return <div className="space-y-4 tf-pad">
+    <ChainNote turn={turn}/>
+    <ol className="relative space-y-5 before:absolute before:bottom-3 before:left-3 before:top-3 before:w-px before:bg-line">
+      <CarriedSteps label="Earlier" note="before this query" rowProps={rowProps} steps={beforePrompt}/>
+      {prompt ? <TimelineStepView key={prompt.key} open rowProps={rowProps} step={prompt}/> : null}
+      <CarriedSteps label="So far" note="in this query, before this turn" rowProps={rowProps} steps={sincePrompt}/>
+      {current.map((step) => <TimelineStepView key={step.key} open rowProps={rowProps} step={step}/>)}
+      {response.map((step, index) => <TimelineStepView key={step.key} open outputTokens={index === 0 ? turn.output : undefined} rowProps={rowProps} step={step} tone="response"/>)}
+    </ol>
+    {!steps.length && !response.length ? <EmptyState framed>No conversation items were captured for this turn.</EmptyState> : null}
+  </div>;
+}
+
 function RequestBody({ earlierTurns, focusPath, mode, onSelectToken, selection, turn }: { earlierTurns: TurnModel[]; focusPath?: JsonPathPart[] | null; mode: RequestMode; onSelectToken: (selection: TokenSelection | null) => void; selection: TokenSelection | null; turn: TurnModel }) {
   const record = turn.record;
   const turnId = turn.id;
   const selectedPath = useMemo(() => focusPath || selectedJsonPath(record, selection, turnId), [focusPath, record, selection, turnId]);
+  if (mode === "timeline") return <TimelineRequest earlierTurns={earlierTurns} onSelectToken={onSelectToken} selection={selection} turn={turn}/>;
   if (mode === "structured") return <StructuredRequest earlierTurns={earlierTurns} onSelectToken={onSelectToken} selection={selection} turn={turn}/>;
   return <div className="tf-pad"><div className="tf-card overflow-hidden"><RawJsonTree selectedBlockId={selection?.turnId === turnId ? selection.blockId : undefined} selectedPath={selectedPath} turnId={turnId} value={record}/></div></div>;
 }
@@ -1545,7 +1723,7 @@ function SearchResults({ current, hits, onPick, query }: { current: number; hits
 /* The turn level of the workspace: one selected turn's request, beside the flow. */
 export function RequestView({ jumpToBlock, onNavigate, onSelectToken, selection, turn, turns }: { jumpToBlock: (TokenSelection & { nonce: number }) | null; onNavigate: (index: number | null) => void; onSelectToken: (selection: TokenSelection | null) => void; selection: TokenSelection | null; turn: TurnModel; turns: TurnModel[] }) {
   const [scope, setScope] = useState<RequestScope>("turn");
-  const [mode, setMode] = useState<RequestMode>("structured");
+  const [mode, setMode] = useState<RequestMode>("timeline");
   const [query, setQuery] = useState("");
   const [cursor, setCursor] = useState({ index: -1, query: "" });
   const [listOpen, setListOpen] = useState(true);
@@ -1634,7 +1812,7 @@ export function RequestView({ jumpToBlock, onNavigate, onSelectToken, selection,
     // On narrow screens the result list would cover the match, so fold it after a jump.
     if (window.matchMedia("(max-width: 1023px)").matches) setListOpen(false);
     const reveal = { nonce: Date.now(), query, turnId: turn.id };
-    if (mode === "structured" && hit.blockId) {
+    if (mode !== "raw" && hit.blockId) {
       const next: TokenSelection = { blockId: hit.blockId, blockIds: [hit.blockId], label: hit.label, turnId: turn.id };
       onSelectToken(next);
       setLocalJump({ ...next, ...reveal });
@@ -1682,7 +1860,7 @@ export function RequestView({ jumpToBlock, onNavigate, onSelectToken, selection,
         </div>
         {selection?.turnId === turn.id ? <SelectionChip onJump={(next) => setLocalJump({ ...next, nonce: Date.now() })} onSelectToken={onSelectToken} selection={selection}/> : null}
         <div className="ml-auto flex items-center gap-1">
-          <Segmented label="Request view" onChange={setView} options={[["structured", "Structured"], ["raw", "Raw"], ["changes", "Changes"]]} value={view}/>
+          <Segmented label="Request view" onChange={setView} options={[["timeline", "Timeline"], ["structured", "Tokens"], ["raw", "Raw"], ["changes", "Changes"]]} value={view}/>
           <IconButton active={searchOpen || Boolean(query)} aria-expanded={searchOpen || Boolean(query)} className="-mr-2" label="Search this turn" onClick={() => { if (searchOpen || query) { setSearchOpen(false); setQuery(""); } else openSearch(); }}><SearchIcon/></IconButton>
         </div>
       </div>

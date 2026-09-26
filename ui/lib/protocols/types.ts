@@ -36,6 +36,14 @@ export interface ProtocolAdapter {
   blockTokens?(record: TraceRecord): AnyObject;
   /* Cache counts that measure a prompt prefix (Anthropic prompt caching). */
   cachePrefix?(record: TraceRecord): CachePrefix | undefined;
+  /* One conversation item as the steps it contains, in the item shapes the
+     timeline reads (OpenAI Responses: message, reasoning, function_call,
+     function_call_output). Protocols that pack tool calls, results, and thinking
+     into one message's content blocks split them here. */
+  expand?(item: unknown): unknown[];
+  /* What the model returned for this request, as conversation items in the same
+     shape as `items()`, so a timeline can show a turn's response after its input. */
+  output?(record: TraceRecord): unknown[];
   /* Harness instructions sent beside the conversation, if any. */
   system(body: AnyObject): unknown;
   /* Conversation items in the order the model reads them. */
