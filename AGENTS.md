@@ -81,6 +81,24 @@ Supported clients are plugins; never branch on a client id outside its plugin.
   total, never replace per-item provider counts, and are always marked `≈`.
 - Shared section rendering primitives live in
   `ui/components/workspace/section-views.tsx`, not in plugins.
+- Parse request content once into `TurnModel.blocks`. Token allocation retains
+  `memberIds`; Tokens, Timeline, and Changes project those same blocks. Local
+  block IDs support selection only, not provider attribution or cross-turn
+  identity. Raw navigation uses captured source paths when available; inherited
+  context must not be presented as present in the current raw request.
+- `TurnBlock.rawPath` points to captured evidence; split text also retains a
+  half-open UTF-16 `rawRange` in that unchanged string. Search uses these source
+  locations and the block's class rather than guessing ids or reclassifying a
+  whole carrier. Raw-only metadata remains searchable without a block target.
+- Claude text conventions are observed heuristics, not a provider schema.
+  Split only recognized semantic sections; ordinary instruction headings remain
+  together. Unrecognized system reminders are Unknown, not assumed runtime state.
+- Timeline includes capabilities and instructions as request context before the
+  conversation steps. Adjacent instruction blocks with the same category and
+  detail fold into one section group; selecting a member opens the group without
+  changing block identity or raw provenance. Categories retain small categories
+  and expose them through
+  the legend; neither projection may hide a category behind a view switch.
 - `.agents/docs/standards/product-design-system.md` is the product and
   interaction contract for every user-facing surface.
 - UI styling goes through the design system: tokens in `ui/styles/tokens.css`,

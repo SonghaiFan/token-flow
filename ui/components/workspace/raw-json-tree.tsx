@@ -18,9 +18,17 @@ function pathStartsWith(path: JsonPathPart[], prefix: JsonPathPart[]): boolean {
   return prefix.length <= path.length && prefix.every((part, index) => part === path[index]);
 }
 
-function Primitive({ value }: { value: unknown }) {
+type SourceRange = { start: number; end: number };
+
+function Primitive({ value, range }: { value: unknown; range?: SourceRange }) {
   if (value === null) return <span className="text-muted">null</span>;
-  if (typeof value === "string") return <span className="text-syntax-string">{JSON.stringify(value)}</span>;
+  if (typeof value === "string") {
+    if (range && range.start >= 0 && range.end <= value.length && range.start < range.end) {
+      const escaped = (text: string) => JSON.stringify(text).slice(1, -1);
+      return <span className="text-syntax-string">&quot;{escaped(value.slice(0, range.start))}<mark className="bg-highlight-soft text-inherit" data-source-range="" tabIndex={-1}>{escaped(value.slice(range.start, range.end))}</mark>{escaped(value.slice(range.end))}&quot;</span>;
+    }
+    return <span className="text-syntax-string">{JSON.stringify(value)}</span>;
+  }
   if (typeof value === "number") return <span className="text-syntax-number">{String(value)}</span>;
   if (typeof value === "boolean") return <span className="text-syntax-boolean">{String(value)}</span>;
   return <span className="text-muted">{JSON.stringify(String(value))}</span>;
@@ -30,7 +38,7 @@ function JsonKey({ children }: { children: ReactNode }) {
   return <span className="text-syntax-key">{children}</span>;
 }
 
-function RawJsonNode({ blockId, isLast = true, keyName, path, selectedPath, turnId, value }: { blockId?: string; isLast?: boolean; keyName?: JsonPathPart; path: JsonPathPart[]; selectedPath?: JsonPathPart[] | null; turnId: string; value: unknown }) {
+function RawJsonNode({ blockId, isLast = true, keyName, path, selectedPath, selectedRange, turnId, value }: { blockId?: string; isLast?: boolean; keyName?: JsonPathPart; path: JsonPathPart[]; selectedPath?: JsonPathPart[] | null; selectedRange?: SourceRange; turnId: string; value: unknown }) {
   const [collapsed, setCollapsed] = useState(false);
   const selected = Boolean(selectedPath && path.length === selectedPath.length && pathStartsWith(selectedPath, path));
   const containsSelection = Boolean(selectedPath && pathStartsWith(selectedPath, path));
@@ -42,7 +50,7 @@ function RawJsonNode({ blockId, isLast = true, keyName, path, selectedPath, turn
   const objectLike = value !== null && typeof value === "object";
 
   if (!objectLike) {
-    return <div className={`raw-json-line rounded-tag px-1 ${selected ? "raw-json-selected" : ""}`} data-json-path={pathString} {...itemProps}>{key}<Primitive value={value}/>{comma}</div>;
+    return <div className={`raw-json-line rounded-tag px-1 ${selected ? "raw-json-selected" : ""}`} data-json-path={pathString} {...itemProps}>{key}<Primitive range={selected ? selectedRange : undefined} value={value}/>{comma}</div>;
   }
 
   const isArray = Array.isArray(value);
@@ -58,14 +66,14 @@ function RawJsonNode({ blockId, isLast = true, keyName, path, selectedPath, turn
     </div>
     {open ? <>
       <div className="ml-2 border-l border-line pl-3">
-        {entries.map(([entryKey, entryValue], index) => <RawJsonNode blockId={blockId} isLast={index === entries.length - 1} key={`${String(entryKey)}-${index}`} keyName={entryKey} path={[...path, entryKey]} selectedPath={selectedPath} turnId={turnId} value={entryValue}/>) }
+        {entries.map(([entryKey, entryValue], index) => <RawJsonNode blockId={blockId} isLast={index === entries.length - 1} key={`${String(entryKey)}-${index}`} keyName={entryKey} path={[...path, entryKey]} selectedPath={selectedPath} selectedRange={selectedRange} turnId={turnId} value={entryValue}/>) }
       </div>
       <div className="raw-json-line px-1 text-muted">{closeMark}{comma}</div>
     </> : null}
   </div>;
 }
 
-export function RawJsonTree({ selectedBlockId, selectedPath, turnId, value }: { selectedBlockId?: string; selectedPath?: JsonPathPart[] | null; turnId: string; value: object }) {
+export function RawJsonTree({ selectedBlockId, selectedPath, selectedRange, turnId, value }: { selectedBlockId?: string; selectedPath?: JsonPathPart[] | null; selectedRange?: SourceRange; turnId: string; value: object }) {
   const [copied, setCopied] = useState(false);
   const resetTimer = useRef<number | undefined>(undefined);
 
@@ -86,7 +94,7 @@ export function RawJsonTree({ selectedBlockId, selectedPath, turnId, value }: { 
       <Button compact onClick={() => void copyRaw()}>{copied ? "Copied" : "Copy raw JSON"}</Button>
     </div>
     <div aria-label="Raw captured JSON tree" className="token-flow-raw-json tf-code tf-pad max-h-[68dvh] overflow-auto bg-canvas text-ink" role="region">
-      <RawJsonNode blockId={selectedBlockId} path={["trace"]} selectedPath={selectedPath} turnId={turnId} value={value}/>
+      <RawJsonNode blockId={selectedBlockId} path={["trace"]} selectedPath={selectedPath} selectedRange={selectedRange} turnId={turnId} value={value}/>
     </div>
   </div>;
 }

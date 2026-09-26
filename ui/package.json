@@ -3,6 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
+    "test:model": "node scripts/test-model.mjs",
     "dev": "vite --config vite.config.mts",
     "build": "vite build --config vite.config.mts",
     "sync": "node scripts/sync-vite-build.mjs",

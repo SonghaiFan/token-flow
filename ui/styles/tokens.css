@@ -40,6 +40,10 @@
   --danger-line: color-mix(in srgb, var(--danger) 32%, var(--panel));
   --danger-ink: color-mix(in srgb, var(--danger) 62%, var(--ink));
 
+  /* Search and source selection are yellow, distinct from amber warning state. */
+  --highlight: #ffff00;
+  --highlight-soft: color-mix(in srgb, var(--highlight) 28%, transparent);
+
   /* Raw JSON syntax: evidence colors, not status colors. */
   --syntax-key: light-dark(#6d28d9, #a78bfa);
   --syntax-string: light-dark(#047857, #34d399);
@@ -110,6 +114,8 @@
   --color-danger-soft: var(--danger-soft);
   --color-danger-line: var(--danger-line);
   --color-danger-ink: var(--danger-ink);
+  --color-highlight: var(--highlight);
+  --color-highlight-soft: var(--highlight-soft);
   --color-syntax-key: var(--syntax-key);
   --color-syntax-string: var(--syntax-string);
   --color-syntax-number: var(--syntax-number);

@@ -10,7 +10,7 @@ import { EmptyState, Notice } from "../ui/feedback";
 import { MenuItem } from "../ui/menu";
 import { ConversationOverview } from "../workspace/conversation-overview";
 import type { CategoryFocus } from "../workspace/input-units";
-import { RequestView } from "../workspace/request-view";
+import { RequestView, type RequestViewMode } from "../workspace/request-view";
 import { TurnFlow } from "../workspace/turn-flow";
 
 export function WorkspaceView({ sessionId, onBack }: { sessionId: string; onBack: () => void }) {
@@ -20,6 +20,10 @@ export function WorkspaceView({ sessionId, onBack }: { sessionId: string; onBack
   // A category chosen in the overview treemap, followed through the flow until cleared.
   const [focusCategory, setFocusCategory] = useState<CategoryFocus | null>(null);
   const [tokenSelection, setTokenSelection] = useState<TokenSelection | null>(null);
+  // The inspector is one projection of the selected turn. Keep its view beside
+  // the turn selection so changing turns or visiting the overview does not
+  // create a second, hidden selection state inside the inspector.
+  const [requestView, setRequestView] = useState<RequestViewMode>("timeline");
   const [requestJump, setRequestJump] = useState<(TokenSelection & { nonce: number }) | null>(null);
   const [error, setError] = useState("");
   const [deleteOpen, setDeleteOpen] = useState(false);
@@ -91,9 +95,13 @@ export function WorkspaceView({ sessionId, onBack }: { sessionId: string; onBack
   const turn = selected === null ? undefined : turns[selected];
   const title = turns.find((item) => item.kind === "user" && item.queryText)?.queryText || data?.session.first_user || "Conversation";
   const selectTurn = useCallback((index: number | null) => {
-    setSelectedId(index === null ? "" : turns[index]?.id || "");
-    setTokenSelection(null);
-  }, [turns]);
+    const nextId = index === null ? "" : turns[index]?.id || "";
+    setSelectedId(nextId);
+    // Re-selecting the active turn must not silently break a linked block.
+    // A different turn has different block identities, so its block selection
+    // starts empty while the chosen view remains the same projection mode.
+    if (nextId !== selectedId) setTokenSelection(null);
+  }, [selectedId, turns]);
   // A Sankey node opens its turn and jumps to that layer, or to that category's blocks.
   const selectNode = useCallback((index: number, selection: TokenSelection) => {
     if (!turns[index]) return;
@@ -135,7 +143,7 @@ export function WorkspaceView({ sessionId, onBack }: { sessionId: string; onBack
           (page side-by-side); on narrow screens the turn rises over the flow instead. */}
       <div className={`t-page-enter ${turn ? "fixed inset-0 z-(--z-sheet) overflow-y-auto bg-canvas p-2 lg:static lg:z-auto lg:overflow-visible lg:bg-transparent lg:p-0" : "min-w-0 px-3 pb-5 lg:px-0"}`} data-overlay={turn ? "true" : undefined} key={turn ? "turn" : "overview"} style={{ "--t-page-dir": turn ? 1 : -1 } as React.CSSProperties}>
         {turn
-          ? <RequestView jumpToBlock={requestJump?.turnId === turn.id ? requestJump : null} onNavigate={selectTurn} onSelectToken={setTokenSelection} selection={tokenSelection} turn={turn} turns={turns}/>
+          ? <RequestView jumpToBlock={requestJump?.turnId === turn.id ? requestJump : null} onNavigate={selectTurn} onSelectToken={setTokenSelection} onViewChange={setRequestView} selection={tokenSelection} turn={turn} turns={turns} view={requestView}/>
           : <section className="tf-panel"><ConversationOverview focus={focusCategory} onFocus={setFocusCategory} onSelectNode={selectNode} onSelectTurn={selectTurn} session={data.session} turns={turns}/></section>}
       </div>
     </main>

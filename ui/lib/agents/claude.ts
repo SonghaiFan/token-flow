@@ -19,21 +19,38 @@ import type { AgentPlugin } from "./types";
    conversation, which then continues from the summary. (Its one-token quota
    check never reaches the turn list: the backend drops one-token probes.) */
 
-/* Lines that open a section of Claude Code's system text. */
-const SECTION_START = /^(?:# \S|Available agent types for the Agent tool|While [\w -]+ mode is active:|Called the \w+ tool with the following input|Today's date is)/;
+/* Observed harness conventions, not a provider schema. Match complete known
+   headings; ordinary Markdown headings stay together as instruction text. */
+const SEMANTIC_SECTIONS: Array<[RegExp, string]> = [
+  [/^# Environment\s*$/i, "environment"],
+  [/^# (?:auto )?Memory\s*$/i, "memory"],
+  [/^# MCP Server Instructions\s*$/i, "tool-guide"],
+  [/^# Claude in Chrome browser automation\s*$/i, "tool-guide"],
+  [/^Available agent types for the Agent tool:\s*$/, "sub-agents"],
+];
 
 /* Split a system text at its section openers, outside fenced code blocks. Text
    with a single section stays whole. */
 function splitSections(text: string): string[] {
   const sections: string[] = [];
   let current: string[] = [];
-  let fenced = false;
+  let fence: string | undefined;
+  let section = "instructions";
   for (const line of text.split("\n")) {
-    if (/^\s*```/.test(line)) fenced = !fenced;
-    if (!fenced && SECTION_START.test(line) && current.some((value) => value.trim())) {
+    const delimiter = /^\s*(`{3,}|~{3,})/.exec(line)?.[1];
+    if (delimiter) {
+      if (!fence) fence = delimiter;
+      else if (delimiter[0] === fence[0] && delimiter.length >= fence.length) fence = undefined;
+      current.push(line);
+      continue;
+    }
+    const known = !fence ? SEMANTIC_SECTIONS.find(([pattern]) => pattern.test(line))?.[1] : undefined;
+    const next = known ?? (!fence && /^# \S/.test(line) ? "instructions" : section);
+    if (next !== section && current.some((value) => value.trim())) {
       sections.push(current.join("\n").trim());
       current = [];
     }
+    section = next;
     current.push(line);
   }
   if (current.some((value) => value.trim())) sections.push(current.join("\n").trim());
@@ -86,21 +103,18 @@ export const claude: AgentPlugin = {
     [/^x-anthropic-billing-header:/, inputClass("harness", "Billing header")],
     [/^You are Claude Code\b/, inputClass("harness", "Base instructions")],
     [/^You are an interactive agent/, inputClass("harness", "Base instructions")],
-    [/^# Environment\b|^Today's date is/, inputClass("runtime", "Environment")],
-    [/^# (?:auto )?Memory\b/i, inputClass("project", "Memory")],
-    [/^# MCP Server Instructions|^# Claude in Chrome/, inputClass("tools", "MCP servers")],
-    [/^Available agent types for the Agent tool/, inputClass("tools", "Sub-agents")],
-    [/^While [\w -]+ mode is active:/, inputClass("harness", "Permissions")],
-    [/^Called the \w+ tool with the following input/, inputClass("results", "Restored files")],
+    [/^# Environment\s*(?:\n|$)/i, inputClass("runtime", "Environment")],
+    [/^# (?:auto )?Memory\s*(?:\n|$)/i, inputClass("project", "Memory")],
+    [/^# (?:MCP Server Instructions|Claude in Chrome browser automation)\s*(?:\n|$)/i, inputClass("harness", "Tool guide")],
+    [/^Available agent types for the Agent tool:\s*(?:\n|$)/, inputClass("tools", "Sub-agents")],
     [/^<system-reminder>\s*(?:Codebase and user instructions|[\s\S]*?\n# claudeMd\n)/, inputClass("project", "CLAUDE.md")],
     [/^<system-reminder>\s*As you answer the user's questions, you can use the following context/, inputClass("runtime", "Environment")],
     [/^<system-reminder>\s*The following skills are available/, inputClass("tools", "Skills")],
     [/^<system-reminder>\s*The following deferred tools/, inputClass("tools", "Tool definitions")],
     [/^<system-reminder>\s*Attribution for git commits/, inputClass("harness", "Attribution")],
-    REMINDER_PATTERN,
+    [/^<system-reminder(?:\s|>)/i, inputClass("unknown", "System reminder")],
     [/^This session is being continued from a previous conversation/, inputClass("model", "Compaction summary")],
     [/^CRITICAL: Respond with TEXT ONLY/, inputClass("harness", "Compaction prompt")],
-    [/^# \S/, inputClass("harness", "Guidelines")],
   ],
   injectedUserPrefixes: ["<system-reminder", "This session is being continued from a previous conversation", "CRITICAL: Respond with TEXT ONLY"],
   compactionPrompts: ["critical: respond with text only"],

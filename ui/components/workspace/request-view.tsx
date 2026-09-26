@@ -23,7 +23,7 @@ import { clearCurrentMatch, clearHighlights, focusMatch, highlightMatches, MIN_Q
 
 type UnknownRecord = Record<string, unknown>;
 type RequestMode = "timeline" | "structured" | "raw";
-type RequestScope = "turn" | "changes";
+export type RequestViewMode = RequestMode | "changes";
 
 function asRecord(value: unknown): UnknownRecord {
   return value && typeof value === "object" && !Array.isArray(value) ? value as UnknownRecord : {};
@@ -562,29 +562,10 @@ function splitBlockId(blockId: string): { itemId: string; partIndex: number | nu
   return match ? { itemId: match[1], partIndex: Number(match[2]) } : { itemId: blockId, partIndex: null };
 }
 
-function selectedJsonPath(record: TraceRecord, selection: TokenSelection | null, turnId: string): Array<number | string> | null {
+function selectedJsonPath(turn: TurnModel, selection: TokenSelection | null, turnId: string): Array<number | string> | null {
   if (!selection || selection.turnId !== turnId) return null;
-  const body = asRecord(record.request?.body);
-  if (selection.label === "Tool definitions" || selection.category === "tools") {
-    if (Array.isArray(body.tools)) return ["trace", "request", "body", "tools"];
-    if (Array.isArray(asRecord(body.request).tools)) return ["trace", "request", "body", "request", "tools"];
-  }
-
-  const sourceKey = ["input", "messages", "contents"].find((key) => Array.isArray(body[key]));
-  if (!sourceKey) return null;
-  const { itemId, partIndex } = splitBlockId(selection.blockId);
-  const items = asArray(body[sourceKey]);
-  const itemIndex = items.findIndex((candidate) => textValue(asRecord(candidate).id) === itemId);
-  if (itemIndex < 0) return null;
-
-  const path: Array<number | string> = ["trace", "request", "body", sourceKey, itemIndex];
-  if (partIndex === null) return path;
-  const item = asRecord(items[itemIndex]);
-  const partKey = ["content", "parts", "text", "output"].find((key) => item[key] !== undefined);
-  if (!partKey) return path;
-  path.push(partKey);
-  if (Array.isArray(item[partKey])) path.push(partIndex);
-  return path;
+  const source = turn.blocks.find((block) => block.id === selection.blockId);
+  return source?.rawPath ?? null;
 }
 
 function toolGroups(value: unknown): Array<{ name: string; tools: UnknownRecord[] }> {
@@ -600,37 +581,6 @@ function toolGroups(value: unknown): Array<{ name: string; tools: UnknownRecord[
     groups.set("Tools", current);
   }
   return [...groups].map(([name, tools]) => ({ name, tools }));
-}
-
-/* Split system text into the sections the agent assembled it from, so each is
-   labeled on its own. Raw always shows the exact capture. */
-function systemParts(turn: TurnModel, system: unknown): unknown {
-  const split = turnPlugins(turn).agent.splitSystemText;
-  if (!split) return system;
-  if (typeof system === "string") {
-    const sections = split(system);
-    return sections.length > 1 ? sections.map((text) => ({ type: "text", text })) : system;
-  }
-  if (!Array.isArray(system)) return system;
-  return system.flatMap((raw) => {
-    const block = asRecord(raw);
-    // Gemini text parts are `{text}` without a type.
-    if ((block.type !== undefined && block.type !== "text") || typeof block.text !== "string") return [raw];
-    const sections = split(block.text);
-    return sections.length > 1 ? sections.map((text) => ({ ...block, text })) : [raw];
-  });
-}
-
-/* Everything the model read, in order: harness instructions, then the items the
-   turn's protocol carries. */
-function collectInput(turn: TurnModel): unknown[] {
-  const body = contextBody(turn);
-  const protocol = turnPlugins(turn).protocol;
-  const items: unknown[] = [];
-  const system = protocol ? protocol.system(body) : body.instructions ?? body.system ?? body.system_instruction;
-  if (system !== undefined) items.push({ type: "instructions", role: "system", content: systemParts(turn, system) });
-  if (protocol) items.push(...protocol.items(body));
-  return items;
 }
 
 /* The request body as the model received it: for a chained request, `input` holds
@@ -654,8 +604,8 @@ function requestToolNames(turn: TurnModel): string[] {
     }
   };
   addTools(toolDeclarations(turnPlugins(turn).protocol, body));
-  for (const item of collectInput(turn)) {
-    const record = asRecord(item);
+  for (const block of turn.blocks) {
+    const record = block.item;
     if (record.type === "additional_tools") addTools(record.tools);
   }
   return [...new Set(names)];
@@ -681,8 +631,8 @@ function entryDiffKey(entry: InputEntry): string {
 /* Compare the two requests block by block. Blocks are matched only by captured
    item id (and part index); blocks without an id are counted, never guessed. */
 function layerDiffs(previous: TurnModel, current: TurnModel): LayerDiff[] {
-  const before = inputEntries(previous, collectInput(previous));
-  const after = inputEntries(current, collectInput(current));
+  const before = inputEntries(previous);
+  const after = inputEntries(current);
   const beforeByKey = new Map(before.map((entry) => [entryDiffKey(entry), entry] as const).filter(([key]) => key));
   const afterKeys = new Set(after.map(entryDiffKey).filter(Boolean));
   return LAYER_ORDER.flatMap((layer) => {
@@ -721,10 +671,13 @@ function tokenText(value: number | undefined): string {
   return value === undefined ? "Unknown" : value.toLocaleString();
 }
 
-function LayerDiffSection({ diff }: { diff: LayerDiff }) {
+function LayerDiffSection({ diff, onSelectToken, selection, turnId }: { diff: LayerDiff; onSelectToken: (selection: TokenSelection | null) => void; selection: TokenSelection | null; turnId: string }) {
   const meta = LAYER_META[diff.layer];
   const count = (change: LayerChange) => diff.rows.filter((row) => row.change === change).length;
   const delta = diff.before !== undefined && diff.after !== undefined ? diff.after - diff.before : undefined;
+  const selectedLayer = selection?.turnId === turnId && selection.layer === diff.layer;
+  const selectedBlocks = selectionIds(selection, turnId);
+  const layerDimmed = selection?.turnId === turnId && Boolean(selection.layer) && !selectedLayer;
   const summary = <>
     <Swatch color={meta.color}/>
     <strong className="text-xs">{meta.title}</strong>
@@ -734,22 +687,27 @@ function LayerDiffSection({ diff }: { diff: LayerDiff }) {
     {!diff.rows.length ? <span className="text-xs text-muted">{diff.uncompared ? "No matched changes" : "Unchanged"}</span> : null}
     <span className="ml-auto shrink-0 font-mono text-xs text-muted">{tokenText(diff.before)} → <span className="text-ink">{tokenText(diff.after)}</span>{delta ? ` (${delta > 0 ? "+" : ""}${delta.toLocaleString()})` : ""}</span>
   </>;
-  if (!diff.rows.length && !diff.uncompared) return <div className="tf-card flex min-h-11 flex-wrap items-center gap-x-2 gap-y-1 py-2 pl-9 pr-3">{summary}</div>;
-  return <Disclosure summary={summary}>
+  const style = selectedLayer ? { borderColor: meta.color, boxShadow: `0 0 0 3px color-mix(in srgb, ${meta.color} 18%, transparent)` } : undefined;
+  if (!diff.rows.length && !diff.uncompared) return <div className={`tf-card flex min-h-11 flex-wrap items-center gap-x-2 gap-y-1 py-2 pl-9 pr-3 transition ${layerDimmed ? "tf-dimmed" : ""}`} style={style}>{summary}</div>;
+  return <div className={`transition ${layerDimmed ? "tf-dimmed" : ""}`} style={style}><Disclosure defaultOpen={selectedLayer || diff.rows.some(({ change, entry }) => change !== "removed" && selectionHits([entry], selection, turnId))} summary={summary}>
     <ul className="divide-y divide-line text-xs">
-      {diff.rows.map(({ change, entry }) => <li className="flex items-center gap-2 py-2" key={`${change}-${entry.key}`}>
-        <CategorySwatch category={entry.inputClass.category}/>
+      {diff.rows.map(({ change, entry }) => {
+        const blockIds = change === "removed" ? [] : entryBlockIds([entry]);
+        const active = selectionHits([entry], selection, turnId);
+        return <li className={`flex items-center gap-2 py-2 transition ${selectedBlocks.length && !active ? "tf-dimmed" : ""}`} key={`${change}-${entry.key}`}>
+        <LinkSwatch blockIds={blockIds} category={entry.inputClass.category} label={entry.inputClass.label} onSelectToken={onSelectToken} selection={selection} turnId={turnId}/>
         <span className="shrink-0 font-medium">{entry.inputClass.label}</span>
         <Badge tone={CHANGE_TONES[change]}>{change}</Badge>
         <span className="min-w-0 flex-1 truncate text-muted">{entryPreview(entry)}</span>
         {entry.tokens ? <span className="shrink-0 font-mono text-xs text-muted">{entry.tokens.tokens.toLocaleString()}</span> : null}
-      </li>)}
+      </li>;
+      })}
       {diff.uncompared ? <li className="py-2 text-muted">{diff.uncompared} {diff.uncompared === 1 ? "block has" : "blocks have"} no captured id, so {diff.uncompared === 1 ? "it is" : "they are"} not compared.</li> : null}
     </ul>
-  </Disclosure>;
+  </Disclosure></div>;
 }
 
-function RequestChanges({ previous, current }: { previous: TurnModel | undefined; current: TurnModel }) {
+function RequestChanges({ previous, current, onSelectToken, selection }: { previous: TurnModel | undefined; current: TurnModel; onSelectToken: (selection: TokenSelection | null) => void; selection: TokenSelection | null }) {
   if (!previous) return <div className="tf-pad"><EmptyState framed title="No previous turn">Choose Turn 2 or later to compare captured requests.</EmptyState></div>;
 
   const previousBody = asRecord(previous.record.request?.body);
@@ -760,7 +718,7 @@ function RequestChanges({ previous, current }: { previous: TurnModel | undefined
     ["User input", previous.title, current.title],
     ["Model", textValue(previousBody.model) || "Unknown", textValue(currentBody.model) || "Unknown"],
     ["Endpoint", `${previous.method} ${previous.path}`.trim(), `${current.method} ${current.path}`.trim()],
-    ["Input items", String(collectInput(previous).length), String(collectInput(current).length)],
+    ["Input items", String(previous.context.input.length), String(current.context.input.length)],
     ["Tool definitions", String(requestToolNames(previous).length), String(requestToolNames(current).length)],
     ["Reasoning effort", textValue(previousReasoning.effort) || "Unavailable", textValue(currentReasoning.effort) || "Unavailable"],
   ].filter(([, before, after]) => before !== after);
@@ -773,7 +731,7 @@ function RequestChanges({ previous, current }: { previous: TurnModel | undefined
     {facts.length ? <dl className="tf-card divide-y divide-line overflow-hidden">{facts.map(([label, before, after]) => <div className="tf-inset grid gap-1 py-3 text-xs sm:grid-cols-[8rem_minmax(0,1fr)_auto_minmax(0,1fr)] sm:items-start" key={label}>
       <dt className="font-medium text-muted">{label}</dt><dd className="min-w-0 break-words font-mono text-xs text-muted">{before}</dd><span aria-hidden="true" className="hidden text-muted sm:block">→</span><dd className="min-w-0 break-words font-mono text-xs text-ink">{after}</dd>
     </div>)}</dl> : <EmptyState framed>No high-level request changes detected.</EmptyState>}
-    <section className="space-y-2"><h4 className="tf-eyebrow">Input by layer</h4>{diffs.map((diff) => <LayerDiffSection diff={diff} key={diff.layer}/>)}</section>
+    <section className="space-y-2"><h4 className="tf-eyebrow">Input by layer</h4>{diffs.map((diff) => <LayerDiffSection diff={diff} key={diff.layer} onSelectToken={onSelectToken} selection={selection} turnId={current.id}/>)}</section>
     {changedFields.length ? <Disclosure summary={<><strong className="text-xs">Changed request fields</strong><span className="text-xs text-muted">Exact top-level evidence</span></>}><div className="flex flex-wrap gap-1.5">{changedFields.map((field) => <Badge key={field} mono>{field}</Badge>)}</div></Disclosure> : null}
   </div>;
 }
@@ -802,6 +760,8 @@ function SectionContent({ previous, section, value }: { previous?: string; secti
 }
 
 interface InputEntry {
+  sourceId?: string;
+  sourceIndex?: number;
   blockId?: string;
   inputClass: InputClass;
   /* The kind the client declared for this part, if any. */
@@ -854,7 +814,7 @@ function tokenIndex(turn: TurnModel): Map<string, { cached: number; tokens: numb
   return index;
 }
 
-function inputEntries(turn: TurnModel, items: unknown[]): InputEntry[] {
+function inputEntries(turn: TurnModel, responseItems?: unknown[]): InputEntry[] {
   const tokens = tokenIndex(turn);
   const { agent } = turnPlugins(turn);
   const withView = (entry: InputEntry): InputEntry => ({ ...entry, section: agent.sections?.[entry.inputClass.label] });
@@ -867,7 +827,7 @@ function inputEntries(turn: TurnModel, items: unknown[]): InputEntry[] {
     const presentation = toolCallPresentation(item);
     return formatForCall({ input: presentation.input, name: [presentation.name, presentation.wrapperName].filter(Boolean).join(" ") });
   };
-  const entries: InputEntry[] = items.flatMap((raw, itemIndex) => {
+  const entries: InputEntry[] = responseItems ? responseItems.flatMap((raw, itemIndex) => {
     const item = asRecord(raw);
     const itemId = textValue(item.id);
     const state = itemStateOf(turn, raw);
@@ -881,6 +841,12 @@ function inputEntries(turn: TurnModel, items: unknown[]): InputEntry[] {
       const partTokens = blockId ? tokens.get(blockId) ?? (parts.length === 1 ? tokens.get(`item:${itemId}`) : undefined) : undefined;
       return withView({ blockId, declaredKind: agent.declaredKind?.(item, partIndex) || undefined, inputClass: classifyInput(turn.record, item, part, partIndex), item, itemId, key: `${key}:${partIndex}`, part, partIndex, state, tokens: partTokens });
     });
+  }) : turn.blocks.map((block) => {
+    const state = block.itemIndex >= 0 ? turn.itemStates[block.itemId || `@${block.itemIndex}`] : undefined;
+    return withView({ sourceId: block.id, sourceIndex: block.itemIndex, blockId: block.id, itemId: block.itemId, key: block.id, item: block.item, part: block.part, partIndex: block.partIndex, inputClass: block.inputClass, state,
+      tokens: tokens.get(block.id) ?? (block.partIndex === undefined && block.itemId ? tokens.get(`item:${block.itemId}`) : undefined),
+      outputFormat: toolEventKind(block.item) === "call" ? formatFor(block.item) : undefined,
+      declaredKind: agent.declaredKind?.(block.item, block.partIndex || 0) || undefined });
   });
   const mixed = entries.some((entry) => entry.state && entry.state !== "new");
   const callFormats = new Map(entries.filter((entry) => entry.outputFormat).map((entry) => [textValue(entry.item.call_id), entry.outputFormat as OutputFormat] as const));
@@ -930,6 +896,7 @@ function sumTokens(entries: InputEntry[]): { cached: number; tokens: number } | 
 
 function entryBlockIds(entries: Array<InputEntry | undefined>): string[] {
   return entries.flatMap((entry) => {
+    if (entry?.sourceId) return [entry.sourceId];
     if (!entry?.itemId) return [];
     if (entry.part !== undefined) return entry.blockId ? [entry.blockId] : [];
     const parts = inputItemParts(entry.item);
@@ -945,12 +912,15 @@ function selectionIds(selection: TokenSelection | null, turnId: string, focusOnl
 }
 
 function entryHit(entry: InputEntry | undefined, ids: string[]): boolean {
-  if (!entry?.itemId || !ids.length) return false;
+  if (!entry || !ids.length) return false;
+  if (entry.sourceId && ids.includes(entry.sourceId)) return true;
+  if (!entry.itemId) return false;
   if (entry.part !== undefined) return ids.some((id) => id === entry.blockId || id === entry.itemId);
   return ids.some((id) => id === entry.itemId || id.startsWith(`${entry.itemId}:`));
 }
 
 function selectionHits(entries: Array<InputEntry | undefined>, selection: TokenSelection | null, turnId: string): boolean {
+  if (selection?.turnId === turnId && selection.layer) return entries.some((entry) => entry?.inputClass.layer === selection.layer);
   const ids = selectionIds(selection, turnId);
   return entries.some((entry) => entryHit(entry, ids));
 }
@@ -959,11 +929,11 @@ function selectionHits(entries: Array<InputEntry | undefined>, selection: TokenS
    the focused block opens, and everything else in the turn steps back. */
 function rowMarks(entries: Array<InputEntry | undefined>, category: InputCategory, selection: TokenSelection | null, turnId: string): { accent?: string; dimmed: boolean; open: boolean } {
   const ids = selectionIds(selection, turnId);
-  const matched = entries.some((entry) => entryHit(entry, ids));
+  const matched = selectionHits(entries, selection, turnId);
   return {
     accent: matched ? categoryColor(category) : undefined,
-    dimmed: ids.length > 0 && !matched,
-    open: entries.some((entry) => entryHit(entry, selectionIds(selection, turnId, true))),
+    dimmed: (ids.length > 0 || Boolean(selection?.turnId === turnId && selection.layer)) && !matched,
+    open: Boolean(selection?.turnId === turnId && selection.layer && matched) || entries.some((entry) => entryHit(entry, selectionIds(selection, turnId, true))),
   };
 }
 
@@ -1050,8 +1020,9 @@ function StateSummary({ entries }: { entries: InputEntry[] }) {
   const counts = { carried: 0, changed: 0, new: 0 };
   const seen = new Set<string>();
   for (const entry of entries) {
-    if (!entry.state || seen.has(entry.itemId)) continue;
-    seen.add(entry.itemId);
+    const identity = entry.itemId || `@${entry.sourceIndex}`;
+    if (!entry.state || seen.has(identity)) continue;
+    seen.add(identity);
     counts[entry.state] += 1;
   }
   if (!seen.size) return null;
@@ -1324,6 +1295,7 @@ function pairToolExchanges(entries: InputEntry[]): InputEntry[] {
 }
 
 function EntryRow({ entry, previous, ...props }: RowProps & { entry: InputEntry; previous?: string }) {
+  if (Array.isArray(entry.item.tools)) return <ToolDefinitionRow entry={entry} tools={entry.item.tools} {...props}/>;
   if (entry.part !== undefined) return <PartRow entry={entry} previous={previous} {...props}/>;
   const kind = toolEventKind(entry.item);
   if (kind === "call") return <ToolExchangeRow call={entry} result={entry.result} {...props}/>;
@@ -1464,15 +1436,8 @@ function RequestSettings({ body, record }: { body: UnknownRecord; record: TraceR
 /* Text of the nearest earlier Environment block, for field-level comparison. */
 function earlierEnvironment(earlierTurns: TurnModel[]): string | undefined {
   for (let index = earlierTurns.length - 1; index >= 0; index -= 1) {
-    const turn = earlierTurns[index];
-    for (const raw of collectInput(turn)) {
-      const item = asRecord(raw);
-      if (!isMessagePartItem(item)) continue;
-      const parts = messageParts(turnPlugins(turn).agent, item) ?? inputItemParts(item);
-      for (let partIndex = 0; partIndex < parts.length; partIndex += 1) {
-        if (classifyInput(turn.record, item, parts[partIndex], partIndex).label === "Environment") return capturedText(parts[partIndex]);
-      }
-    }
+    const block = earlierTurns[index].blocks.find((candidate) => candidate.inputClass.label === "Environment");
+    if (block) return block.text;
   }
   return undefined;
 }
@@ -1518,14 +1483,12 @@ function StructuredRequest({ earlierTurns, onSelectToken, selection, turn }: { e
   const record = turn.record;
   const turnId = turn.id;
   const body = asRecord(record.request?.body);
-  const input = useMemo(() => collectInput(turn), [turn]);
-  const entries = useMemo(() => inputEntries(turn, input), [turn, input]);
+  const entries = useMemo(() => inputEntries(turn), [turn]);
   const previousEnvironment = useMemo(() => earlierEnvironment(earlierTurns), [earlierTurns]);
-  const topLevelTools = toolDeclarations(turnPlugins(turn).protocol, body);
   const byLayer = new Map<InputLayer, InputEntry[]>();
   for (const entry of entries) byLayer.set(entry.inputClass.layer, [...(byLayer.get(entry.inputClass.layer) || []), entry]);
   const lastPromptKey = [...entries].reverse().find((entry) => entry.inputClass.label === "User prompt")?.key || "";
-  const hasContent = entries.length > 0 || topLevelTools.length > 0;
+  const hasContent = entries.length > 0;
   const rowProps = { onSelectToken, selection, turnId };
   const contextChanges = (byLayer.get("context") || []).filter((entry) => entry.inputClass.label === "Environment" && (entry.section?.changes?.(capturedText(entry.part), previousEnvironment) || []).length).length;
 
@@ -1535,14 +1498,11 @@ function StructuredRequest({ earlierTurns, onSelectToken, selection, turn }: { e
     {LAYER_ORDER.map((layer) => {
       const layerEntries = byLayer.get(layer) || [];
       if (layer === "capabilities") {
-        if (!layerEntries.length && !topLevelTools.length) return null;
+        if (!layerEntries.length) return null;
         // Tool declarations read as a tool list; catalogs (skills, MCP servers, …)
         // are sections of text like any other.
         return <LayerSection entries={layerEntries} key={layer} layer={layer} selection={selection} turnId={turnId}>
-          {topLevelTools.length ? <ToolDefinitionRow tools={topLevelTools} {...rowProps}/> : null}
-          {layerEntries.map((entry) => Array.isArray(entry.item.tools)
-            ? <ToolDefinitionRow entry={entry} key={entry.key} tools={entry.item.tools} {...rowProps}/>
-            : <EntryRow entry={entry} key={entry.key} {...rowProps}/>)}
+          {layerEntries.map((entry) => <EntryRow entry={entry} key={entry.key} {...rowProps}/>)}
         </LayerSection>;
       }
       if (!layerEntries.length) return null;
@@ -1550,6 +1510,8 @@ function StructuredRequest({ earlierTurns, onSelectToken, selection, turn }: { e
       return <LayerSection badge={badge} entries={layerEntries} key={layer} layer={layer} selection={selection} turnId={turnId}>
         {layer === "conversation"
           ? <ConversationRows entries={layerEntries} lastPromptKey={lastPromptKey} {...rowProps}/>
+          : layer === "instructions"
+            ? <InstructionRows entries={layerEntries} {...rowProps}/>
           : groupMinorRows(layerEntries).map((row) => Array.isArray(row)
             ? <MinorRowsGroup entries={row} key={`minor-${layer}`} {...rowProps}/>
             : <EntryRow entry={row} key={row.key} previous={previousEnvironment} {...rowProps}/>)}
@@ -1569,11 +1531,12 @@ function StructuredRequest({ earlierTurns, onSelectToken, selection, turn }: { e
    before it. The timeline reads that trajectory in order as steps by role: the
    user's prompt, the model's reasoning, messages, and tool calls (each with its
    result), results without a captured call, and context the harness injected.
-   Harness instructions and tool definitions belong to Tokens, not the timeline.
+   Capabilities and instructions precede the trajectory as request context;
+   every input block remains inspectable in this projection.
    Steps the previous turn already had fold into "Earlier"; what this turn adds
    stays open, and the turn's own response closes the timeline. */
 
-type StepRole = "user" | "model" | "tool" | "context";
+type StepRole = "user" | "model" | "tool" | "context" | "capabilities" | "instructions";
 
 interface TimelineStep {
   entries: InputEntry[];
@@ -1583,6 +1546,8 @@ interface TimelineStep {
 }
 
 const STEP_META: Record<StepRole, { icon: IconComponent; label: string }> = {
+  capabilities: { icon: ToolIcon, label: "Capabilities" },
+  instructions: { icon: BookIcon, label: "Instructions" },
   context: { icon: PinIcon, label: "Context" },
   model: { icon: SparkleIcon, label: "Model" },
   tool: { icon: TerminalIcon, label: "Tool" },
@@ -1590,6 +1555,7 @@ const STEP_META: Record<StepRole, { icon: IconComponent; label: string }> = {
 };
 
 function stepRole(entry: InputEntry): StepRole {
+  if (entry.inputClass.layer === "capabilities" || entry.inputClass.layer === "instructions") return entry.inputClass.layer;
   const kind = entry.part === undefined ? toolEventKind(entry.item) : null;
   if (kind === "result") return "tool";
   if (kind === "call") return "model";
@@ -1602,9 +1568,6 @@ function stepRole(entry: InputEntry): StepRole {
   return role === "assistant" || role === "model" ? "model" : role === "user" ? "user" : "context";
 }
 
-/* Items the previous turn in the same thread already had: the longest shared
-   prefix of its input and output with this turn's input. Protocols with item ids
-   answer this per item instead (see itemStatesByTurn). */
 /* The turn's items as timeline steps; protocols that pack several steps into one
    message split them (see ProtocolAdapter.expand). */
 function timelineItems(turn: TurnModel, items: unknown[]): unknown[] {
@@ -1613,7 +1576,7 @@ function timelineItems(turn: TurnModel, items: unknown[]): unknown[] {
 }
 
 function previousInThread(turn: TurnModel, earlierTurns: TurnModel[]): TurnModel | undefined {
-  return [...earlierTurns].reverse().find((candidate) => candidate.lane === turn.lane && candidate.protocol === turn.protocol);
+  return [...earlierTurns].reverse().find((candidate) => candidate.thread.id === turn.thread.id && candidate.protocol === turn.protocol);
 }
 
 /* Item ids the previous turn in this thread returned. The model's own steps first
@@ -1624,31 +1587,27 @@ function previousOutputIds(turn: TurnModel, earlierTurns: TurnModel[]): Set<stri
   return new Set(output.map((item) => textValue(asRecord(item).id)).filter(Boolean));
 }
 
-function carriedPrefix(turn: TurnModel, earlierTurns: TurnModel[]): number {
+function carriedBlockIds(turn: TurnModel, earlierTurns: TurnModel[]): Set<string> {
   const previous = previousInThread(turn, earlierTurns);
-  if (!previous) return 0;
+  if (!previous) return new Set();
   // Compare what a step says, not how it was serialized: a response and the next
   // request carry the same step with different envelopes (thinking signatures,
   // cache breakpoints, extra metadata fields).
-  const signature = (value: unknown) => {
-    const item = asRecord(value);
-    return stableValue({ arguments: item.arguments, call: item.call_id, name: item.name, output: item.output, role: item.role, text: capturedText(item.content ?? item.summary ?? item.text), type: item.type });
+  const signature = (entry: InputEntry) => {
+    const item = entry.item;
+    return stableValue({ arguments: item.arguments, call: item.call_id, name: item.name, output: item.output, category: entry.inputClass.category, text: capturedText(entry.part ?? item.content ?? item.summary ?? item.text), type: item.type });
   };
-  const before = timelineItems(previous, [...collectInput(previous), ...(turnPlugins(previous).protocol?.output?.(previous.record) || [])]).map(signature);
-  const current = timelineItems(turn, collectInput(turn)).map(signature);
+  const before = [...inputEntries(previous), ...inputEntries(previous, timelineItems(previous, turnPlugins(previous).protocol?.output?.(previous.record) || []))].map(signature);
+  const entries = inputEntries(turn);
+  const current = entries.map(signature);
   let shared = 0;
   while (shared < current.length && shared < before.length && current[shared] === before[shared]) shared += 1;
-  return shared;
-}
-
-function itemIndexOf(entry: InputEntry): number {
-  const match = /^item-(\d+)/.exec(entry.key);
-  return match ? Number(match[1]) : -1;
+  return new Set(entries.slice(0, shared).map((entry) => entry.key));
 }
 
 function groupSteps(entries: InputEntry[], isFreshEntry: (entry: InputEntry) => boolean, prefix: string): TimelineStep[] {
   const steps: TimelineStep[] = [];
-  for (const entry of pairToolExchanges(entries.filter((item) => item.inputClass.layer !== "instructions" && item.inputClass.layer !== "capabilities"))) {
+  for (const entry of pairToolExchanges(entries)) {
     const resultOnly = Boolean(entry.result && !isFreshEntry(entry) && isFreshEntry(entry.result));
     // A call from an earlier turn whose result arrives now is this turn's tool step.
     const role = resultOnly ? "tool" : stepRole(entry);
@@ -1670,12 +1629,38 @@ function stepSummary(step: TimelineStep): string {
   return `${step.entries.length} ${step.entries.length === 1 ? "item" : "items"}`;
 }
 
+/* Claude Code often sends one long Guidelines document split into heading-sized
+   blocks. Keep those blocks for search and raw provenance, while reading the
+   document as one instruction in the inspector. */
+function InstructionRows({ entries, ...props }: RowProps & { entries: InputEntry[] }) {
+  const groups: InputEntry[][] = [];
+  for (const entry of entries) {
+    const last = groups[groups.length - 1];
+    if (last && last[0].inputClass.category === entry.inputClass.category && last[0].inputClass.label === entry.inputClass.label) last.push(entry);
+    else groups.push([entry]);
+  }
+  return <>{groups.map((group) => group.length === 1
+    ? <EntryRow entry={group[0]} key={group[0].key} {...props}/>
+    : <InstructionGroupRow entries={group} key={group[0].key} {...props}/>)}</>;
+}
+
+function InstructionGroupRow({ entries, previous, ...props }: RowProps & { entries: InputEntry[]; previous?: string }) {
+  const marks = rowMarks(entries, entries[0].inputClass.category, props.selection, props.turnId);
+  const { category, label } = entries[0].inputClass;
+  const blockIds = entryBlockIds(entries);
+  return <Row accent={marks.accent} defaultOpen={marks.open || isFresh(...entries)} dimmed={marks.dimmed} summary={<>
+    <LinkSwatch blockIds={blockIds} category={category} label={label} onSelectToken={props.onSelectToken} selection={props.selection} turnId={props.turnId}/>
+    <span className="truncate text-ink">{label}</span>
+    <RowEnd badge={<StateSummary entries={entries}/>} tokens={sumTokens(entries)}/>
+  </>}><div className="space-y-3">{entries.map((entry) => <BlockAnchor blockIds={entryBlockIds([entry])} key={entry.key} turnId={props.turnId}><SectionContent previous={previous} section={entry.section} value={entry.part}/></BlockAnchor>)}</div></Row>;
+}
+
 function TimelineStepView({ open, outputTokens, rowProps, step, tone }: { open: boolean; outputTokens?: number; rowProps: RowProps; step: TimelineStep; tone?: "carried" | "response" }) {
   const meta = STEP_META[step.role];
   // Output has no per-item counts; the response shows the turn's measured output tokens.
-  const tokens = tone === "response" ? (outputTokens ? { cached: 0, tokens: outputTokens } : undefined) : sumTokens(step.entries);
+  const tokens = tone === "response" ? (outputTokens ? { cached: 0, tokens: outputTokens } : undefined) : sumTokens(step.entries.flatMap((entry) => entry.result ? [entry, entry.result] : [entry]));
   const summary = stepSummary(step);
-  return <li className={`t-row relative pl-8 ${tone === "carried" ? "opacity-70" : ""}`}>
+  return <li className={`t-row relative pl-8 ${tone === "carried" ? "opacity-70" : ""}`} data-layer={step.role === "capabilities" || step.role === "instructions" ? step.role : undefined} data-turn-id={rowProps.turnId}>
     <span aria-hidden="true" className={`absolute left-0 top-0.5 grid size-6 place-items-center rounded-full border bg-panel ${tone === "response" ? "border-ink text-ink" : "border-line text-muted"}`}><meta.icon className="size-3.5"/></span>
     <div className="mb-1.5 flex min-h-6 items-center gap-2 text-xs">
       <span className="font-semibold text-ink">{tone === "response" ? "Response" : meta.label}</span>
@@ -1684,18 +1669,19 @@ function TimelineStepView({ open, outputTokens, rowProps, step, tone }: { open: 
       {tokens ? <span className="ml-auto font-mono tabular-nums text-muted">{tokens.tokens.toLocaleString()}</span> : null}
     </div>
     <div className="divide-y divide-line overflow-hidden rounded-inset border border-line">
-      {step.entries.map((entry) => <EntryRow entry={entry} key={entry.key} {...rowProps} defaultOpen={open && step.role !== "context"} inResponse={tone === "response"}/>)}
+      {step.role === "instructions" ? <InstructionRows entries={step.entries} {...rowProps}/> : step.entries.map((entry) => <EntryRow entry={entry} key={entry.key} {...rowProps} defaultOpen={open && step.role !== "context"} inResponse={tone === "response"}/>)}
     </div>
   </li>;
 }
 
 /* A run of steps this request carries from before, folded to one line. */
 function CarriedSteps({ label, note, rowProps, steps }: { label: string; note: string; rowProps: RowProps; steps: TimelineStep[] }) {
-  const [open, setOpen] = useState(false);
+  const selected = steps.some((step) => step.entries.some((entry) => selectionHits([entry, entry.result], rowProps.selection, rowProps.turnId)));
+  const { open, toggle } = useAccordion(selected);
   if (!steps.length) return null;
   return <li className="relative pl-8">
     <span aria-hidden="true" className="absolute left-0 top-0 grid size-6 place-items-center rounded-full border border-line bg-panel text-muted"><HistoryIcon className="size-3.5"/></span>
-    <button aria-expanded={open} className="flex min-h-6 items-center gap-2 text-xs text-muted hover:text-ink" onClick={() => setOpen((value) => !value)} type="button">
+    <button aria-expanded={open} className="flex min-h-6 items-center gap-2 text-xs text-muted hover:text-ink" onClick={toggle} type="button">
       <ChevronRightIcon className={`size-3.5 transition-transform ${open ? "rotate-90" : ""}`}/>
       <span className="font-semibold">{label}</span>
       <span>{steps.length} {steps.length === 1 ? "step" : "steps"} {note}</span>
@@ -1705,13 +1691,13 @@ function CarriedSteps({ label, note, rowProps, steps }: { label: string; note: s
 }
 
 function TimelineRequest({ earlierTurns, onSelectToken, selection, turn }: { earlierTurns: TurnModel[]; onSelectToken: (selection: TokenSelection | null) => void; selection: TokenSelection | null; turn: TurnModel }) {
-  const input = useMemo(() => timelineItems(turn, collectInput(turn)), [turn]);
-  const entries = useMemo(() => inputEntries(turn, input), [turn, input]);
-  const hasIds = entries.some((entry) => entry.state);
-  const prefix = useMemo(() => (hasIds ? 0 : carriedPrefix(turn, earlierTurns)), [earlierTurns, hasIds, turn]);
-  const returned = useMemo(() => (hasIds ? previousOutputIds(turn, earlierTurns) : new Set<string>()), [earlierTurns, hasIds, turn]);
-  const isFreshEntry = (entry: InputEntry) => (hasIds ? (entry.state === "new" || entry.state === "changed") && !returned.has(entry.itemId) : itemIndexOf(entry) >= prefix);
-  const steps = groupSteps(entries, isFreshEntry, "in:");
+  const entries = useMemo(() => inputEntries(turn), [turn]);
+  const carried = useMemo(() => carriedBlockIds(turn, earlierTurns), [earlierTurns, turn]);
+  const returned = useMemo(() => previousOutputIds(turn, earlierTurns), [earlierTurns, turn]);
+  const isFreshEntry = (entry: InputEntry) => entry.state !== "carried" && !carried.has(entry.key) && !returned.has(entry.itemId);
+  const requestContext = (entry: InputEntry) => entry.inputClass.layer === "capabilities" || entry.inputClass.layer === "instructions";
+  const contextSteps = groupSteps(entries.filter(requestContext), () => false, "context:");
+  const steps = groupSteps(entries.filter((entry) => !requestContext(entry)), isFreshEntry, "in:");
   const output = useMemo(() => timelineItems(turn, turnPlugins(turn).protocol?.output?.(turn.record) || []), [turn]);
   const response = useMemo(() => groupSteps(inputEntries(turn, output), () => true, "out:"), [output, turn]);
   const rowProps: RowProps = { onSelectToken, selection, turnId: turn.id };
@@ -1729,23 +1715,26 @@ function TimelineRequest({ earlierTurns, onSelectToken, selection, turn }: { ear
   return <div className="space-y-4 tf-pad">
     <ChainNote turn={turn}/>
     <ol className="relative space-y-5 before:absolute before:bottom-3 before:left-3 before:top-3 before:w-px before:bg-line">
+      {contextSteps.map((step) => <TimelineStepView key={step.key} open={false} rowProps={rowProps} step={step}/>)}
       <CarriedSteps label="Earlier" note="before this query" rowProps={rowProps} steps={beforePrompt}/>
       {prompt ? <TimelineStepView key={prompt.key} open rowProps={rowProps} step={prompt}/> : null}
       <CarriedSteps label="So far" note="in this query, before this turn" rowProps={rowProps} steps={sincePrompt}/>
       {current.map((step) => <TimelineStepView key={step.key} open rowProps={rowProps} step={step}/>)}
-      {response.map((step, index) => <TimelineStepView key={step.key} open outputTokens={index === 0 ? turn.output : undefined} rowProps={rowProps} step={step} tone="response"/>)}
+      {response.map((step, index) => <TimelineStepView key={step.key} open outputTokens={index === 0 ? turn.output : undefined} rowProps={{ ...rowProps, selection: null }} step={step} tone="response"/>)}
     </ol>
-    {!steps.length && !response.length ? <EmptyState framed>No conversation items were captured for this turn.</EmptyState> : null}
+    {!entries.length && !response.length ? <EmptyState framed>No conversation items were captured for this turn.</EmptyState> : null}
   </div>;
 }
 
 function RequestBody({ earlierTurns, focusPath, mode, onSelectToken, selection, turn }: { earlierTurns: TurnModel[]; focusPath?: JsonPathPart[] | null; mode: RequestMode; onSelectToken: (selection: TokenSelection | null) => void; selection: TokenSelection | null; turn: TurnModel }) {
   const record = turn.record;
   const turnId = turn.id;
-  const selectedPath = useMemo(() => focusPath || selectedJsonPath(record, selection, turnId), [focusPath, record, selection, turnId]);
+  const selectedPath = useMemo(() => focusPath || selectedJsonPath(turn, selection, turnId), [focusPath, turn, selection, turnId]);
+  const source = selection?.turnId === turnId ? turn.blocks.find((block) => block.id === selection.blockId) : undefined;
+  const selectedRange = source?.rawPath && selectedPath && source.rawPath.length === selectedPath.length && source.rawPath.every((part, index) => part === selectedPath[index]) ? source.rawRange : undefined;
   if (mode === "timeline") return <TimelineRequest earlierTurns={earlierTurns} onSelectToken={onSelectToken} selection={selection} turn={turn}/>;
   if (mode === "structured") return <StructuredRequest earlierTurns={earlierTurns} onSelectToken={onSelectToken} selection={selection} turn={turn}/>;
-  return <div className="tf-pad"><div className="tf-card overflow-hidden"><RawJsonTree selectedBlockId={selection?.turnId === turnId ? selection.blockId : undefined} selectedPath={selectedPath} turnId={turnId} value={record}/></div></div>;
+  return <div className="tf-pad">{selection?.turnId === turnId && !selectedPath ? <p className="mb-3 text-xs text-muted">No exact raw location is available for this selection in the current request.</p> : null}<div className="tf-card overflow-hidden"><RawJsonTree selectedBlockId={selection?.turnId === turnId ? selection.blockId : undefined} selectedPath={selectedPath} selectedRange={selectedRange} turnId={turnId} value={record}/></div></div>;
 }
 
 
@@ -1754,12 +1743,10 @@ type InspectorJump = TokenSelection & { nonce: number; path?: JsonPathPart[]; qu
 /* The shared selection, named in its category color. A category that spans several
    blocks can be stepped through here; each step opens and scrolls to that block. */
 function SelectionChip({ onJump, onSelectToken, selection }: { onJump: (selection: TokenSelection) => void; onSelectToken: (selection: TokenSelection | null) => void; selection: TokenSelection }) {
-  // Step by captured item, not by attribution part: one tool result can span several parts.
-  const ids: string[] = [];
-  for (const id of selection.layer ? [] : selection.blockIds || [selection.blockId]) {
-    if (!ids.some((known) => splitBlockId(known).itemId === splitBlockId(id).itemId)) ids.push(id);
-  }
-  const position = Math.max(0, ids.findIndex((id) => splitBlockId(id).itemId === splitBlockId(selection.blockId).itemId));
+  // Canonical blocks, not their carrier: one system field can contain many
+  // independently classified instructions, and every one must be reachable.
+  const ids = [...new Set(selection.layer ? [] : selection.blockIds || [selection.blockId])];
+  const position = Math.max(0, ids.indexOf(selection.blockId));
   const move = (delta: number) => {
     const next = { ...selection, blockId: ids[(position + delta + ids.length) % ids.length] };
     onSelectToken(next);
@@ -1790,16 +1777,16 @@ function SearchResults({ current, hits, onPick, query }: { current: number; hits
           <span className="truncate font-medium text-ink">{hit.location}</span>
           <code className="ml-auto hidden max-w-[45%] truncate font-mono text-xs text-muted sm:block">{hit.pathText.replace(/^trace\.?/, "")}</code>
         </span>
-        <span className="truncate pl-[18px] text-xs text-muted">{hit.before}<mark className="rounded-mark bg-warning/40 px-0.5 text-ink">{hit.match}</mark>{hit.after}</span>
+        <span className="truncate pl-[18px] text-xs text-muted">{hit.before}<mark className="rounded-mark bg-highlight-soft px-0.5 text-ink">{hit.match}</mark>{hit.after}</span>
       </button>
     </li>)}</ol> : <p className="tf-inset border-t border-line py-3 text-xs text-muted">Nothing in this turn&apos;s captured request or response contains “{query}”.</p>}
   </div>;
 }
 
 /* The turn level of the workspace: one selected turn's request, beside the flow. */
-export function RequestView({ jumpToBlock, onNavigate, onSelectToken, selection, turn, turns }: { jumpToBlock: (TokenSelection & { nonce: number }) | null; onNavigate: (index: number | null) => void; onSelectToken: (selection: TokenSelection | null) => void; selection: TokenSelection | null; turn: TurnModel; turns: TurnModel[] }) {
-  const [scope, setScope] = useState<RequestScope>("turn");
-  const [mode, setMode] = useState<RequestMode>("timeline");
+export function RequestView({ jumpToBlock, onNavigate, onSelectToken, onViewChange, selection, turn, turns, view }: { jumpToBlock: (TokenSelection & { nonce: number }) | null; onNavigate: (index: number | null) => void; onSelectToken: (selection: TokenSelection | null) => void; onViewChange: (view: RequestViewMode) => void; selection: TokenSelection | null; turn: TurnModel; turns: TurnModel[]; view: RequestViewMode }) {
+  const scope = view === "changes" ? "changes" : "turn";
+  const mode: RequestMode = view === "changes" ? "timeline" : view;
   const [query, setQuery] = useState("");
   const [cursor, setCursor] = useState({ index: -1, query: "" });
   const [listOpen, setListOpen] = useState(true);
@@ -1809,7 +1796,7 @@ export function RequestView({ jumpToBlock, onNavigate, onSelectToken, selection,
   const bodyRef = useRef<HTMLDivElement>(null);
   const rangesRef = useRef<Range[]>([]);
   const selectedIndex = turns.findIndex((item) => item.id === turn.id);
-  const previous = selectedIndex > 0 ? turns[selectedIndex - 1] : undefined;
+  const previous = previousInThread(turn, turns.slice(0, Math.max(0, selectedIndex)));
   // Turn changes update the request in place instead of replacing it: rows that
   // persist keep their place and open state, and only the rows this turn brings in
   // enter (Row enter). The flag is set in the same render as the new turn, so the
@@ -1826,11 +1813,11 @@ export function RequestView({ jumpToBlock, onNavigate, onSelectToken, selection,
     return () => window.clearTimeout(timer);
   }, [rowMotion, shownTurn]);
   const searching = scope === "turn" && query.trim().length >= MIN_QUERY;
-  const hits = useMemo(() => (searching ? searchRecord(turn.record, query) : []), [query, searching, turn.record]);
+  const hits = useMemo(() => (searching ? searchRecord(turn.record, query, turn.blocks) : []), [query, searching, turn]);
   const current = cursor.query === query ? cursor.index : -1;
   // The newest request to reveal something wins, whether it came from the flow or from here.
   const jump = [jumpToBlock as InspectorJump | null, localJump]
-    .filter((item): item is InspectorJump => Boolean(item && item.turnId === turn.id))
+    .filter((item): item is InspectorJump => Boolean(item && item.turnId === turn.id && (item.blockId ? selection?.blockId === item.blockId : !selection)))
     .sort((left, right) => right.nonce - left.nonce)[0] || null;
 
   // Mark every visible occurrence, and keep marking as rows open and close.
@@ -1863,13 +1850,13 @@ export function RequestView({ jumpToBlock, onNavigate, onSelectToken, selection,
     const frame = window.requestAnimationFrame(() => {
       const body = bodyRef.current;
       if (!body) return;
-      const target = jump.path
-        ? body.querySelector<HTMLElement>('[data-json-selected="true"]')
+      const target = jump.path && mode === "raw"
+        ? body.querySelector<HTMLElement>('[data-json-selected="true"] [data-source-range]') ?? body.querySelector<HTMLElement>('[data-json-selected="true"]')
         : [...body.querySelectorAll<HTMLElement>(jump.layer ? "[data-layer]" : "[data-block-id]")].find((element) => element.dataset.turnId === jump.turnId && (jump.layer ? element.dataset.layer === jump.layer : element.dataset.blockId === jump.blockId));
       if (!target) return;
       if (jump.query) {
         rangesRef.current = highlightMatches(body, jump.query);
-        focusMatch(jump.path ? target : target.closest("[data-block-anchor]") ?? target, rangesRef.current);
+        focusMatch(jump.path && mode === "raw" ? target : target.closest("[data-block-anchor]") ?? target, rangesRef.current);
       } else target.scrollIntoView({ behavior: "smooth", block: jump.layer ? "start" : "center" });
       target.focus({ preventScroll: true });
     });
@@ -1888,28 +1875,19 @@ export function RequestView({ jumpToBlock, onNavigate, onSelectToken, selection,
     // On narrow screens the result list would cover the match, so fold it after a jump.
     if (window.matchMedia("(max-width: 1023px)").matches) setListOpen(false);
     const reveal = { nonce: Date.now(), query, turnId: turn.id };
-    if (mode !== "raw" && hit.blockId) {
+    if (hit.blockId) {
       const next: TokenSelection = { blockId: hit.blockId, blockIds: [hit.blockId], category: hit.category, label: hit.label, turnId: turn.id };
       onSelectToken(next);
-      setLocalJump({ ...next, ...reveal });
+      setLocalJump({ ...next, ...reveal, path: hit.path });
     } else {
       // Raw locations have no node in the flow, so the flow selection is cleared.
       onSelectToken(null);
-      setMode("raw");
+      onViewChange("raw");
       setLocalJump({ blockId: "", label: hit.label, path: hit.path, ...reveal });
     }
   };
-  // One view switch: the structured or raw request, or what changed since the previous turn.
-  const view = scope === "changes" ? "changes" : mode;
-  const setView = (next: RequestMode | "changes") => {
-    if (next === "changes") setScope("changes");
-    else {
-      setScope("turn");
-      setMode(next);
-    }
-  };
   const openSearch = () => {
-    setScope("turn");
+    if (view === "changes") onViewChange("timeline");
     setSearchOpen(true);
     window.requestAnimationFrame(() => searchRef.current?.focus());
   };
@@ -1936,7 +1914,7 @@ export function RequestView({ jumpToBlock, onNavigate, onSelectToken, selection,
         </div>
         {selection?.turnId === turn.id ? <SelectionChip onJump={(next) => setLocalJump({ ...next, nonce: Date.now() })} onSelectToken={onSelectToken} selection={selection}/> : null}
         <div className="ml-auto flex items-center gap-1">
-          <Segmented label="Request view" onChange={setView} options={[["timeline", "Timeline"], ["structured", "Tokens"], ["raw", "Raw"], ["changes", "Changes"]]} value={view}/>
+          <Segmented label="Request view" onChange={onViewChange} options={[["timeline", "Timeline"], ["structured", "Tokens"], ["raw", "Raw"], ["changes", "Changes"]]} value={view}/>
           <IconButton active={searchOpen || Boolean(query)} aria-expanded={searchOpen || Boolean(query)} className="-mr-2" label="Search this turn" onClick={() => { if (searchOpen || query) { setSearchOpen(false); setQuery(""); } else openSearch(); }}><SearchIcon/></IconButton>
         </div>
       </div>
@@ -1948,7 +1926,7 @@ export function RequestView({ jumpToBlock, onNavigate, onSelectToken, selection,
     </div>
     <div data-row-motion={rowMotion ? "enter" : undefined} ref={bodyRef}>
       <div className="tf-inset pt-3 sm:pt-4"><RequestHeader turn={turn}/></div>
-      {scope === "changes" ? <RequestChanges current={turn} previous={previous}/> : <RequestBody earlierTurns={turns.slice(0, Math.max(0, selectedIndex))} focusPath={mode === "raw" ? jump?.path : null} mode={mode} onSelectToken={onSelectToken} selection={selection} turn={turn}/>}
+      {scope === "changes" ? <RequestChanges current={turn} onSelectToken={onSelectToken} previous={previous} selection={selection}/> : <RequestBody earlierTurns={turns.slice(0, Math.max(0, selectedIndex))} focusPath={mode === "raw" ? jump?.path : null} mode={mode} onSelectToken={onSelectToken} selection={selection} turn={turn}/>}
     </div>
   </section>;
 }

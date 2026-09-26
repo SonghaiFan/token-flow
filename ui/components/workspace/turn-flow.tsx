@@ -9,6 +9,7 @@ import { threadIndices, threadTree, type ThreadNode } from "@/lib/threads";
 import { queryGroups } from "@/lib/turn-order";
 import type { InputCategory, InputLayer, TokenSelection, TurnModel } from "@/lib/types";
 import { Badge, Swatch } from "../ui/badge";
+import { activateOnKey } from "../motion";
 import { IconButton } from "../ui/button";
 import { EmptyState } from "../ui/feedback";
 import { SearchField } from "../ui/field";
@@ -26,7 +27,6 @@ const NODE_TOP = 20;
 const NODE = 14;
 const GAP = 6;
 const MIN_NODE = 2;
-const MIN_SHARE = 0.03;
 const SEARCH_THRESHOLD = 7;
 
 type Granularity = "layers" | "categories";
@@ -66,11 +66,11 @@ interface FlowRow {
    input category, with categories under 3% of the turn's input combined as Others.
    Both keep prompt order (capabilities, instructions, context, conversation,
    unattributed). */
-function nodesFor(turn: TurnModel, granularity: Granularity): NodeData[] {
+export function nodesFor(turn: TurnModel, granularity: Granularity): NodeData[] {
   if (granularity === "layers") {
     const totals = layerTotals(turn);
     return LAYER_ORDER.flatMap((layer) => totals[layer].tokens ? [{
-      blockIds: turn.categories.filter((category) => (category.layer || "unknown") === layer).map((category) => category.id),
+      blockIds: turn.categories.filter((category) => (category.layer || "unknown") === layer).flatMap((category) => category.memberIds || [category.id]),
       estimated: turn.categories.some((category) => (category.layer || "unknown") === layer && category.estimated),
       cached: Math.min(totals[layer].cached, totals[layer].tokens),
       color: LAYER_META[layer].color,
@@ -84,24 +84,11 @@ function nodesFor(turn: TurnModel, granularity: Granularity): NodeData[] {
   for (const category of turn.categories) {
     const meta = CATEGORY_META[category.category];
     const current = grouped.get(category.category) || { blockIds: [], cached: 0, category: category.category, color: categoryColor(category.category), key: category.category, label: meta.title, layer: meta.layer, tokens: 0 };
-    grouped.set(category.category, { ...current, blockIds: [...current.blockIds, category.id], cached: current.cached + category.cached, estimated: current.estimated || category.estimated, tokens: current.tokens + category.tokens });
+    grouped.set(category.category, { ...current, blockIds: [...current.blockIds, ...(category.memberIds || [category.id])], cached: current.cached + category.cached, estimated: current.estimated || category.estimated, tokens: current.tokens + category.tokens });
   }
-  const threshold = turn.input * MIN_SHARE;
-  const all = [...grouped.values()];
-  const kept = all.filter((node) => node.tokens >= threshold).sort((left, right) => CATEGORY_ORDER.indexOf(left.category as InputCategory) - CATEGORY_ORDER.indexOf(right.category as InputCategory));
-  const small = all.filter((node) => node.tokens < threshold);
-  if (small.length) kept.push({
-    aggregate: true,
-    blockIds: small.flatMap((node) => node.blockIds),
-    cached: small.reduce((sum, node) => sum + node.cached, 0),
-    color: categoryColor("others"),
-    estimated: small.some((node) => node.estimated),
-    key: "Others",
-    label: "Others",
-    layer: "unknown",
-    tokens: small.reduce((sum, node) => sum + node.tokens, 0),
-  });
-  return kept;
+  // Small categories still carry distinct meaning and selection targets. Keep
+  // their true widths instead of merging them into an uninspectable remainder.
+  return [...grouped.values()].sort((left, right) => CATEGORY_ORDER.indexOf(left.category as InputCategory) - CATEGORY_ORDER.indexOf(right.category as InputCategory));
 }
 
 /* A top-to-bottom ribbon between a source node's bottom edge and a target node's top edge. */
@@ -265,11 +252,11 @@ export function TurnFlow({ focus = null, onSelectNode, onSelectTurn, selected, s
     const links: Array<{ key: string; source: PlacedNode; sourceRow: FlowRow; target: PlacedNode; targetRow: FlowRow }> = [];
     if (!normalized) {
       rows.forEach((row, position) => {
-        const lane = turns[row.index].lane;
+        const threadId = turns[row.index].thread.id;
         for (const target of row.nodes) {
           for (let earlier = position - 1; earlier >= 0; earlier -= 1) {
             const candidate = rows[earlier];
-            if (turns[candidate.index].lane !== lane) continue;
+            if (turns[candidate.index].thread.id !== threadId) continue;
             const source = candidate.nodes.find((node) => node.key === target.key);
             if (source) {
               links.push({ key: `${candidate.index}-${row.index}-${target.key}`, source, sourceRow: candidate, target, targetRow: row });
@@ -348,7 +335,11 @@ export function TurnFlow({ focus = null, onSelectNode, onSelectTurn, selected, s
       </div>
       {searchOpen || query ? <div className="flex"><SearchField autoFocus={!query} inputRef={searchRef} label="Search turns" onChange={setQuery} onKeyDown={(event) => { if (event.key === "Escape") { event.stopPropagation(); setQuery(""); setSearchOpen(false); } }} placeholder="Search turns" value={query}/></div> : null}
       <div aria-label="Legend" className="flex flex-wrap gap-x-3 gap-y-1 pb-0.5 text-xs text-muted" role="list">
-        {LAYER_ORDER.filter((layer) => layer !== "unknown").map((layer) => <span className="inline-flex items-center gap-1.5" key={layer} role="listitem"><Swatch color={LAYER_META[layer].color}/>{LAYER_META[layer].title}</span>)}
+        {granularity === "layers" ? LAYER_ORDER.filter((layer) => layer !== "unknown").map((layer) => <span className="inline-flex items-center gap-1.5" key={layer} role="listitem"><Swatch color={LAYER_META[layer].color}/>{LAYER_META[layer].title}</span>) : CATEGORY_ORDER.filter((category) => turns.some((turn) => turn.categories.some((item) => item.category === category && item.tokens > 0))).map((category) => {
+          const row = graph.rows.find((candidate) => candidate.index === selected);
+          const node = row?.nodes.find((candidate) => candidate.category === category);
+          return <span className="inline-flex items-center" key={category} role="listitem"><button aria-label={`Select ${CATEGORY_META[category].title} in current turn`} aria-pressed={Boolean(row && node && isActive(row, node))} className="tf-focus-inset inline-flex min-h-11 items-center gap-1.5 text-left disabled:cursor-default" disabled={!row || !node} onClick={() => { if (row && node) pick(row, node); }} type="button"><Swatch color={categoryColor(category)}/>{CATEGORY_META[category].title}</button></span>;
+        })}
         <span className="inline-flex items-center gap-1.5" role="listitem" title="Hatched: read from cache. Darker ribbons carry new tokens into the next turn."><Swatch className="border border-line bg-[repeating-linear-gradient(135deg,transparent_0,transparent_2px,var(--ink)_2px,var(--ink)_3px)] opacity-60"/>cached</span>
       </div>
     </div>
@@ -402,7 +393,7 @@ export function TurnFlow({ focus = null, onSelectNode, onSelectTurn, selected, s
             </li>;
           })}
         </ol>
-        <div aria-hidden="true" className="pointer-events-none absolute inset-y-0 left-[calc(var(--text-w)+1.5rem)] right-3 sm:left-[calc(var(--text-w)+1.75rem)] sm:right-4" ref={canvasRef}>
+        <div className="pointer-events-none absolute inset-y-0 left-[calc(var(--text-w)+1.5rem)] right-3 sm:left-[calc(var(--text-w)+1.75rem)] sm:right-4" ref={canvasRef}>
           {width ? <svg className="block overflow-visible" height={layout.height} viewBox={`0 0 ${width} ${Math.max(1, layout.height)}`} width={width}>
             <defs><pattern height="8" id="turn-flow-hatch" patternUnits="userSpaceOnUse" width="8"><path d="M-2 2L2-2M0 8L8 0M6 10L10 6" fill="none" stroke="var(--ink)" strokeOpacity="0.34" strokeWidth="1"/></pattern></defs>
             {(["base", "fresh"] as const).map((kind) => <g key={kind}>{graph.links.map((link) => {
@@ -421,7 +412,7 @@ export function TurnFlow({ focus = null, onSelectNode, onSelectTurn, selected, s
                 const active = isActive(row, node);
                 const y = row.top + NODE_TOP;
                 const label = nodeWidth >= node.label.length * 5.4 + 6;
-                return <g className="t-fade cursor-pointer" key={node.key} onClick={(event) => { event.stopPropagation(); pick(row, node); }} style={{ opacity: hasTokenSelection && !relatedKeys.has(node.key) ? FADED_MARK_OPACITY : 1, pointerEvents: "all" }}>
+                return <g aria-label={`Turn ${turn.label}: ${node.label}`} aria-pressed={active} className="t-fade cursor-pointer" key={node.key} onClick={(event) => { event.stopPropagation(); pick(row, node); }} onKeyDown={(event) => activateOnKey(event, () => pick(row, node))} role="button" style={{ opacity: hasTokenSelection && !relatedKeys.has(node.key) ? FADED_MARK_OPACITY : 1, pointerEvents: "all" }} tabIndex={0}>
                   <title>{`Turn ${turn.label} · ${node.label}: ${node.estimated ? "≈" : ""}${formatNumber(node.tokens)} tokens${node.estimated ? " (estimated)" : ""}; cache read ${formatNumber(node.cached)}; fresh ${formatNumber(node.tokens - node.cached)}${node.aggregate ? "; categories below 3% combined" : ""}`}</title>
                   <rect fill={node.color} fillOpacity={0.82} height={NODE} rx={3} stroke={active ? "var(--ink)" : "var(--panel)"} strokeWidth={active ? 2 : 1} width={nodeWidth} x={node.x0} y={y}/>
                   {cachedWidth > 0 ? <rect fill="url(#turn-flow-hatch)" height={NODE} pointerEvents="none" rx={3} width={cachedWidth} x={node.x0} y={y}/> : null}

@@ -165,8 +165,10 @@ The workspace answers a second question: **What happened in this conversation?**
   in order, as steps by role. *User* is the typed prompt; *Model* is reasoning,
   messages, and tool calls, each call with its result beneath it; *Tool* is a
   result whose call came earlier (the usual new input of a turn); *Context* is
-  what the harness injected. Harness instructions and tool definitions belong
-  to *Tokens*, not the timeline. A step is carried when the previous turn in the
+  what the harness injected. Capabilities and harness instructions precede the
+  trajectory as request context, collapsed until opened or selected. Every
+  captured input block must have a destination in Timeline as well as Tokens;
+  switching views must not be necessary to follow a Sankey selection. A step is carried when the previous turn in the
   same thread already had it in its input or its output (by item id, or else by
   shared prefix compared on content, not on serialization). Carried steps fold
   into *Earlier* (before the query's prompt) and *So far* (after it); the prompt
@@ -221,8 +223,9 @@ and problem state); the right column belongs to the Sankey alone.
 
 Nodes are `Layers` by default (capabilities, instructions, injected context,
 conversation, unattributed) or `Categories` (the seven fixed categories of
-[`token-model.md`](token-model.md), with categories below 3% of the turn's input
-combined as `Others`). Both keep prompt
+[`token-model.md`](token-model.md), including small categories without merging
+them into `Others`). Category legend labels also select the current turn's
+category, keeping sub-pixel nodes reachable without inflating token widths. Both keep prompt
 order. Every node uses one scale across the conversation, so context growth is
 visible, and each turn's nodes are centered as a compact group. The cached
 portion of a node is hatched from its leading edge, using captured per-block
@@ -442,6 +445,7 @@ primitives. Views compose primitives; they do not restyle them.
 | Text | `ink`, `muted` | Primary text and values; labels, metadata, secondary text |
 | Interaction | `fill-hover`, `fill-selected`, `--focus` | Hover and selected rows and controls on any surface; the focus ring |
 | Status | `success`, `warning`, `danger`, each with `-soft`, `-line`, `-ink` | Fill, border, and readable text of a toned badge, notice, or button |
+| Search | `highlight`, `highlight-soft` | Yellow search matches and selected source ranges |
 | Syntax | `syntax-key`, `-string`, `-number`, `-boolean` | Raw JSON only |
 | Radius | `panel` 16, `control` 12, `inset` 8, `tag` 6, `mark` 3 | Panes; controls and cards; wells and menu items; badges; swatches |
 | Elevation | `shadow-raised`, `shadow-overlay` | Panes; menus, popovers, and dialogs |

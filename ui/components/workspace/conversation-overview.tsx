@@ -54,7 +54,7 @@ export function ConversationOverview({ focus, onFocus, onSelectNode, onSelectTur
   const focusTotal = focus ? byCategory.get(focus.category) : undefined;
   const focusTurns = focus ? own.map(({ index, turn }) => {
     const blocks = turn.categories.filter((category) => category.category === focus.category);
-    return { blockIds: blocks.map((category) => category.id), index, tokens: blocks.reduce((sum, category) => sum + category.tokens, 0), turn };
+    return { blockIds: blocks.flatMap((category) => category.memberIds || [category.id]), index, tokens: blocks.reduce((sum, category) => sum + category.tokens, 0), turn };
   }).filter((item) => item.tokens > 0) : [];
   const constant = focusTurns.length > 1 && focusTurns.every((item) => item.tokens === focusTurns[0].tokens);
   // A category that never changes size has no peak; offer where it first appears instead.

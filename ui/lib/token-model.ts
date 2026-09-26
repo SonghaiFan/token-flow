@@ -5,7 +5,7 @@ import { asNumber, asObject, textOf, textParts, type AnyObject } from "./json";
 import { protocolById, protocolFor, toolDeclarations, turnProtocol, type ProtocolAdapter } from "./protocols";
 import { messageReasoning } from "./protocols/chat-completions";
 import { responseBody } from "./protocols/usage";
-import type { InputClass, InputLayer, ItemState, TokenCategory, TraceRecord, TurnChange, TurnModel } from "./types";
+import type { InputClass, InputLayer, ItemState, TokenCategory, TraceRecord, TurnBlock, TurnChange, TurnModel } from "./types";
 
 /* Turns are read by two plugins. The wire protocol (`ui/lib/protocols`) owns the
    request and response shape and the token schema; the agent (`ui/lib/agents`)
@@ -270,13 +270,9 @@ function itemStatesByTurn(contexts: TurnContext[], threads: string[], auxiliary:
 
 /* One block of the prompt, in the order the model reads it: tool definitions and
    system sections first (`item` -1), then each part of each conversation item. */
-interface PromptBlock {
-  inputClass: InputClass;
-  item: number;
-  text: string;
-}
+type PromptBlock = TurnBlock;
 
-type Segment = { inputClass: InputClass; tokens: number; cached: number; estimated: boolean };
+type Segment = { inputClass: InputClass; memberIds: string[]; tokens: number; cached: number; estimated: boolean };
 type TurnAllocation = { segments: Segment[]; fromIndex?: number; carried: number; added: number };
 type CachedTurn = { total: number; breakpoint: number; head: string; items: string[]; prefix: Segment[] };
 
@@ -319,29 +315,82 @@ export function messageParts(agent: AgentPlugin, item: AnyObject): unknown[] | u
   });
 }
 
-function promptBlocks(record: TraceRecord, protocol: ProtocolAdapter, agent: AgentPlugin): PromptBlock[] {
+function promptBlocks(record: TraceRecord, protocol: ProtocolAdapter, agent: AgentPlugin, input?: unknown[]): PromptBlock[] {
   const body = asObject(record.request?.body);
   const blocks: PromptBlock[] = [];
+  const paths = new Map<unknown, Array<string | number>>();
+  const strings: Array<{ path: Array<string | number>; text: string }> = [];
+  const visit = (value: unknown, path: Array<string | number>) => {
+    if (typeof value === "string") strings.push({ path, text: value });
+    if (!value || typeof value !== "object") return;
+    paths.set(value, path);
+    for (const [key, child] of Object.entries(value)) visit(child, [...path, Array.isArray(value) ? Number(key) : key]);
+  };
+  visit(body, ["trace", "request", "body"]);
   const tools = toolDeclarations(protocol, body);
-  if (tools.length) blocks.push({ inputClass: inputClass("tools", "Tool definitions"), item: -1, text: contentSignature(tools) });
+  if (tools.length) blocks.push({ id: "@tools", itemId: "", inputClass: inputClass("tools", "Tool definitions"), itemIndex: -1, item: { type: "additional_tools", tools }, text: contentSignature(tools) });
   const system = protocol.system(body);
+  const systemPath = paths.get(system) ?? (typeof system === "string" && strings.filter((source) => source.text === system).length === 1 ? strings.find((source) => source.text === system)?.path : undefined);
   if (system !== undefined) {
     const systemItem = { type: "instructions", role: "system" };
-    for (const text of systemTexts(system, agent)) blocks.push({ inputClass: classifyPart(agent, protocol, systemItem, { type: "text", text }, 0), item: -1, text });
+    systemTexts(system, agent).forEach((text, index) => blocks.push({ id: `@system:${index}`, itemId: "", rawPath: systemPath, inputClass: classifyPart(agent, protocol, systemItem, { type: "text", text }, 0), itemIndex: -1, item: systemItem, part: { type: "text", text }, partIndex: index, text }));
   }
-  protocol.items(body).forEach((raw, index) => {
+  (input ?? protocol.items(body)).forEach((raw, index) => {
     const item = asObject(raw);
+    const itemId = typeof item.id === "string" ? item.id : "";
+    const id = itemId || `@input.${index}`;
+    const base = { item, itemId, itemIndex: index, rawPath: paths.get(raw) };
     const content = item.content ?? item.parts;
     const parts = messageParts(agent, item);
     // Chat Completions carries an assistant turn's reasoning and tool calls beside
     // its text; each is its own block.
     const reasoning = item.role === "assistant" ? messageReasoning(item) : undefined;
     const toolCalls = Array.isArray(item.tool_calls) && item.tool_calls.length ? item.tool_calls : undefined;
-    if (reasoning?.text) blocks.push({ inputClass: inputClass("model", "Reasoning"), item: index, text: reasoning.text });
-    if (parts) parts.forEach((part, partIndex) => blocks.push({ inputClass: classifyPart(agent, protocol, item, part, partIndex), item: index, text: blockText(part) }));
-    else if ((content !== undefined && content !== null && content !== "") || (!reasoning && !toolCalls)) blocks.push({ inputClass: classifyPart(agent, protocol, item), item: index, text: blockText(content ?? item) });
-    if (toolCalls) blocks.push({ inputClass: inputClass("model", "Tool calls"), item: index, text: contentSignature(toolCalls) });
+    if (reasoning?.text) blocks.push({ ...base, id: `${id}:reasoning`, item: { type: "reasoning", summary: [{ text: reasoning.text }] }, inputClass: inputClass("model", "Reasoning"), text: reasoning.text });
+    if (parts) parts.forEach((part, partIndex) => {
+      // Expand a single source part, retaining its identity through the protocol
+      // projection. Both readers now use this same normalized content.
+      const single = { ...item, [Array.isArray(item.parts) ? "parts" : "content"]: [part] };
+      const expanded = protocol.expand?.(single);
+      const step = expanded?.length === 1 ? asObject(expanded[0]) : item;
+      const event = typeof step.type === "string" && (step.type === "reasoning" || step.type.endsWith("_call") || step.type.endsWith("_call_output"));
+      blocks.push({ ...base, rawPath: paths.get(part) ?? base.rawPath, id: `${id}:${partIndex}`, inputClass: classifyPart(agent, protocol, item, part, partIndex), item: event ? step : item, ...(event ? {} : { part }), partIndex, text: blockText(part) });
+    });
+    else if ((content !== undefined && content !== null && content !== "") || (!reasoning && !toolCalls)) {
+      const expanded = protocol.expand?.(item);
+      const normalized = expanded?.length === 1 ? asObject(expanded[0]) : item;
+      blocks.push({ ...base, id, item: normalized, ...(typeof item.role === "string" && normalized === item ? { part: content ?? item } : {}), inputClass: classifyPart(agent, protocol, item), text: blockText(content ?? item) });
+    }
+    if (toolCalls) toolCalls.forEach((call, callIndex) => {
+      const step = protocol.expand?.({ ...item, content: null, reasoning: undefined, reasoning_content: undefined, reasoning_details: undefined, tool_calls: [call] })?.[0];
+      blocks.push({ ...base, rawPath: paths.get(call) ?? base.rawPath, id: `${id}:call.${callIndex}`, item: asObject(step ?? call), inputClass: inputClass("model", "Tool calls"), text: contentSignature(call) });
+    });
   });
+  // Resolve split sections against their own captured carrier, in source order.
+  // Offsets refer to the untouched string, never the normalized display text.
+  const consumed = new Map<string, number>();
+  for (const block of blocks) {
+    if (block.id === "@tools") {
+      const toolPaths = tools.map((tool) => paths.get(tool)).filter((path): path is Array<string | number> => Boolean(path));
+      if (toolPaths.length === tools.length && toolPaths.length) {
+        const common = [...toolPaths[0]];
+        while (common.length && !toolPaths.every((path) => common.every((part, index) => part === path[index]))) common.pop();
+        block.rawPath = tools.length === 1 ? toolPaths[0].slice(0, -1) : common;
+      }
+    }
+    if (!block.rawPath || !block.text || block.id === "@tools") continue;
+    const candidates = strings.filter((source) => block.rawPath!.every((part, index) => source.path[index] === part)
+      && (source.path.length === block.rawPath!.length || /^(text|thinking|output|input_text|output_text|content|instructions|system|reasoning_content|reasoning)$/.test(String(source.path.at(-1)))));
+    for (const source of candidates) {
+      const key = JSON.stringify(source.path);
+      const start = source.text.indexOf(block.text, consumed.get(key) || 0);
+      if (start < 0) continue;
+      block.rawPath = source.path;
+      block.rawRange = { start, end: start + block.text.length };
+      consumed.set(key, block.rawRange.end);
+      break;
+    }
+  }
   return blocks;
 }
 
@@ -366,7 +415,8 @@ function promptSignature(value: unknown): string {
 function splitRange(blocks: PromptBlock[], tokens: number, estimates: TokenEstimates | undefined): Segment[] {
   if (tokens <= 0) return [];
   const labels = new Set(blocks.map((block) => `${block.inputClass.category}:${block.inputClass.label}`));
-  if (blocks.length && labels.size === 1) return [{ inputClass: blocks[0].inputClass, tokens, cached: 0, estimated: false }];
+  const memberIds = blocks.map((block) => block.id);
+  if (blocks.length && labels.size === 1) return [{ inputClass: blocks[0].inputClass, memberIds, tokens, cached: 0, estimated: false }];
   const counts = blocks.map((block) => estimates?.get(block.text));
   const total = counts.reduce<number>((sum, count) => sum + (count || 0), 0);
   if (blocks.length && total > 0 && counts.every((count) => count !== undefined)) {
@@ -378,18 +428,18 @@ function splitRange(blocks: PromptBlock[], tokens: number, estimates: TokenEstim
       shares[index] += 1;
       remainder -= 1;
     }
-    return blocks.map((block, index) => ({ inputClass: block.inputClass, tokens: shares[index], cached: 0, estimated: true }));
+    return blocks.map((block, index) => ({ inputClass: block.inputClass, memberIds: [block.id], tokens: shares[index], cached: 0, estimated: true }));
   }
   const category = blocks[0]?.inputClass.category;
   if (category && category !== "unknown" && blocks.every((block) => block.inputClass.category === category)) {
-    return [{ inputClass: inputClass(category, `${CATEGORY_META[category].title} (mixed)`), tokens, cached: 0, estimated: false }];
+    return [{ inputClass: inputClass(category, `${CATEGORY_META[category].title} (mixed)`), memberIds, tokens, cached: 0, estimated: false }];
   }
   // Blocks of one layer but several categories keep the layer; their category is unknown.
   const layer = blocks[0]?.inputClass.layer;
   if (layer && layer !== "unknown" && blocks.every((block) => block.inputClass.layer === layer)) {
-    return [{ inputClass: { category: "unknown", layer, label: `${LAYER_META[layer].title} (mixed)` }, tokens, cached: 0, estimated: false }];
+    return [{ inputClass: { category: "unknown", layer, label: `${LAYER_META[layer].title} (mixed)` }, memberIds, tokens, cached: 0, estimated: false }];
   }
-  return [{ inputClass: UNATTRIBUTED, tokens, cached: 0, estimated: false }];
+  return [{ inputClass: UNATTRIBUTED, memberIds, tokens, cached: 0, estimated: false }];
 }
 
 /* Cached tokens are always the start of the prompt: place them in order. */
@@ -408,7 +458,7 @@ function mergeSegments(segments: Segment[]): Segment[] {
     if (!segment.tokens) continue;
     const key = `${segment.inputClass.layer}:${segment.inputClass.category}:${segment.inputClass.label}`;
     const current = merged.get(key);
-    merged.set(key, current ? { ...current, tokens: current.tokens + segment.tokens, cached: current.cached + segment.cached, estimated: current.estimated || segment.estimated } : { ...segment });
+    merged.set(key, current ? { ...current, memberIds: [...new Set([...current.memberIds, ...segment.memberIds])], tokens: current.tokens + segment.tokens, cached: current.cached + segment.cached, estimated: current.estimated || segment.estimated } : { ...segment });
   }
   return [...merged.values()];
 }
@@ -424,12 +474,12 @@ function mergeSegments(segments: Segment[]): Segment[] {
    breakpoint are identical. The carried tokens keep the earlier turn's
    categories; the written tokens cover the items up to this turn's breakpoint and
    the uncached input the items after it. */
-function allocateTurns(records: TraceRecord[], protocols: ProtocolAdapter[], agents: AgentPlugin[], estimates: TokenEstimates | undefined): Array<TurnAllocation | undefined> {
+function allocateTurns(records: TraceRecord[], protocols: ProtocolAdapter[], blocksByTurn: PromptBlock[][], estimates: TokenEstimates | undefined): Array<TurnAllocation | undefined> {
   const cachedTurns: Array<CachedTurn | undefined> = [];
   return records.map((record, index) => {
     const protocol = protocols[index];
     if (Object.keys(protocol.blockTokens?.(record) || {}).length) return undefined;
-    const blocks = promptBlocks(record, protocol, agents[index]);
+    const blocks = blocksByTurn[index];
     const cache = protocol.cachePrefix?.(record);
     if (!cache) {
       const usage = protocol.usage(record);
@@ -452,8 +502,8 @@ function allocateTurns(records: TraceRecord[], protocols: ProtocolAdapter[], age
 
     const start = fromIndex === undefined ? -Infinity : (cachedTurns[fromIndex] as CachedTurn).breakpoint;
     const carried = fromIndex === undefined ? [] : (cachedTurns[fromIndex] as CachedTurn).prefix.map((segment) => ({ ...segment, cached: segment.tokens }));
-    const written = splitRange(blocks.filter((block) => block.item > start && block.item <= cache.breakpoint), fromIndex === undefined ? cache.read + cache.written : cache.written, estimates);
-    const after = splitRange(blocks.filter((block) => block.item > Math.max(start, cache.breakpoint)), cache.after, estimates);
+    const written = splitRange(blocks.filter((block) => block.itemIndex > start && block.itemIndex <= cache.breakpoint), fromIndex === undefined ? cache.read + cache.written : cache.written, estimates);
+    const after = splitRange(blocks.filter((block) => block.itemIndex > Math.max(start, cache.breakpoint)), cache.after, estimates);
     const own = placeCached([...written, ...after], fromIndex === undefined ? cache.read : 0);
     cachedTurns[index] = {
       total: cache.read + cache.written,
@@ -475,21 +525,21 @@ export function estimateTexts(turns: TurnModel[]): string[] {
     const protocol = protocolById(turn.protocol);
     // Per-item counts from the provider are never replaced by estimates.
     if (!protocol || Object.keys(protocol.blockTokens?.(turn.record) || {}).length) continue;
-    for (const block of promptBlocks(turn.record, protocol, agentById(turn.agent))) texts.add(block.text);
+    for (const block of turn.blocks) texts.add(block.text);
   }
   return [...texts];
 }
 
 /* Input tokens by category. Only counts the provider reported per item are
    attributed; the rest of the prompt stays Unattributed, never estimated. */
-function categoryRows(record: TraceRecord, protocol: ProtocolAdapter, catalog: Map<string, CatalogEntry>, index: number, states: Record<string, ItemState>, allocation: TurnAllocation | undefined): TokenCategory[] {
+function categoryRows(record: TraceRecord, protocol: ProtocolAdapter, catalog: Map<string, CatalogEntry>, index: number, states: Record<string, ItemState>, allocation: TurnAllocation | undefined, blocks: TurnBlock[]): TokenCategory[] {
   const attributionItems = protocol.blockTokens?.(record) || {};
   const categories: Omit<TokenCategory, "color" | "fresh">[] = [];
   let attributed = 0;
 
   if (allocation) {
     for (const segment of allocation.segments) {
-      categories.push({ id: `alloc:${index}:${segment.inputClass.layer}:${segment.inputClass.category}:${segment.inputClass.label}`, ...segment.inputClass, tokens: segment.tokens, cached: segment.cached, ...(segment.estimated ? { estimated: true } : {}) });
+      categories.push({ id: `alloc:${index}:${segment.inputClass.layer}:${segment.inputClass.category}:${segment.inputClass.label}`, memberIds: segment.memberIds, ...segment.inputClass, tokens: segment.tokens, cached: segment.cached, ...(segment.estimated ? { estimated: true } : {}) });
       attributed += segment.tokens;
     }
   }
@@ -526,6 +576,7 @@ function categoryRows(record: TraceRecord, protocol: ProtocolAdapter, catalog: M
 
   return categories.map((category) => ({
     ...category,
+    memberIds: category.memberIds ?? blocks.filter((block) => block.id === category.id || block.itemId === category.id || (block.partIndex === undefined && category.id.startsWith(`${block.itemId}:`) && block.itemId !== "")).map((block) => block.id),
     fresh: Math.max(0, category.tokens - category.cached),
     color: categoryColor(category.category),
   }));
@@ -620,7 +671,8 @@ export function buildTurns(records: TraceRecord[], estimates?: TokenEstimates): 
     // A request that continues from a summary names no prompt of its own.
     if (change?.rewritten && identities[index].kind === "unknown") identities[index] = { title: "Continue from summary", kind: "unknown" };
   });
-  const cacheLinks = allocateTurns(turnRecords.map((entry) => entry.record), protocols, agents, estimates);
+  const blocks = allRecords.map((record, index) => promptBlocks(record, protocols[index], agents[index], contexts[index].input));
+  const cacheLinks = allocateTurns(allRecords, protocols, blocks, estimates);
   return turnRecords.map(({ record, protocol }, index) => {
     const agent = agents[index];
     const { input, cached, output } = protocol.usage(record);
@@ -651,7 +703,8 @@ export function buildTurns(records: TraceRecord[], estimates?: TokenEstimates): 
       output,
       cached,
       fresh: Math.max(0, input - cached),
-      categories: categoryRows(record, protocol, catalog, index, states[index], cacheLinks[index]),
+      categories: categoryRows(record, protocol, catalog, index, states[index], cacheLinks[index], blocks[index]),
+      blocks: blocks[index],
       itemStates: states[index],
       ...(changes[index] ? { change: changes[index] } : {}),
       context: {

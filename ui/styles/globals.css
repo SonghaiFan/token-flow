@@ -115,18 +115,18 @@ button, a { -webkit-tap-highlight-color: transparent; }
 .scrollbar-none::-webkit-scrollbar { display: none; }
 
 .token-flow-raw-json .raw-json-selected {
-  background: color-mix(in srgb, var(--warning) 18%, transparent);
+  background: color-mix(in srgb, var(--highlight) 18%, transparent);
   box-shadow: inset 2px 0 0 var(--ink);
 }
 
 /* Inspector search: every visible occurrence, and the one the user jumped to. */
 ::highlight(token-flow-search) {
-  background-color: color-mix(in srgb, var(--warning) 32%, transparent);
+  background-color: var(--highlight-soft);
   color: inherit;
 }
 
 ::highlight(token-flow-search-current) {
-  background-color: var(--warning);
+  background-color: var(--highlight);
   color: var(--ink);
 }
 

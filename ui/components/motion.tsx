@@ -46,7 +46,7 @@ export function useAccordion(defaultOpen: boolean) {
 
 /* Keyboard activation for a header that is a role="button" region (it may contain
    its own buttons, so it cannot be a <button>). Inner controls keep their own keys. */
-export function activateOnKey(event: React.KeyboardEvent<HTMLElement>, action: () => void) {
+export function activateOnKey(event: React.KeyboardEvent<Element>, action: () => void) {
   if (event.target !== event.currentTarget) return;
   if (event.key === "Enter" || event.key === " ") {
     event.preventDefault();

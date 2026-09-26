@@ -148,6 +148,23 @@ export interface TokenSelection {
   layer?: InputLayer;
 }
 
+/* A local content identity is independent of whether a provider measured it.
+   Captured ids remain separate: only those are evidence for an exact diff. */
+export interface TurnBlock {
+  id: string;
+  itemId: string;
+  itemIndex: number;
+  partIndex?: number;
+  /* Exact captured object path, when present in this request (not inherited). */
+  rawPath?: Array<string | number>;
+  /* Half-open UTF-16 offsets in the original string at rawPath. */
+  rawRange?: { start: number; end: number };
+  inputClass: InputClass;
+  item: Record<string, unknown>;
+  part?: unknown;
+  text: string;
+}
+
 export interface TurnThread {
   id: string;
   parentId?: string;
@@ -194,6 +211,7 @@ export interface TurnModel {
   cached: number;
   fresh: number;
   categories: TokenCategory[];
+  blocks: TurnBlock[];
   /* States by item id; items without an id are keyed `@<position>` in `context.input`. */
   itemStates: Record<string, ItemState>;
   change?: TurnChange;

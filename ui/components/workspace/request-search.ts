@@ -1,7 +1,6 @@
 import { categoryColor } from "@/lib/category-palette";
 import { CATEGORY_META } from "@/lib/input-categories";
-import { classifyInput } from "@/lib/token-model";
-import type { InputCategory, TraceRecord } from "@/lib/types";
+import type { InputCategory, TraceRecord, TurnBlock } from "@/lib/types";
 
 export type JsonPathPart = number | string;
 
@@ -28,12 +27,6 @@ const MAX_RANGES = 2000;
 const ALL_MATCHES = "token-flow-search";
 const CURRENT_MATCH = "token-flow-search-current";
 
-type UnknownRecord = Record<string, unknown>;
-
-function asRecord(value: unknown): UnknownRecord {
-  return value && typeof value === "object" && !Array.isArray(value) ? value as UnknownRecord : {};
-}
-
 export function jsonPath(parts: JsonPathPart[]): string {
   return parts.reduce<string>((path, part) => {
     if (typeof part === "number") return `${path}[${part}]`;
@@ -42,36 +35,19 @@ export function jsonPath(parts: JsonPathPart[]): string {
   }, "");
 }
 
-function isToolEvent(item: UnknownRecord): boolean {
-  const type = String(item.type || "").toLowerCase();
-  return type.endsWith("_call") || type.endsWith("_call_output") || ["tool_use", "tool_result", "tool_output"].includes(type);
-}
-
 /* Name the part of the request a JSON path points into, in the structured view's
    vocabulary, and the block that opens it there. Paths start at the record root. */
-function locate(record: TraceRecord, parts: JsonPathPart[]): { blockId?: string; category?: InputCategory; color: string; label: string; location: string } {
-  const [scope, section, field, index] = parts.slice(1);
-  const body = asRecord(record.request?.body);
+function locate(parts: JsonPathPart[], blocks: TurnBlock[], at: number, length: number, isKey: boolean): { blockId?: string; category?: InputCategory; color: string; label: string; location: string } {
+  const block = !isKey ? blocks.filter((candidate) => candidate.rawPath?.every((part, index) => parts[index] === part)
+    && (!candidate.rawRange || (parts.length === candidate.rawPath.length && at >= candidate.rawRange.start && at + length <= candidate.rawRange.end)))
+    .sort((left, right) => (right.rawPath?.length || 0) - (left.rawPath?.length || 0) || Number(Boolean(right.rawRange)) - Number(Boolean(left.rawRange)))[0] : undefined;
+  if (block) {
+    const { category, label } = block.inputClass;
+    return { blockId: block.id, category, color: categoryColor(category), label, location: `${CATEGORY_META[category].title} › ${label}` };
+  }
+  const [scope, section, field] = parts.slice(1);
   if (scope === "request" && section === "body") {
-    if ((field === "input" || field === "messages") && typeof index === "number") {
-      const source = body[field];
-      const item = asRecord(Array.isArray(source) ? source[index] : undefined);
-      const id = typeof item.id === "string" ? item.id : "";
-      let inputClass = classifyInput(record, item);
-      let blockId = id || undefined;
-      if (item.role && !isToolEvent(item) && item.type !== "additional_tools") {
-        const partKey = parts[5];
-        const partIndex = (partKey === "content" || partKey === "parts") && typeof parts[6] === "number" ? parts[6] : 0;
-        const content = item.content ?? item.parts;
-        const part = Array.isArray(content) ? content[partIndex] : content;
-        inputClass = classifyInput(record, item, part, partIndex);
-        blockId = id ? `${id}:${partIndex}` : undefined;
-      }
-      return { blockId, category: inputClass.category, color: categoryColor(inputClass.category), label: inputClass.label, location: `${CATEGORY_META[inputClass.category].title} › ${inputClass.label}` };
-    }
-    if (field === "tools") return { category: "tools", color: categoryColor("tools"), label: "Tool definitions", location: `${CATEGORY_META.tools.title} › Tool definitions` };
-    if (field === "instructions" || field === "system") return { category: "harness", color: categoryColor("harness"), label: "Developer instructions", location: `${CATEGORY_META.harness.title} › Developer instructions` };
-    return { color: "", label: "Request settings", location: `Request settings › ${String(field ?? "body")}` };
+    return { color: "", label: "Captured request", location: `Captured request › ${String(field ?? "body")}` };
   }
   if (scope === "request") return { color: "", label: "Request", location: `Request ${String(section ?? "")}`.trim() };
   if (scope === "response") return { color: "", label: "Response", location: section === "body" && field !== undefined ? `Response › ${String(field)}` : "Response" };
@@ -91,12 +67,12 @@ function snippet(text: string, at: number, length: number): Pick<SearchHit, "aft
 
 /* Case-insensitive search over the captured record's keys and scalar values, in
    document order, so results read top to bottom like the request itself. */
-export function searchRecord(record: TraceRecord, query: string): SearchHit[] {
+export function searchRecord(record: TraceRecord, query: string, blocks: TurnBlock[] = []): SearchHit[] {
   const needle = query.trim().toLowerCase();
   if (needle.length < MIN_QUERY) return [];
   const hits: SearchHit[] = [];
-  const push = (path: JsonPathPart[], text: string, at: number) => {
-    const place = locate(record, path);
+  const push = (path: JsonPathPart[], text: string, at: number, isKey = false) => {
+    const place = locate(path, blocks, at, needle.length, isKey);
     hits.push({ ...place, ...snippet(text, at, needle.length), key: `${jsonPath(path)}@${at}:${hits.length}`, path, pathText: jsonPath(path) });
   };
   const visit = (value: unknown, path: JsonPathPart[]) => {
@@ -104,7 +80,7 @@ export function searchRecord(record: TraceRecord, query: string): SearchHit[] {
     if (typeof value === "object") {
       if (Array.isArray(value)) value.forEach((item, index) => visit(item, [...path, index]));
       else for (const [key, item] of Object.entries(value)) {
-        if (key.toLowerCase().includes(needle)) push([...path, key], key, key.toLowerCase().indexOf(needle));
+        if (key.toLowerCase().includes(needle)) push([...path, key], key, key.toLowerCase().indexOf(needle), true);
         visit(item, [...path, key]);
       }
       return;
