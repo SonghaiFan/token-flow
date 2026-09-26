@@ -11,6 +11,7 @@ from urllib.parse import parse_qsl, urlencode, urlparse, urlsplit, urlunsplit
 
 from token_tap.agents import dashboard_labels
 from token_tap.core.bedrock import bedrock_model_from_path
+from token_tap.core.model_traffic import is_model_probe_path, is_non_model_request, is_primary_model_path
 from token_tap.core.trace_encoding import (
     _decode_bedrock_eventstream_events,
     content_type_from_headers,
@@ -24,7 +25,7 @@ from token_tap.storage.trace_store import SessionQuery, TraceStore, get_trace_st
 _DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 
 CLIENT_LABELS = dashboard_labels()
-DASHBOARD_SUMMARY_VERSION = 7
+DASHBOARD_SUMMARY_VERSION = 8
 VALID_SESSION_STATUSES = {"active", "complete", "error", "empty"}
 _REDACTED_VALUE = "REDACTED"
 _SENSITIVE_KEY_NAMES = {
@@ -1070,23 +1071,7 @@ def _is_sensitive_key(key: str) -> bool:
 def _is_primary_model_record(record: dict[str, Any]) -> bool:
     if _is_cursor_transcript_record(record):
         return True
-    path = _record_path(record).lower()
-    if not path:
-        return False
-    primary_fragments = (
-        "/v1/messages",
-        "/zen/v1/messages",
-        "/v1/responses",
-        "/responses",
-        "/backend-api/codex/responses",
-        "/v1/chat/completions",
-        "/chat/completions",
-        "/v1/completions",
-        "/completions",
-        "streamgeneratecontent",
-        "generatecontent",
-    )
-    return any(fragment in path for fragment in primary_fragments)
+    return is_primary_model_path(_record_path(record))
 
 
 def _is_cursor_transcript_record(record: dict[str, Any]) -> bool:
@@ -1111,10 +1096,10 @@ def _is_protobuf_noise_record(record: dict[str, Any]) -> bool:
 
 
 def _is_auxiliary_record(record: dict[str, Any]) -> bool:
-    if _is_protobuf_noise_record(record):
+    if _is_protobuf_noise_record(record) or is_non_model_request(record):
         return True
     path = _record_path(record).lower()
-    if _is_model_probe_path(path):
+    if is_model_probe_path(path):
         return True
     auxiliary_fragments = (
         "/token",
@@ -1137,14 +1122,6 @@ def _is_auxiliary_record(record: dict[str, Any]) -> bool:
     return any(fragment in path for fragment in auxiliary_fragments)
 
 
-def _is_model_probe_path(path: str) -> bool:
-    clean_path = path.split("?", 1)[0].rstrip("/")
-    if clean_path in {"/models", "/v1/models", "/v1alpha/models", "/v1beta/models"}:
-        return True
-    match = re.fullmatch(r"/(?:v1/)?models/([^/:]+)", clean_path)
-    return match is not None
-
-
 def _is_session_error_record(record: dict[str, Any]) -> bool:
     if _record_error(record):
         return True
@@ -1154,7 +1131,7 @@ def _is_session_error_record(record: dict[str, Any]) -> bool:
 
 def _is_auxiliary_status_error_record(record: dict[str, Any]) -> bool:
     status_code = _response_status(record)
-    return status_code >= 400 and _is_auxiliary_record(record)
+    return status_code >= 400 and _is_auxiliary_record(record) and not is_non_model_request(record)
 
 
 def _is_successful_primary_record(record: dict[str, Any]) -> bool:
