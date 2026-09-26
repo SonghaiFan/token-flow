@@ -1,6 +1,7 @@
 import { environmentChanges, environmentPreview, EnvironmentView, ReadableText, type EnvironmentFacts } from "@/components/workspace/section-views";
 import { decodeXmlText, SkillList, skillCount, splitTaggedSections, type SkillEntry } from "./prompt-sections";
 import type { AgentPlugin } from "./types";
+import { inputClass } from "../input-categories";
 
 /* Pi assembles one system prompt from top-level pseudo-XML sections: a plain
    preamble, then `<tools>`, `<rules>`, `<docs>`, `<project_context>`, `<skills>`,
@@ -35,13 +36,13 @@ export const pi: AgentPlugin = {
   id: "pi",
   clients: ["pi"],
   textPatterns: [
-    [/^You are an expert coding assistant operating inside pi\b/i, { layer: "instructions", label: "Base instructions" }],
-    [/^<tools>/i, { layer: "instructions", label: "Tool guide" }],
-    [/^<rules>/i, { layer: "instructions", label: "Rules" }],
-    [/^<docs>/i, { layer: "instructions", label: "Harness docs" }],
-    [/^<skills>/i, { layer: "instructions", label: "Skills" }],
-    [/^<project_context>/i, { layer: "context", label: "AGENTS.md" }],
-    [/^<cwd>/i, { layer: "context", label: "Environment" }],
+    [/^You are an expert coding assistant operating inside pi\b/i, inputClass("harness", "Base instructions")],
+    [/^<tools>/i, inputClass("harness", "Tool guide")],
+    [/^<rules>/i, inputClass("harness", "Rules")],
+    [/^<docs>/i, inputClass("harness", "Harness docs")],
+    [/^<skills>/i, inputClass("tools", "Skills")],
+    [/^<project_context>/i, inputClass("project", "AGENTS.md")],
+    [/^<cwd>/i, inputClass("runtime", "Environment")],
   ],
   splitSystemText: splitTaggedSections,
   sections: {

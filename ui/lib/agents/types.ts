@@ -35,6 +35,9 @@ export interface AgentPlugin {
   textPatterns?: Array<[RegExp, InputClass]>;
   /* User-role text the harness injects; never shown as the typed prompt. */
   injectedUserPrefixes?: string[];
+  /* Prompts that ask the model to summarize the conversation so it can continue
+     from the summary, by lower-case prefix. */
+  compactionPrompts?: string[];
   /* Auxiliary prompts (title generation, …) by lower-case prefix. */
   metadataPrompts?: Array<[string, string]>;
   /* Strip harness wrapping from a typed prompt. */

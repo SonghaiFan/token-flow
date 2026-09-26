@@ -2,6 +2,7 @@ import { asNumber, asObject, type AnyObject } from "../json";
 import type { InputClass } from "../types";
 import type { ProtocolAdapter } from "./types";
 import { promptUsage, responseBody, usageObject } from "./usage";
+import { inputClass } from "../input-categories";
 
 /* Gemini `generateContent`, including Code Assist's `v1internal` wrapper that
    nests the request and response under `request` / `response`. */
@@ -16,9 +17,9 @@ function geminiResponse(body: AnyObject): AnyObject {
 }
 
 function partClass(part: AnyObject): InputClass | undefined {
-  if (part.functionCall !== undefined) return { layer: "conversation", label: "Tool calls" };
-  if (part.functionResponse !== undefined) return { layer: "conversation", label: "Tool results" };
-  if (part.thought === true) return { layer: "conversation", label: "Reasoning" };
+  if (part.functionCall !== undefined) return inputClass("model", "Tool calls");
+  if (part.functionResponse !== undefined) return inputClass("results", "Tool results");
+  if (part.thought === true) return inputClass("model", "Reasoning");
   return undefined;
 }
 

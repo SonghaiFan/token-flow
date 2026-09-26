@@ -56,6 +56,9 @@ Token Flow service
   definition, an instruction section, or a tool result.
 - An **input layer** groups blocks by origin: capabilities, instructions,
   injected context, conversation, and unattributed input.
+- A **category** is one of seven fixed kinds of input, each changed by one
+  driver (see [`token-model.md`](token-model.md)); a block's **detail** is the
+  agent's own name for it, such as `AGENTS.md` or `Permissions`.
 - An **agent** is the originating coding agent, such as Codex or Claude Code.
 - The **turn flow** is the conversation itself: its turns in order, each with
   its input composition, joined by the tokens that carry over.
@@ -70,7 +73,7 @@ may retain legacy names when changing them would add unnecessary risk.
 ## Entry dashboard
 
 The dashboard answers one question: **Which conversation should I open?** Its
-only other action is starting a new one. Show what the user can do now, never
+other actions are starting a new one and comparing several. Show what the user can do now, never
 everything the system supports.
 
 - The page is: title with a one-line purpose and a **Capture** button; a quiet
@@ -86,6 +89,10 @@ everything the system supports.
   exceptions: a green dot for Active, `Empty` and `Error` badges. Complete is
   the default and stays unmarked. A row opens as one object; per-row actions,
   such as delete, live in its `•••` menu.
+- Each row has a checkbox that chooses it for comparison without opening it.
+  While any row is chosen, one bar above the list names the count and offers
+  Clear and **Compare** (enabled from two). Choices persist across search and
+  filters. Compare opens `/dashboard/compare?ids=…`.
 - Start times read as people scan: the time today, `Yesterday`, then the date;
   the exact timestamp is in the title.
 - The app toolbar holds identity, watching state, theme, and a `•••` menu for
@@ -118,9 +125,12 @@ The workspace answers a second question: **What happened in this conversation?**
   Categories. The legend is one line; explanations live in tooltips. Each turn
   row is two lines, its label and tokens, then what it added; cache share,
   duration, and time are in its tooltip.
-- The overview states counts as one quiet line, then where the input went:
+- The overview describes the conversation's own requests (`ui/lib/conversation-scope.ts`):
+  background threads and auxiliary requests are listed after it under
+  *Outside the conversation*, each with its turns and input, and open their
+  first turn. It states counts as one quiet line, then where the input went:
   the unit treemap (one square per fixed token amount, grouped by layer) above
-  the ranked categories (the largest six and the rest), and the few turns
+  the ranked categories, and the few turns
   worth opening. Selecting a square or a category follows it through the flow.
   Do not add instructions for obvious controls.
 - The turn inspector has one toolbar: back, `Turn N of M` with previous and
@@ -141,8 +151,13 @@ The workspace answers a second question: **What happened in this conversation?**
   whose `search_web` call carried its exact query, and reads by that query
   ("↳ `Google stock price GOOGL` Web search · 1 turn · 70"). The branch holding
   the selected turn
-  opens itself. Title generation and empty requests fold into "Auxiliary
-  requests" at the end. Ribbons connect turns of one thread only, so a thread
+  opens itself. Threads the harness runs on its own (plugins mark them
+  `background`: Codex rollout summaries, memory consolidation, Skysight memory)
+  follow the conversation under a *Background* header, one folded row per
+  thread. Title generation and empty requests fold into "Auxiliary
+  requests" at the end. A compaction request is marked `Compact`; a turn whose
+  earlier history was replaced is marked `Rewritten`, with how many earlier
+  items are gone in its tooltip. Ribbons connect turns of one thread only, so a thread
   reads continuously past folded branches. A search lists matching turns flat.
   Agent plugins name threads through `thread()`; turn numbers stay in capture
   order.
@@ -205,8 +220,9 @@ such as the prompt or the tools the turn added, cache share, duration, time,
 and problem state); the right column belongs to the Sankey alone.
 
 Nodes are `Layers` by default (capabilities, instructions, injected context,
-conversation, unattributed) or `Categories` (blocks sharing a label, with
-categories below 3% of the turn's input combined as `Others`). Both keep prompt
+conversation, unattributed) or `Categories` (the seven fixed categories of
+[`token-model.md`](token-model.md), with categories below 3% of the turn's input
+combined as `Others`). Both keep prompt
 order. Every node uses one scale across the conversation, so context growth is
 visible, and each turn's nodes are centered as a compact group. The cached
 portion of a node is hatched from its leading edge, using captured per-block
@@ -237,11 +253,10 @@ along the other direction. Counts are exact and no cell is left empty except in
 the chart's last column or row, so boundaries may step by one cell rather than
 leave gaps. Cached squares are pale and fresh squares solid. There are no borders:
 layers and categories are told apart by color alone. Labels never take area inside the chart. Below it,
-one legend line names the layer color families and the unit, followed by bars
-for the five largest categories (swatch, share bar on one axis, exact tokens,
-share of input, cache rate) and one quiet row totaling the other categories, so
-the list still sums to the whole. Those rows are the keyboard-reachable way to
-focus a category. A category under half a
+one legend line names the layer color families and the unit, followed by one
+bar per category present, largest first (swatch, share bar on one axis, exact
+tokens, share of input), so the list sums to the whole. Those rows are the
+keyboard-reachable way to focus a category. A category under half a
 square still shows as one square and is marked `<`. The legend states the unit.
 
 Selecting a square or a category focuses that category: other squares fade,
@@ -249,6 +264,29 @@ the token flow keeps the category (or its layer, in `Layers` mode) bright in
 every turn, and the overview names the turns where it is largest, or where it
 first appears when its size never changes. Those turns open in the inspector
 with the category selected. Selecting it again, or clearing it, ends the focus.
+
+### Compare conversations
+
+Answers: **How do these agents and models differ on the same work?** It
+compares only each conversation's own requests, including the branches they
+spawned; background and auxiliary work is counted apart. Four panels, each
+reading the conversations as rows in dashboard order:
+
+- *At a glance*: agent and models, turns, input, cache share, output, model time,
+  and background input. The agent cell opens that conversation.
+- *First request*: the first request's input as one bar of categories, which is
+  everything the harness sends before any work happens.
+- *Every turn*: one column per turn in capture order, its height the turn's
+  input, stacked by category; `C` under a column marks a compaction request and
+  `R` a rewritten turn.
+- *By query*: turns grouped by the user query they served (a branch joins the
+  query of the latest top-level turn before it), with input, turns, output,
+  and compactions.
+
+*First request* and *Every turn* each switch between Same scale (one scale
+for every conversation, so sizes compare) and Own scale (each conversation
+fills the width, so its shape reads). Tables scroll inside their panel on
+narrow screens; the page never scrolls sideways.
 
 ### Turn inspector
 
@@ -372,10 +410,11 @@ Never present missing capture data as a successful zero.
 - Categorical visualization colors require a visible legend and stable category
   identity. Do not reuse navigation or status colors as data categories.
 - Token categories use one fixed palette, `ui/lib/category-palette.ts`, in
-  the turn flow, the overview, and the inspector alike. Each category label has an
-  explicit color within its input layer's hue family (capabilities teal,
-  instructions violet, injected context amber, conversation blue, unattributed
-  gray). A new classifier label needs a palette entry; never hash or cycle colors.
+  the turn flow, the overview, and the inspector alike. Each of the seven
+  categories has an explicit color within its input layer's hue family
+  (capabilities teal, instructions violet, injected context amber, conversation
+  blue, unattributed gray). A block's detail takes its category's color, so a new
+  detail label needs no palette entry; never hash or cycle colors.
 - Use sentence case and direct, human-facing labels. Keep protocol paths and
   identifiers in monospace without reformatting their literal values.
 - Compact large measurements in overview contexts, but show exact measurements

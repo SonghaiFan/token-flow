@@ -7,13 +7,15 @@ import type { TurnModel } from "./types";
 
    A thread with a captured parent is a branch of it, placed after the parent's
    last request before the branch began. Threads without one are top-level
-   sections. Auxiliary requests (title generation, empty requests) sit apart. */
+   sections, and background threads (work the harness does on its own) follow
+   them. Auxiliary requests (title generation, empty requests) sit apart. */
 
 export interface ThreadNode {
   id: string;
   label?: string;
   /* The agent's task path, when it was spawned for one. */
   name?: string;
+  background?: boolean;
   /* This thread's own turn indices, in capture order. */
   indices: number[];
   /* Branches, each after a turn index of this thread (-1: before its first turn). */
@@ -22,6 +24,8 @@ export interface ThreadNode {
 
 export interface ThreadTree {
   roots: ThreadNode[];
+  /* Top-level threads the harness runs on its own, after the conversation. */
+  background: ThreadNode[];
   auxiliary: number[];
   /* The thread ids from a root down to the thread of each turn. */
   pathOf: Map<number, string[]>;
@@ -40,11 +44,12 @@ export function threadTree(turns: TurnModel[]): ThreadTree {
       return;
     }
     const id = turn.thread.id;
-    const node = nodes.get(id) || { branches: [], id, indices: [], label: turn.thread.label, name: turn.thread.name, parentId: turn.thread.parentId };
+    const node = nodes.get(id) || { background: turn.thread.background, branches: [], id, indices: [], label: turn.thread.label, name: turn.thread.name, parentId: turn.thread.parentId };
     node.indices.push(index);
     node.label ||= turn.thread.label;
     node.name ||= turn.thread.name;
     node.parentId ||= turn.thread.parentId;
+    node.background ||= turn.thread.background;
     nodes.set(id, node);
   });
 
@@ -67,7 +72,7 @@ export function threadTree(turns: TurnModel[]): ThreadTree {
     for (const branch of node.branches) walk(branch.node, here);
   };
   for (const root of roots) walk(root, []);
-  return { auxiliary, pathOf, roots };
+  return { auxiliary, background: roots.filter((root) => root.background), pathOf, roots: roots.filter((root) => !root.background) };
 }
 
 /* Every turn index in a thread and its branches. */

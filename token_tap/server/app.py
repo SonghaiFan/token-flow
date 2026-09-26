@@ -272,6 +272,7 @@ def create_app(controller) -> FastAPI:
         ("/viewer", "GET", "_handle_index", False),
         ("/dashboard", "GET", "_handle_dashboard_index", False),
         ("/dashboard/session/{session_id}", "GET", "_handle_dashboard_session_detail", False),
+        ("/dashboard/compare", "GET", "_handle_dashboard_index", False),
         ("/assets/{asset_path:path}", "GET", "_handle_static_ui_asset", False),
         ("/dashboard/health", "GET", "_handle_dashboard_health", False),
         ("/dashboard/events", "GET", "_handle_dashboard_sse", True),

@@ -2,12 +2,13 @@ import { asNumber, asObject } from "../json";
 import type { InputClass } from "../types";
 import type { ProtocolAdapter } from "./types";
 import { promptUsage, responseBody, usageObject } from "./usage";
+import { inputClass } from "../input-categories";
 
 const PART_CLASSES: Record<string, InputClass> = {
-  tool_use: { layer: "conversation", label: "Tool calls" },
-  tool_result: { layer: "conversation", label: "Tool results" },
-  thinking: { layer: "conversation", label: "Reasoning" },
-  redacted_thinking: { layer: "conversation", label: "Reasoning" },
+  tool_use: inputClass("model", "Tool calls"),
+  tool_result: inputClass("results", "Tool results"),
+  thinking: inputClass("model", "Reasoning"),
+  redacted_thinking: inputClass("model", "Reasoning"),
 };
 
 function hasBreakpoint(value: unknown): boolean {

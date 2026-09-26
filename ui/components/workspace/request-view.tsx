@@ -6,8 +6,8 @@ import type { SectionView } from "@/lib/agents";
 import { callReadSource, cleanWebText, inferOutputFormat, type OutputFormat, type OutputKind } from "@/lib/output-format";
 import { genericResultParts, scriptToolCalls, type ResultPart, type ToolCall } from "@/lib/tool-results";
 import { toolDeclarations } from "@/lib/protocols";
-import { classifyInput, LAYER_META, LAYER_ORDER, turnPlugins } from "@/lib/token-model";
-import type { InputClass, InputLayer, ItemState, TokenSelection, TraceRecord, TurnModel } from "@/lib/types";
+import { classifyInput, itemStateOf, LAYER_META, LAYER_ORDER, messageParts, turnPlugins } from "@/lib/token-model";
+import type { InputCategory, InputClass, InputLayer, ItemState, TokenSelection, TraceRecord, TurnModel } from "@/lib/types";
 import { categoryColor } from "@/lib/category-palette";
 import { CategorySwatch } from "../charts/category-legend";
 import { activateOnKey, motionMs, useAccordion } from "../motion";
@@ -565,7 +565,7 @@ function splitBlockId(blockId: string): { itemId: string; partIndex: number | nu
 function selectedJsonPath(record: TraceRecord, selection: TokenSelection | null, turnId: string): Array<number | string> | null {
   if (!selection || selection.turnId !== turnId) return null;
   const body = asRecord(record.request?.body);
-  if (selection.label === "Tool definitions") {
+  if (selection.label === "Tool definitions" || selection.category === "tools") {
     if (Array.isArray(body.tools)) return ["trace", "request", "body", "tools"];
     if (Array.isArray(asRecord(body.request).tools)) return ["trace", "request", "body", "request", "tools"];
   }
@@ -738,7 +738,7 @@ function LayerDiffSection({ diff }: { diff: LayerDiff }) {
   return <Disclosure summary={summary}>
     <ul className="divide-y divide-line text-xs">
       {diff.rows.map(({ change, entry }) => <li className="flex items-center gap-2 py-2" key={`${change}-${entry.key}`}>
-        <CategorySwatch label={entry.inputClass.label} layer={entry.inputClass.layer}/>
+        <CategorySwatch category={entry.inputClass.category}/>
         <span className="shrink-0 font-medium">{entry.inputClass.label}</span>
         <Badge tone={CHANGE_TONES[change]}>{change}</Badge>
         <span className="min-w-0 flex-1 truncate text-muted">{entryPreview(entry)}</span>
@@ -870,12 +870,12 @@ function inputEntries(turn: TurnModel, items: unknown[]): InputEntry[] {
   const entries: InputEntry[] = items.flatMap((raw, itemIndex) => {
     const item = asRecord(raw);
     const itemId = textValue(item.id);
-    const state = itemId ? turn.itemStates[itemId] : undefined;
+    const state = itemStateOf(turn, raw);
     const key = itemId || `item-${itemIndex}`;
     if (!isMessagePartItem(item)) {
       return [withView({ blockId: itemId || undefined, inputClass: classifyInput(turn.record, item), item, itemId, key, outputFormat: toolEventKind(item) === "call" ? formatFor(item) : undefined, state, tokens: itemId ? tokens.get(`item:${itemId}`) : undefined })];
     }
-    const parts = inputItemParts(item);
+    const parts = messageParts(agent, item) ?? inputItemParts(item);
     return parts.map((part, partIndex) => {
       const blockId = itemId ? `${itemId}:${partIndex}` : undefined;
       const partTokens = blockId ? tokens.get(blockId) ?? (parts.length === 1 ? tokens.get(`item:${itemId}`) : undefined) : undefined;
@@ -957,11 +957,11 @@ function selectionHits(entries: Array<InputEntry | undefined>, selection: TokenS
 
 /* How a row reflects the shared selection: matching rows take their category color,
    the focused block opens, and everything else in the turn steps back. */
-function rowMarks(entries: Array<InputEntry | undefined>, label: string, layer: InputLayer, selection: TokenSelection | null, turnId: string): { accent?: string; dimmed: boolean; open: boolean } {
+function rowMarks(entries: Array<InputEntry | undefined>, category: InputCategory, selection: TokenSelection | null, turnId: string): { accent?: string; dimmed: boolean; open: boolean } {
   const ids = selectionIds(selection, turnId);
   const matched = entries.some((entry) => entryHit(entry, ids));
   return {
-    accent: matched ? categoryColor(label, layer) : undefined,
+    accent: matched ? categoryColor(category) : undefined,
     dimmed: ids.length > 0 && !matched,
     open: entries.some((entry) => entryHit(entry, selectionIds(selection, turnId, true))),
   };
@@ -1003,12 +1003,12 @@ function RowEnd({ badge, tokens }: { badge?: ReactNode; tokens?: { cached: numbe
 
 /* The row's one leading mark: a category swatch, or an icon tinted with the category
    color. It also links the row's blocks to Composition and Token flow. */
-function LinkSwatch({ blockIds, icon, label, layer, onSelectToken, selection, turnId }: { blockIds: string[]; icon?: IconComponent; label: string; layer: InputLayer; onSelectToken: (selection: TokenSelection | null) => void; selection: TokenSelection | null; turnId: string }) {
+function LinkSwatch({ blockIds, category, icon, label, onSelectToken, selection, turnId }: { blockIds: string[]; category: InputCategory; icon?: IconComponent; label: string; onSelectToken: (selection: TokenSelection | null) => void; selection: TokenSelection | null; turnId: string }) {
   const selectedIds = selection?.turnId === turnId ? selection.blockIds || [selection.blockId] : [];
   const active = blockIds.some((id) => selectedIds.includes(id));
-  const mark = icon ? <RowIcon color={categoryColor(label, layer)} icon={icon}/> : <CategorySwatch label={label} layer={layer}/>;
+  const mark = icon ? <RowIcon color={categoryColor(category)} icon={icon}/> : <CategorySwatch category={category}/>;
   if (!blockIds.length) return <span className="grid size-5 shrink-0 place-items-center">{mark}</span>;
-  return <button aria-label={active ? `Unlink ${label}` : `Link ${label} in the charts`} aria-pressed={active} className={`grid size-5 shrink-0 place-items-center rounded-tag ${active ? "ring-2 ring-ink" : "hover:ring-1 hover:ring-line"}`} onClick={(event) => { event.preventDefault(); event.stopPropagation(); onSelectToken(active ? null : { blockId: blockIds[0], blockIds, label, turnId }); }} title={`${label} · link in charts`} type="button">{mark}</button>;
+  return <button aria-label={active ? `Unlink ${label}` : `Link ${label} in the charts`} aria-pressed={active} className={`grid size-5 shrink-0 place-items-center rounded-tag ${active ? "ring-2 ring-ink" : "hover:ring-1 hover:ring-line"}`} onClick={(event) => { event.preventDefault(); event.stopPropagation(); onSelectToken(active ? null : { blockId: blockIds[0], blockIds, category, label, turnId }); }} title={`${label} · link in charts`} type="button">{mark}</button>;
 }
 
 /* Invisible scroll targets for one or more captured blocks; the row carries the highlight. */
@@ -1100,9 +1100,9 @@ function ToolDefinitionRow({ entry, onSelectToken, selection, tools, turnId }: R
   const total = groups.reduce((sum, group) => sum + group.tools.length, 0);
   const blockIds = entry?.blockId ? [entry.blockId] : [];
   if (!total) return null;
-  const marks = rowMarks([entry], "Tool definitions", "capabilities", selection, turnId);
+  const marks = rowMarks([entry], "tools", selection, turnId);
   return <Row accent={marks.accent} defaultOpen={marks.open} dimmed={marks.dimmed} summary={<>
-    <LinkSwatch blockIds={blockIds} label="Tool definitions" layer="capabilities" onSelectToken={onSelectToken} selection={selection} turnId={turnId}/>
+    <LinkSwatch blockIds={blockIds} category="tools" label="Tool definitions" onSelectToken={onSelectToken} selection={selection} turnId={turnId}/>
     <span className="min-w-0 flex-1 truncate">{groups.map((group, index) => <span key={group.name}>{index ? <span className="text-muted"> · </span> : null}<span className="font-mono text-sm text-ink">{group.name}</span> <span className="text-xs text-muted">{group.tools.length}</span></span>)}</span>
     <RowEnd badge={<StateBadge state={entry?.rowState}/>} tokens={entry?.tokens}/>
   </>}>
@@ -1151,9 +1151,9 @@ function PartRow({ defaultOpen = false, entry, onSelectToken, previous, selectio
   const blockIds = entry.blockId ? [entry.blockId] : [];
   const changes = entry.section?.changes?.(text, previous) || [];
   const badge = changes.length ? <Badge tone="warning">{changes.length === 1 ? `${changes[0]} changed` : `${changes.length} fields changed`}</Badge> : <StateBadge state={entry.rowState}/>;
-  const marks = rowMarks([entry], label, entry.inputClass.layer, selection, turnId);
+  const marks = rowMarks([entry], entry.inputClass.category, selection, turnId);
   return <Row accent={marks.accent} defaultOpen={defaultOpen || marks.open || isFresh(entry)} dimmed={marks.dimmed} hint={isPrompt ? undefined : sectionPreview(entry.section, text)} summary={<>
-    <LinkSwatch blockIds={blockIds} icon={isPrompt ? UserIcon : label === "Assistant messages" ? ChatIcon : undefined} label={label} layer={entry.inputClass.layer} onSelectToken={onSelectToken} selection={selection} turnId={turnId}/>
+    <LinkSwatch blockIds={blockIds} category={entry.inputClass.category} icon={isPrompt ? UserIcon : label === "Assistant messages" ? ChatIcon : undefined} label={label} onSelectToken={onSelectToken} selection={selection} turnId={turnId}/>
     {isPrompt ? <span className="min-w-0 flex-1 truncate font-medium text-ink">{entry.section?.preview?.(text) || previewText(entry.part) || "Empty prompt"}</span> : <>
       <span className="shrink-0 text-ink">{label === "Assistant messages" ? "Assistant" : label}</span>
       <Meta mono={fact.mono}>{fact.value}</Meta>
@@ -1173,9 +1173,9 @@ function ReasoningRow({ defaultOpen = false, entry, onSelectToken, selection, tu
   const encrypted = Boolean(textValue(entry.item.encrypted_content));
   const blockIds = entryBlockIds([entry]);
   const detail = [encrypted ? "encrypted" : "", summary ? previewText(summary) : "no summary"].filter(Boolean).join(" · ");
-  const marks = rowMarks([entry], "Reasoning", "conversation", selection, turnId);
+  const marks = rowMarks([entry], "model", selection, turnId);
   return <Row accent={marks.accent} defaultOpen={defaultOpen || marks.open || isFresh(entry)} dimmed={marks.dimmed} summary={<>
-    <LinkSwatch blockIds={blockIds} icon={SparkleIcon} label="Reasoning" layer="conversation" onSelectToken={onSelectToken} selection={selection} turnId={turnId}/>
+    <LinkSwatch blockIds={blockIds} category="model" icon={SparkleIcon} label="Reasoning" onSelectToken={onSelectToken} selection={selection} turnId={turnId}/>
     <span className="shrink-0 text-ink">Reasoning</span>
     <Meta>{detail}</Meta>
     <RowEnd badge={<StateBadge state={entry.rowState}/>} tokens={entry.tokens}/>
@@ -1228,9 +1228,9 @@ function ToolExchangeRow({ call, defaultOpen = false, inResponse = false, onSele
   const tokens = sumTokens([call, result].filter((entry): entry is InputEntry => Boolean(entry)));
   const blockIds = entryBlockIds([call, result]);
   const state = result?.rowState ?? call?.rowState;
-  const marks = rowMarks([call, result], result && selectionHits([result], selection, turnId) ? "Tool results" : "Tool calls", "conversation", selection, turnId);
+  const marks = rowMarks([call, result], result && selectionHits([result], selection, turnId) ? "results" : "model", selection, turnId);
   return <Row accent={marks.accent} defaultOpen={defaultOpen || marks.open || isFresh(call, result)} dimmed={marks.dimmed} summary={<>
-    <LinkSwatch blockIds={blockIds} icon={TerminalIcon} label={call ? "Tool calls" : "Tool results"} layer="conversation" onSelectToken={onSelectToken} selection={selection} turnId={turnId}/>
+    <LinkSwatch blockIds={blockIds} category={call ? "model" : "results"} icon={TerminalIcon} label={call ? "Tool calls" : "Tool results"} onSelectToken={onSelectToken} selection={selection} turnId={turnId}/>
     <span className="shrink-0 font-mono text-sm text-ink">{namespace ? <span className="text-muted">{namespace}.</span> : null}{presentation?.name || "Tool result"}</span>
     <Meta>{title}</Meta>
     <RowEnd badge={failed ? <Badge tone="danger">failed</Badge> : failedParts ? <Badge tone="danger">{readout && readout.parts.length > 1 ? `${failedParts} failed` : "failed"}</Badge> : <StateBadge state={state}/>} tokens={tokens}/>
@@ -1289,9 +1289,9 @@ function ResultPartsView({ parts }: { parts: ResultReadout["parts"] }) {
 
 function GenericRow({ defaultOpen = false, entry, onSelectToken, selection, turnId }: RowProps & { entry: InputEntry }) {
   const blockIds = entryBlockIds([entry]);
-  const marks = rowMarks([entry], entry.inputClass.label, entry.inputClass.layer, selection, turnId);
+  const marks = rowMarks([entry], entry.inputClass.category, selection, turnId);
   return <Row accent={marks.accent} defaultOpen={defaultOpen || marks.open || isFresh(entry)} dimmed={marks.dimmed} summary={<>
-    <LinkSwatch blockIds={blockIds} label={entry.inputClass.label} layer={entry.inputClass.layer} onSelectToken={onSelectToken} selection={selection} turnId={turnId}/>
+    <LinkSwatch blockIds={blockIds} category={entry.inputClass.category} label={entry.inputClass.label} onSelectToken={onSelectToken} selection={selection} turnId={turnId}/>
     <span className="shrink-0 text-ink">{entry.inputClass.label}</span>
     <Meta mono>{textValue(entry.item.type) || "input"}</Meta>
     <RowEnd badge={<StateBadge state={entry.rowState}/>} tokens={entry.tokens}/>
@@ -1390,9 +1390,10 @@ function groupMinorRows(entries: InputEntry[]): Array<InputEntry | InputEntry[]>
 
 function MinorRowsGroup({ entries, ...props }: RowProps & { entries: InputEntry[] }) {
   const labels = [...new Set(entries.map((entry) => entry.inputClass.label))];
+  const swatches = [...new Map(entries.map((entry) => [entry.inputClass.label, entry.inputClass.category])).entries()];
   const matched = entries.find((entry) => selectionHits([entry], props.selection, props.turnId));
-  return <Row accent={matched ? categoryColor(matched.inputClass.label, matched.inputClass.layer) : undefined} defaultOpen={Boolean(matched)} dimmed={selectionIds(props.selection, props.turnId).length > 0 && !matched} summary={<>
-    <span className="flex shrink-0 -space-x-1">{labels.slice(0, 4).map((label) => <span className="rounded-mark ring-2 ring-panel" key={label}><CategorySwatch label={label} layer={entries[0].inputClass.layer}/></span>)}</span>
+  return <Row accent={matched ? categoryColor(matched.inputClass.category) : undefined} defaultOpen={Boolean(matched)} dimmed={selectionIds(props.selection, props.turnId).length > 0 && !matched} summary={<>
+    <span className="flex shrink-0 -space-x-1">{swatches.slice(0, 4).map(([label, category]) => <span className="rounded-mark ring-2 ring-panel" key={label}><CategorySwatch category={category}/></span>)}</span>
     <span className="min-w-0 flex-1 truncate text-ink">{labels.join(" · ")}</span>
     <RowEnd badge={<StateBadge state={entries.find((entry) => entry.rowState)?.rowState}/>} tokens={sumTokens(entries)}/>
   </>}><NestedRows>{entries.map((entry) => <EntryRow entry={entry} key={entry.key} {...props}/>)}</NestedRows></Row>;
@@ -1467,7 +1468,7 @@ function earlierEnvironment(earlierTurns: TurnModel[]): string | undefined {
     for (const raw of collectInput(turn)) {
       const item = asRecord(raw);
       if (!isMessagePartItem(item)) continue;
-      const parts = inputItemParts(item);
+      const parts = messageParts(turnPlugins(turn).agent, item) ?? inputItemParts(item);
       for (let partIndex = 0; partIndex < parts.length; partIndex += 1) {
         if (classifyInput(turn.record, item, parts[partIndex], partIndex).label === "Environment") return capturedText(parts[partIndex]);
       }
@@ -1535,9 +1536,13 @@ function StructuredRequest({ earlierTurns, onSelectToken, selection, turn }: { e
       const layerEntries = byLayer.get(layer) || [];
       if (layer === "capabilities") {
         if (!layerEntries.length && !topLevelTools.length) return null;
+        // Tool declarations read as a tool list; catalogs (skills, MCP servers, …)
+        // are sections of text like any other.
         return <LayerSection entries={layerEntries} key={layer} layer={layer} selection={selection} turnId={turnId}>
           {topLevelTools.length ? <ToolDefinitionRow tools={topLevelTools} {...rowProps}/> : null}
-          {layerEntries.map((entry) => <ToolDefinitionRow entry={entry} key={entry.key} tools={entry.item.tools} {...rowProps}/>)}
+          {layerEntries.map((entry) => Array.isArray(entry.item.tools)
+            ? <ToolDefinitionRow entry={entry} key={entry.key} tools={entry.item.tools} {...rowProps}/>
+            : <EntryRow entry={entry} key={entry.key} {...rowProps}/>)}
         </LayerSection>;
       }
       if (!layerEntries.length) return null;
@@ -1761,7 +1766,7 @@ function SelectionChip({ onJump, onSelectToken, selection }: { onJump: (selectio
     onJump(next);
   };
   return <span className="tf-control inline-flex max-w-full items-center gap-1.5 rounded-full border border-line bg-canvas pl-2.5 pr-1 text-xs">
-    <CategorySwatch label={selection.label} layer={selection.layer}/>
+    <CategorySwatch category={selection.category} layer={selection.layer}/>
     <span className="max-w-40 truncate font-medium text-ink">{selection.label}{selection.layer ? " layer" : ""}</span>
     {ids.length > 1 ? <span className="flex items-center font-mono text-xs text-muted">
       <button aria-label="Previous matching block" className="grid size-11 place-items-center rounded-full hover:bg-fill-hover hover:text-ink" onClick={() => move(-1)} type="button"><ChevronLeftIcon className="size-4"/></button>
@@ -1884,7 +1889,7 @@ export function RequestView({ jumpToBlock, onNavigate, onSelectToken, selection,
     if (window.matchMedia("(max-width: 1023px)").matches) setListOpen(false);
     const reveal = { nonce: Date.now(), query, turnId: turn.id };
     if (mode !== "raw" && hit.blockId) {
-      const next: TokenSelection = { blockId: hit.blockId, blockIds: [hit.blockId], label: hit.label, turnId: turn.id };
+      const next: TokenSelection = { blockId: hit.blockId, blockIds: [hit.blockId], category: hit.category, label: hit.label, turnId: turn.id };
       onSelectToken(next);
       setLocalJump({ ...next, ...reveal });
     } else {

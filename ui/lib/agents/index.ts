@@ -1,7 +1,7 @@
 import { asObject } from "../json";
 import type { TraceRecord } from "../types";
 import { antigravity } from "./antigravity";
-import { claude } from "./claude";
+import { claude, REMINDER_PATTERN } from "./claude";
 import { codex } from "./codex";
 import { pi } from "./pi";
 import type { AgentPlugin } from "./types";
@@ -20,8 +20,8 @@ export const fallbackAgent: AgentPlugin = {
   clients: [],
   declaredKind: codex.declaredKind,
   contentKinds: codex.contentKinds,
-  textPatterns: [...(codex.textPatterns || []), ...(claude.textPatterns || [])],
-  injectedUserPrefixes: [...(codex.injectedUserPrefixes || []), ...(claude.injectedUserPrefixes || [])],
+  textPatterns: [...(codex.textPatterns || []), REMINDER_PATTERN],
+  injectedUserPrefixes: [...(codex.injectedUserPrefixes || []), "<system-reminder"],
   metadataPrompts: codex.metadataPrompts,
   cleanPrompt: codex.cleanPrompt,
   sections: codex.sections,

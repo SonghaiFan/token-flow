@@ -1,6 +1,7 @@
 import { categoryColor } from "@/lib/category-palette";
-import { classifyInput, LAYER_META } from "@/lib/token-model";
-import type { TraceRecord } from "@/lib/types";
+import { CATEGORY_META } from "@/lib/input-categories";
+import { classifyInput } from "@/lib/token-model";
+import type { InputCategory, TraceRecord } from "@/lib/types";
 
 export type JsonPathPart = number | string;
 
@@ -9,6 +10,7 @@ export interface SearchHit {
   before: string;
   /* The structured-view block that holds the match, when one exists. */
   blockId?: string;
+  category?: InputCategory;
   color: string;
   key: string;
   label: string;
@@ -47,7 +49,7 @@ function isToolEvent(item: UnknownRecord): boolean {
 
 /* Name the part of the request a JSON path points into, in the structured view's
    vocabulary, and the block that opens it there. Paths start at the record root. */
-function locate(record: TraceRecord, parts: JsonPathPart[]): { blockId?: string; color: string; label: string; location: string } {
+function locate(record: TraceRecord, parts: JsonPathPart[]): { blockId?: string; category?: InputCategory; color: string; label: string; location: string } {
   const [scope, section, field, index] = parts.slice(1);
   const body = asRecord(record.request?.body);
   if (scope === "request" && section === "body") {
@@ -65,10 +67,10 @@ function locate(record: TraceRecord, parts: JsonPathPart[]): { blockId?: string;
         inputClass = classifyInput(record, item, part, partIndex);
         blockId = id ? `${id}:${partIndex}` : undefined;
       }
-      return { blockId, color: categoryColor(inputClass.label, inputClass.layer), label: inputClass.label, location: `${LAYER_META[inputClass.layer].title} › ${inputClass.label}` };
+      return { blockId, category: inputClass.category, color: categoryColor(inputClass.category), label: inputClass.label, location: `${CATEGORY_META[inputClass.category].title} › ${inputClass.label}` };
     }
-    if (field === "tools") return { color: categoryColor("Tool definitions", "capabilities"), label: "Tool definitions", location: "Capabilities › Tool definitions" };
-    if (field === "instructions" || field === "system") return { color: categoryColor("Developer instructions", "instructions"), label: "Developer instructions", location: "Instructions › Developer instructions" };
+    if (field === "tools") return { category: "tools", color: categoryColor("tools"), label: "Tool definitions", location: `${CATEGORY_META.tools.title} › Tool definitions` };
+    if (field === "instructions" || field === "system") return { category: "harness", color: categoryColor("harness"), label: "Developer instructions", location: `${CATEGORY_META.harness.title} › Developer instructions` };
     return { color: "", label: "Request settings", location: `Request settings › ${String(field ?? "body")}` };
   }
   if (scope === "request") return { color: "", label: "Request", location: `Request ${String(section ?? "")}`.trim() };

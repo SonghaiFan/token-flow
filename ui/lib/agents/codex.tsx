@@ -7,33 +7,58 @@ import type { InputClass } from "../types";
 const SUBAGENT_LABELS: Record<string, string> = {
   collab_spawn: "Sub-agent",
   guardian: "Guardian review",
+  memory_consolidation: "Memory consolidation",
 };
+
+/* Work Codex does on its own beside a conversation. Memory writing summarizes
+   earlier rollouts (phase 1, one request per rollout, sent under the
+   conversation's own thread id) and consolidates them (phase 2, a sub-agent);
+   Skysight writes memories from recorded activity. Their prompts are written by
+   the harness even where they arrive as user messages. */
+const BACKGROUND_TASKS: Array<[RegExp, string]> = [
+  [/^## Memory Writing Agent: Phase 1\b/, "Rollout summary"],
+  [/^## Memory Writing Agent: Phase 2\b/, "Memory consolidation"],
+  [/^You are a memory writer for Codex Skysight\b/, "Skysight memory"],
+];
+const BACKGROUND_PROMPT = /^(?:## Memory Writing Agent\b|You are a memory writer for Codex\b|Analyze this rollout and produce JSON\b)/;
+
+function leadingTexts(body: Record<string, unknown>): string[] {
+  const input = Array.isArray(body.input) ? body.input : [];
+  return input.slice(0, 12).flatMap((raw) => {
+    const content = asObject(raw).content;
+    return Array.isArray(content) ? content.map((part) => String(asObject(part).text || "").trim()) : [];
+  });
+}
 import type { AgentPlugin } from "./types";
+import { inputClass } from "../input-categories";
 
 /* Codex App labels each content part with `internal_chat_message_metadata_passthrough
    .content_item_kinds[partIndex]`. Prefer that captured evidence; text patterns
    below are only the fallback for requests that do not send it. Generic kinds are
    deliberately absent so their text can still be recognized. */
 const CONTENT_KINDS: Record<string, InputClass> = {
-  "model.base_instructions": { layer: "instructions", label: "Base instructions" },
-  "memories.instructions": { layer: "instructions", label: "Memory" },
-  "host_skills.instructions": { layer: "instructions", label: "Skills" },
-  "permissions.instructions": { layer: "instructions", label: "Permissions" },
-  "collaboration_mode.instructions": { layer: "instructions", label: "Collaboration mode" },
-  "apps.instructions": { layer: "instructions", label: "Apps" },
-  "plugins.usage_instructions": { layer: "instructions", label: "Plugins" },
-  "multi_agent.usage_hint": { layer: "instructions", label: "Multi-agent mode" },
-  "multi_agent.mode_instructions": { layer: "instructions", label: "Multi-agent mode" },
-  "agents_md.instructions": { layer: "context", label: "AGENTS.md" },
-  "environments.environment_context": { layer: "context", label: "Environment" },
-  "plugins.recommendations": { layer: "context", label: "Recommended plugins" },
-  "user.text": { layer: "conversation", label: "User prompt" },
+  "model.base_instructions": inputClass("harness", "Base instructions"),
+  "memories.instructions": inputClass("project", "Memory"),
+  "host_skills.instructions": inputClass("tools", "Skills"),
+  "permissions.instructions": inputClass("harness", "Permissions"),
+  "collaboration_mode.instructions": inputClass("harness", "Collaboration mode"),
+  "apps.instructions": inputClass("tools", "Apps"),
+  "plugins.usage_instructions": inputClass("tools", "Plugins"),
+  "multi_agent.usage_hint": inputClass("harness", "Multi-agent mode"),
+  "multi_agent.mode_instructions": inputClass("harness", "Multi-agent mode"),
+  "agents_md.instructions": inputClass("project", "AGENTS.md"),
+  "environments.environment_context": inputClass("runtime", "Environment"),
+  "plugins.recommendations": inputClass("tools", "Recommended plugins"),
+  "user.text": inputClass("user", "User prompt"),
 };
 
 function codexContentKind(item: Record<string, unknown>, partIndex: number | undefined): string {
   if (partIndex === undefined) return "";
   const kinds = asObject(item.internal_chat_message_metadata_passthrough).content_item_kinds;
-  return Array.isArray(kinds) && typeof kinds[partIndex] === "string" ? kinds[partIndex] : "";
+  const kind = Array.isArray(kinds) && typeof kinds[partIndex] === "string" ? kinds[partIndex] : "";
+  // A background task's prompt is declared as user text; it is the harness's.
+  if (kind === "user.text" && Array.isArray(item.content) && BACKGROUND_PROMPT.test(String(asObject(item.content[partIndex]).text || "").trim())) return "";
+  return kind;
 }
 
 function parseEnvironment(value: string): EnvironmentFacts | null {
@@ -73,7 +98,8 @@ export const codex: AgentPlugin = {
   // Every request names its thread; a sub-agent's requests also name the thread
   // that spawned it and the kind of sub-agent.
   thread(record) {
-    const metadata = asObject(asObject(record.request?.body).client_metadata);
+    const body = asObject(record.request?.body);
+    const metadata = asObject(body.client_metadata);
     const text = (key: string) => (typeof metadata[key] === "string" && metadata[key] ? (metadata[key] as string) : undefined);
     const role = text("x-openai-subagent");
     // A spawned agent carries its task path (`/root/release_docs`) as agent_name in
@@ -85,6 +111,11 @@ export const codex: AgentPlugin = {
     } catch {
       name = undefined;
     }
+    const texts = leadingTexts(body);
+    const task = BACKGROUND_TASKS.find(([pattern]) => texts.some((value) => pattern.test(value)))?.[1];
+    // Each rollout summary is its own request, though it names the conversation's thread.
+    if (task === "Rollout summary") return { id: `rollout:${text("turn_id") || text("thread_id") || ""}`, label: task, background: true };
+    if (task || role === "memory_consolidation") return { id: text("thread_id"), label: task || SUBAGENT_LABELS.memory_consolidation, background: true };
     return {
       id: text("thread_id"),
       parentId: text("x-codex-parent-thread-id"),
@@ -96,8 +127,10 @@ export const codex: AgentPlugin = {
   contentKinds: CONTENT_KINDS,
   textPatterns: [
     [/^You are Codex, an agent/i, CONTENT_KINDS["model.base_instructions"]],
-    [/^You are `?\/root`?, the primary agent/i, { layer: "instructions", label: "Agent role" }],
-    [/^(?:##\s*)?Memory\b|^<Memory>/i, CONTENT_KINDS["memories.instructions"]],
+    [/^You are `?\/root`?, the primary agent/i, inputClass("harness", "Agent role")],
+    [/^## Memory Writing Agent\b|^You are a memory writer for Codex\b/i, CONTENT_KINDS["model.base_instructions"]],
+    [/^Analyze this rollout and produce JSON\b/i, inputClass("harness", "Background task")],
+    [/^(?:##\s*)?Memory\s*(?:\n|$)|^<Memory>/i, CONTENT_KINDS["memories.instructions"]],
     [/^<skills_instructions>/i, CONTENT_KINDS["host_skills.instructions"]],
     [/^<permissions instructions>/i, CONTENT_KINDS["permissions.instructions"]],
     [/^<collaboration_mode>/i, CONTENT_KINDS["collaboration_mode.instructions"]],
@@ -107,9 +140,9 @@ export const codex: AgentPlugin = {
     [/^# AGENTS\.md instructions|^<INSTRUCTIONS>/i, CONTENT_KINDS["agents_md.instructions"]],
     [/^<environment_context>/i, CONTENT_KINDS["environments.environment_context"]],
     [/^<recommended_plugins>/i, CONTENT_KINDS["plugins.recommendations"]],
-    [/^<app-context>/i, { layer: "context", label: "App context" }],
-    [/^<in-app-browser-context/i, { layer: "context", label: "Browser context" }],
-    [/^# Files mentioned by the user:/i, { layer: "context", label: "Mentioned files" }],
+    [/^<app-context>/i, inputClass("runtime", "App context")],
+    [/^<in-app-browser-context/i, inputClass("runtime", "Browser context")],
+    [/^# Files mentioned by the user:/i, inputClass("user", "Mentioned files")],
   ],
   injectedUserPrefixes: [
     "# AGENTS.md instructions",
@@ -120,6 +153,9 @@ export const codex: AgentPlugin = {
     "<in-app-browser-context",
     "# Files mentioned by the user:",
     "<recommended_plugins",
+    "## Memory Writing Agent",
+    "You are a memory writer for Codex",
+    "Analyze this rollout and produce JSON",
   ],
   metadataPrompts: [
     ["generate a concise, single-line task title", "Generate task title"],

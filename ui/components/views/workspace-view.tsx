@@ -1,8 +1,8 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { deleteSession, fetchSessionRecords, fetchTokenEstimates } from "@/lib/api";
-import { buildTurns, estimateTexts, type TokenEstimates } from "@/lib/token-model";
+import { deleteSession, fetchSessionRecords } from "@/lib/api";
+import { useEstimatedTurns } from "@/lib/use-estimated-turns";
 import type { SessionRecordsPayload, TokenSelection } from "@/lib/types";
 import { AppShell, LiveStatus, type LiveState } from "../app-shell";
 import { ConfirmDialog } from "../ui/dialog";
@@ -83,29 +83,13 @@ export function WorkspaceView({ sessionId, onBack }: { sessionId: string; onBack
     };
   }, [sessionId]);
 
-  // Categories render from measured counts first; local estimates for blocks the
-  // provider did not count arrive afterwards and refine them.
-  const measuredTurns = useMemo(() => buildTurns(data?.records || []), [data?.records]);
-  const [estimates, setEstimates] = useState<TokenEstimates>(() => new Map());
-  const [estimatesUnavailable, setEstimatesUnavailable] = useState(false);
-  const pendingTexts = useMemo(() => (estimatesUnavailable ? [] : estimateTexts(measuredTurns).filter((text) => !estimates.has(text))), [estimates, estimatesUnavailable, measuredTurns]);
-  useEffect(() => {
-    if (!pendingTexts.length) return;
-    const controller = new AbortController();
-    fetchTokenEstimates(pendingTexts, controller.signal)
-      .then((counts) => setEstimates((current) => new Map([...current, ...pendingTexts.map((text, index) => [text, counts[index]] as const)])))
-      .catch((reason: Error) => {
-        if (reason.name !== "AbortError") setEstimatesUnavailable(true);
-      });
-    return () => controller.abort();
-  }, [pendingTexts]);
-  const turns = useMemo(() => (estimates.size ? buildTurns(data?.records || [], estimates) : measuredTurns), [data?.records, estimates, measuredTurns]);
+  const turns = useEstimatedTurns(data?.records);
   const selected = useMemo(() => {
     const index = turns.findIndex((item) => item.id === selectedId);
     return index >= 0 ? index : null;
   }, [selectedId, turns]);
   const turn = selected === null ? undefined : turns[selected];
-  const title = data?.session.first_user || "Conversation";
+  const title = turns.find((item) => item.kind === "user" && item.queryText)?.queryText || data?.session.first_user || "Conversation";
   const selectTurn = useCallback((index: number | null) => {
     setSelectedId(index === null ? "" : turns[index]?.id || "");
     setTokenSelection(null);

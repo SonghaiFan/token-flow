@@ -71,6 +71,7 @@ identified and intentionally migrated.
 | `GET /` | In dashboard mode, serves generated dashboard UI; otherwise serves the legacy live viewer. |
 | `GET /dashboard` | Serves generated dashboard UI. |
 | `GET /dashboard/session/{session_id}` | Serves the generated dashboard shell when available; fallback renders the legacy per-session HTML viewer. |
+| `GET /dashboard/compare` | Serves the generated dashboard shell, which compares the conversations named by `ids` (comma-separated session ids). |
 | `GET /assets/{asset_path}` | Serves a compiled Vite asset from `token_tap/static_ui/`; rejects missing paths and traversal. |
 | `GET /_next/{asset_path}` | Serves generated UI assets under `token_tap/web_ui/_next/`; rejects missing paths and traversal. |
 | `GET /viewer` | Legacy live viewer HTML. |

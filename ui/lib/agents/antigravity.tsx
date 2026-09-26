@@ -5,6 +5,7 @@ import { partText, type ResultPart } from "../tool-results";
 import type { InputClass, TraceRecord } from "../types";
 import { SkillList, skillCount, splitTaggedSections, type SkillEntry } from "./prompt-sections";
 import type { AgentPlugin } from "./types";
+import { inputClass } from "../input-categories";
 
 /* Antigravity talks to Code Assist (`v1internal:*generateContent`), which wraps a
    Gemini request with `requestType` and `requestId`:
@@ -19,18 +20,18 @@ import type { AgentPlugin } from "./types";
    (`<ADDITIONAL_METADATA>`, `<USER_SETTINGS_CHANGE>`) in the same text part. */
 
 const SECTION_CLASSES: Array<[string, InputClass]> = [
-  ["identity", { layer: "instructions", label: "Base instructions" }],
-  ["user_information", { layer: "context", label: "Environment" }],
-  ["mcp_servers", { layer: "instructions", label: "MCP servers" }],
-  ["user_rules", { layer: "context", label: "AGENTS.md" }],
-  ["skills", { layer: "instructions", label: "Skills" }],
-  ["subagents", { layer: "instructions", label: "Sub-agents" }],
-  ["messaging", { layer: "instructions", label: "Messaging" }],
-  ["conversation_transcript", { layer: "instructions", label: "Transcripts" }],
-  ["artifacts", { layer: "instructions", label: "Artifacts" }],
-  ["slash_commands", { layer: "instructions", label: "Slash commands" }],
-  ["guidelines", { layer: "instructions", label: "Guidelines" }],
-  ["communication_style", { layer: "instructions", label: "Communication style" }],
+  ["identity", inputClass("harness", "Base instructions")],
+  ["user_information", inputClass("runtime", "Environment")],
+  ["mcp_servers", inputClass("tools", "MCP servers")],
+  ["user_rules", inputClass("project", "AGENTS.md")],
+  ["skills", inputClass("tools", "Skills")],
+  ["subagents", inputClass("tools", "Sub-agents")],
+  ["messaging", inputClass("harness", "Messaging")],
+  ["conversation_transcript", inputClass("harness", "Transcripts")],
+  ["artifacts", inputClass("harness", "Artifacts")],
+  ["slash_commands", inputClass("tools", "Slash commands")],
+  ["guidelines", inputClass("harness", "Guidelines")],
+  ["communication_style", inputClass("harness", "Communication style")],
 ];
 
 interface CodeAssistRequest {

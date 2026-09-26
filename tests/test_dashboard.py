@@ -1357,6 +1357,45 @@ def test_dashboard_preview_skips_auxiliary_auth_records(trace_db, tmp_path: Path
     assert summary["status"] == "complete"
 
 
+def test_dashboard_preview_skips_one_token_quota_probe(trace_db, tmp_path: Path) -> None:
+    trace_path = tmp_path / "2026-05-20" / "trace_110000.jsonl"
+    _write_jsonl(
+        trace_path,
+        [
+            {
+                "timestamp": "2026-05-20T11:00:00+00:00",
+                "turn": 1,
+                "request": {
+                    "method": "POST",
+                    "path": "/v1/messages",
+                    "body": {"model": "claude", "max_tokens": 1, "messages": [{"role": "user", "content": "quota"}]},
+                },
+                "response": {"status": 429, "body": {"type": "error"}},
+            },
+            {
+                "timestamp": "2026-05-20T11:00:01+00:00",
+                "turn": 2,
+                "request": {
+                    "method": "POST",
+                    "path": "/v1/messages",
+                    "body": {
+                        "model": "claude",
+                        "max_tokens": 32000,
+                        "messages": [{"role": "user", "content": "hello"}],
+                    },
+                },
+                "response": {"status": 200, "body": {"content": [{"type": "text", "text": "Hi there."}]}},
+            },
+        ],
+    )
+
+    _seed_legacy(tmp_path)
+    summary = list_trace_sessions()[0]
+
+    assert summary["first_user"] == "hello"
+    assert summary["status"] == "complete"
+
+
 @pytest.mark.asyncio
 async def test_dashboard_server_serves_session_api_and_exports(trace_db, tmp_path: Path) -> None:
     trace_path = tmp_path / "2026-05-20" / "trace_080000.jsonl"
