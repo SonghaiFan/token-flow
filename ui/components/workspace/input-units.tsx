@@ -4,11 +4,12 @@ import { useEffect, useMemo, useRef, useState, type MouseEvent } from "react";
 import { categoryColor, FADED_MARK_OPACITY } from "@/lib/category-palette";
 import { formatNumber } from "@/lib/format";
 import { LAYER_META, LAYER_ORDER } from "@/lib/token-model";
-import type { InputLayer } from "@/lib/types";
+import type { InputCategory, InputLayer } from "@/lib/types";
 import { Swatch } from "../ui/badge";
 
 export interface CategoryTotal {
   cached: number;
+  category: InputCategory;
   /* Some of its tokens are local estimates scaled to a measured total. */
   estimated?: boolean;
   label: string;
@@ -17,6 +18,7 @@ export interface CategoryTotal {
 }
 
 export interface CategoryFocus {
+  category: InputCategory;
   label: string;
   layer: InputLayer;
 }
@@ -116,10 +118,10 @@ export function InputUnits({ categories, focus, onFocus, total }: { categories: 
     return layoutUnits(layers, columns);
   }, [available, layers]);
 
-  const toggle = (category: CategoryTotal) => onFocus(focus?.label === category.label ? null : { label: category.label, layer: category.layer });
+  const toggle = (category: CategoryTotal) => onFocus(focus?.category === category.category ? null : { category: category.category, label: category.label, layer: category.layer });
   const pickFromGrid = (event: MouseEvent<SVGSVGElement>) => {
     const square = (event.target as Element).closest<SVGElement>("[data-category]");
-    const category = categories.find((item) => item.label === square?.dataset.category);
+    const category = categories.find((item) => item.category === square?.dataset.category);
     if (category) toggle(category);
     else onFocus(null);
   };
@@ -130,9 +132,9 @@ export function InputUnits({ categories, focus, onFocus, total }: { categories: 
         <g>
           {layout.regions.flatMap((region) => region.categories.map(({ cells, group }) => {
             const { cached, category } = group;
-            const color = categoryColor(category.label, category.layer);
-            const faded = Boolean(focus) && focus?.label !== category.label;
-            return <g className="t-fade" data-category={category.label} key={`${region.layer}-${category.label}`} style={{ opacity: faded ? FADED_MARK_OPACITY : 1 }}>
+            const color = categoryColor(category.category);
+            const faded = Boolean(focus) && focus?.category !== category.category;
+            return <g className="t-fade" data-category={category.category} key={`${region.layer}-${category.category}`} style={{ opacity: faded ? FADED_MARK_OPACITY : 1 }}>
               <title>{`${category.label}: ${category.estimated ? "≈" : ""}${formatNumber(category.tokens)} tokens, ${formatNumber(category.cached)} cached · ${cells.length} ${cells.length === 1 ? "square" : "squares"}`}</title>
               {cells.map((cell, index) => <rect fill={color} fillOpacity={index < cached ? 0.38 : 1} height={CELL} key={index} rx={2.5} width={CELL} x={cell.x * PITCH} y={cell.y * PITCH}/>)}
             </g>;

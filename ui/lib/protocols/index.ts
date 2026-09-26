@@ -1,3 +1,4 @@
+import type { AnyObject } from "../json";
 import type { TraceRecord } from "../types";
 import { anthropicMessages } from "./anthropic-messages";
 import { chatCompletions } from "./chat-completions";
@@ -22,6 +23,12 @@ const cursorTranscript: ProtocolAdapter = {
 
 /* First match wins. Add a protocol by writing an adapter and listing it here. */
 const PROTOCOLS: ProtocolAdapter[] = [cursorTranscript, openaiResponses, anthropicMessages, gemini, chatCompletions];
+
+/* The tools a request declares, one entry per tool with its `name`. */
+export function toolDeclarations(protocol: ProtocolAdapter | undefined, body: AnyObject): unknown[] {
+  if (protocol?.tools) return protocol.tools(body);
+  return Array.isArray(body.tools) ? body.tools : [];
+}
 
 export function requestPath(record: TraceRecord): string {
   return String(record.request?.path || "").split("?", 1)[0].toLowerCase();

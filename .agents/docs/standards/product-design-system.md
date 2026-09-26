@@ -56,6 +56,9 @@ Token Flow service
   definition, an instruction section, or a tool result.
 - An **input layer** groups blocks by origin: capabilities, instructions,
   injected context, conversation, and unattributed input.
+- A **category** is one of seven fixed kinds of input, each changed by one
+  driver (see [`token-model.md`](token-model.md)); a block's **detail** is the
+  agent's own name for it, such as `AGENTS.md` or `Permissions`.
 - An **agent** is the originating coding agent, such as Codex or Claude Code.
 - The **turn flow** is the conversation itself: its turns in order, each with
   its input composition, joined by the tokens that carry over.
@@ -70,7 +73,7 @@ may retain legacy names when changing them would add unnecessary risk.
 ## Entry dashboard
 
 The dashboard answers one question: **Which conversation should I open?** Its
-only other action is starting a new one. Show what the user can do now, never
+other actions are starting a new one and comparing several. Show what the user can do now, never
 everything the system supports.
 
 - The page is: title with a one-line purpose and a **Capture** button; a quiet
@@ -86,6 +89,10 @@ everything the system supports.
   exceptions: a green dot for Active, `Empty` and `Error` badges. Complete is
   the default and stays unmarked. A row opens as one object; per-row actions,
   such as delete, live in its `•••` menu.
+- Each row has a checkbox that chooses it for comparison without opening it.
+  While any row is chosen, one bar above the list names the count and offers
+  Clear and **Compare** (enabled from two). Choices persist across search and
+  filters. Compare opens `/dashboard/compare?ids=…`.
 - Start times read as people scan: the time today, `Yesterday`, then the date;
   the exact timestamp is in the title.
 - The app toolbar holds identity, watching state, theme, and a `•••` menu for
@@ -118,15 +125,54 @@ The workspace answers a second question: **What happened in this conversation?**
   Categories. The legend is one line; explanations live in tooltips. Each turn
   row is two lines, its label and tokens, then what it added; cache share,
   duration, and time are in its tooltip.
-- The overview states counts as one quiet line, then where the input went:
+- The overview describes the conversation's own requests (`ui/lib/conversation-scope.ts`):
+  background threads and auxiliary requests are listed after it under
+  *Outside the conversation*, each with its turns and input, and open their
+  first turn. It states counts as one quiet line, then where the input went:
   the unit treemap (one square per fixed token amount, grouped by layer) above
-  the ranked categories (the largest six and the rest), and the few turns
+  the ranked categories, and the few turns
   worth opening. Selecting a square or a category follows it through the flow.
   Do not add instructions for obvious controls.
 - The turn inspector has one toolbar: back, `Turn N of M` with previous and
-  next, one view switch (Structured, Raw, Changes), and a search icon that
+  next, one view switch (Timeline, Tokens, Raw, Changes), and a search icon that
   reveals search. Layer sections show their name and tokens; their
   descriptions are tooltips.
+- The flow is organized by agent thread (`ui/lib/threads.ts`), because one
+  capture can hold several: the main conversation, other conversations opened
+  in the same app, scheduled tasks, and sub-agents. Each top-level thread is a
+  section ("Conversation N · first request"; no header when there is one). A
+  thread whose parent was captured (Codex `x-codex-parent-thread-id`) is a
+  branch row after the parent turn it followed, folded to one line and opened
+  on demand. A spawned agent reads by its task (Codex turn metadata
+  `agent_name`, "↳ `release_docs` Sub-agent · 21 turns · 1.1M", full path in the
+  tooltip); a thread without one reads by its kind ("↳ Guardian review · 5 turns
+  · 183K"). A request that names no parent joins one only on captured
+  evidence: an Antigravity `web_search` request is a branch of the agent turn
+  whose `search_web` call carried its exact query, and reads by that query
+  ("↳ `Google stock price GOOGL` Web search · 1 turn · 70"). The branch holding
+  the selected turn
+  opens itself. Threads the harness runs on its own (plugins mark them
+  `background`: Codex rollout summaries, memory consolidation, Skysight memory)
+  follow the conversation under a *Background* header, one folded row per
+  thread. Title generation and empty requests fold into "Auxiliary
+  requests" at the end. A compaction request is marked `Compact`; a turn whose
+  earlier history was replaced is marked `Rewritten`, with how many earlier
+  items are gone in its tooltip. Ribbons connect turns of one thread only, so a thread
+  reads continuously past folded branches. A search lists matching turns flat.
+  Agent plugins name threads through `thread()`; turn numbers stay in capture
+  order.
+- **Timeline** is the inspector's default view: the trajectory up to the turn,
+  in order, as steps by role. *User* is the typed prompt; *Model* is reasoning,
+  messages, and tool calls, each call with its result beneath it; *Tool* is a
+  result whose call came earlier (the usual new input of a turn); *Context* is
+  what the harness injected. Harness instructions and tool definitions belong
+  to *Tokens*, not the timeline. A step is carried when the previous turn in the
+  same thread already had it in its input or its output (by item id, or else by
+  shared prefix compared on content, not on serialization). Carried steps fold
+  into *Earlier* (before the query's prompt) and *So far* (after it); the prompt
+  stays visible; new steps open; the turn's own output closes the timeline as
+  *Response*, with its measured output tokens. Protocols that pack steps into
+  one message's content blocks split them through `ProtocolAdapter.expand`.
 - Stepping between turns updates the inspector in place; it is never replaced
   or slid out. Rows keep their identity (captured item id, else position), so
   what persists stays put with its open state, and only rows the new turn
@@ -174,8 +220,9 @@ such as the prompt or the tools the turn added, cache share, duration, time,
 and problem state); the right column belongs to the Sankey alone.
 
 Nodes are `Layers` by default (capabilities, instructions, injected context,
-conversation, unattributed) or `Categories` (blocks sharing a label, with
-categories below 3% of the turn's input combined as `Others`). Both keep prompt
+conversation, unattributed) or `Categories` (the seven fixed categories of
+[`token-model.md`](token-model.md), with categories below 3% of the turn's input
+combined as `Others`). Both keep prompt
 order. Every node uses one scale across the conversation, so context growth is
 visible, and each turn's nodes are centered as a compact group. The cached
 portion of a node is hatched from its leading edge, using captured per-block
@@ -206,11 +253,10 @@ along the other direction. Counts are exact and no cell is left empty except in
 the chart's last column or row, so boundaries may step by one cell rather than
 leave gaps. Cached squares are pale and fresh squares solid. There are no borders:
 layers and categories are told apart by color alone. Labels never take area inside the chart. Below it,
-one legend line names the layer color families and the unit, followed by bars
-for the five largest categories (swatch, share bar on one axis, exact tokens,
-share of input, cache rate) and one quiet row totaling the other categories, so
-the list still sums to the whole. Those rows are the keyboard-reachable way to
-focus a category. A category under half a
+one legend line names the layer color families and the unit, followed by one
+bar per category present, largest first (swatch, share bar on one axis, exact
+tokens, share of input), so the list sums to the whole. Those rows are the
+keyboard-reachable way to focus a category. A category under half a
 square still shows as one square and is marked `<`. The legend states the unit.
 
 Selecting a square or a category focuses that category: other squares fade,
@@ -218,6 +264,29 @@ the token flow keeps the category (or its layer, in `Layers` mode) bright in
 every turn, and the overview names the turns where it is largest, or where it
 first appears when its size never changes. Those turns open in the inspector
 with the category selected. Selecting it again, or clearing it, ends the focus.
+
+### Compare conversations
+
+Answers: **How do these agents and models differ on the same work?** It
+compares only each conversation's own requests, including the branches they
+spawned; background and auxiliary work is counted apart. Four panels, each
+reading the conversations as rows in dashboard order:
+
+- *At a glance*: agent and models, turns, input, cache share, output, model time,
+  and background input. The agent cell opens that conversation.
+- *First request*: the first request's input as one bar of categories, which is
+  everything the harness sends before any work happens.
+- *Every turn*: one column per turn in capture order, its height the turn's
+  input, stacked by category; `C` under a column marks a compaction request and
+  `R` a rewritten turn.
+- *By query*: turns grouped by the user query they served (a branch joins the
+  query of the latest top-level turn before it), with input, turns, output,
+  and compactions.
+
+*First request* and *Every turn* each switch between Same scale (one scale
+for every conversation, so sizes compare) and Own scale (each conversation
+fills the width, so its shape reads). Tables scroll inside their panel on
+narrow screens; the page never scrolls sideways.
 
 ### Turn inspector
 
@@ -272,12 +341,39 @@ summary, and state visible so disclosure never becomes information loss.
 ### Structured machine output
 
 In the turn inspector, parse valid JSON embedded in captured text into readable
-objects and lists. Preserve any warning or truncation preamble as visible
+objects and lists. Render structured values by size, not by shape: a
+single-field object shows its value, items that fit on one line stay inline,
+short lists are numbered rows, objects are a plain key/value grid, and only a
+large or deeply nested element folds, with a summary that previews its content
+rather than "Item N". URLs read as links without the scheme. Preserve any warning or truncation preamble as visible
 metadata. Tool-definition collections use one collapsed entry per captured tool:
 show its name and plain-language summary first, then place its declaration and
 additional fields in nested disclosures. Large collections render lazily. When
 captured JSON is malformed, recover only a known, unambiguous structure; do not
 invent missing fields. Raw JSON always retains the exact captured evidence.
+
+A tool result is shown the way the call that produced it declares, never by
+guessing from how the output looks (`ui/lib/output-format.ts`). A command that
+prints one file (`cat`, `sed -n`, `head`, `tail`, optionally piped through
+those) or a read tool takes the file's type: `.md` renders as Markdown, source
+reads as code, `.diff`/`.patch` as a diff. `git diff`/`git show` render as a
+diff; web tools read as prose with citation markers removed. Compound
+commands, listings, searches, and anything without evidence stay plain text.
+Only JSON that parses and complete HTML documents are recognized from content.
+Each result names its evidence ("From README.md") and offers a switch between
+the inferred view, Plain, and Markdown. Agent plugins may describe their own
+tools through `outputFormat`. Only output that is JSON from its first character
+reads as structured; JSON printed partway through other output is text.
+
+A result captured as several parts is several results, never one joined text
+(`ui/lib/tool-results.ts`). Each part reads full width under one line: its
+number, the nested call that produced it and that call's command when the call
+names it, then only exceptions and facts worth a glance (a failure, a
+truncation, a long wall time, a session still running). Agent plugins unwrap
+their harness's payload envelopes through `resultParts` (Codex `exec`:
+`{i, status, value}` settled results, `exec_command` chunks, MCP content;
+Antigravity: `Created At`/`Completed At` timing and tool errors), so the
+output itself is the body, not a nested value grid.
 
 The turn inspector has two evidence-preserving representations. `Structured`
 uses domain-specific renderers for known trace shapes. `Raw` preserves the exact
@@ -314,10 +410,11 @@ Never present missing capture data as a successful zero.
 - Categorical visualization colors require a visible legend and stable category
   identity. Do not reuse navigation or status colors as data categories.
 - Token categories use one fixed palette, `ui/lib/category-palette.ts`, in
-  the turn flow, the overview, and the inspector alike. Each category label has an
-  explicit color within its input layer's hue family (capabilities teal,
-  instructions violet, injected context amber, conversation blue, unattributed
-  gray). A new classifier label needs a palette entry; never hash or cycle colors.
+  the turn flow, the overview, and the inspector alike. Each of the seven
+  categories has an explicit color within its input layer's hue family
+  (capabilities teal, instructions violet, injected context amber, conversation
+  blue, unattributed gray). A block's detail takes its category's color, so a new
+  detail label needs no palette entry; never hash or cycle colors.
 - Use sentence case and direct, human-facing labels. Keep protocol paths and
   identifiers in monospace without reformatting their literal values.
 - Compact large measurements in overview contexts, but show exact measurements

@@ -3,19 +3,25 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { categoryColor, FADED_MARK_OPACITY } from "@/lib/category-palette";
 import { formatCompact, formatDuration, formatNumber, formatTime } from "@/lib/format";
+import { CATEGORY_META, CATEGORY_ORDER } from "@/lib/input-categories";
 import { LAYER_META, LAYER_ORDER, layerTotals } from "@/lib/token-model";
+import { threadIndices, threadTree, type ThreadNode } from "@/lib/threads";
 import { queryGroups } from "@/lib/turn-order";
-import type { InputLayer, TokenSelection, TurnModel } from "@/lib/types";
+import type { InputCategory, InputLayer, TokenSelection, TurnModel } from "@/lib/types";
 import { Badge, Swatch } from "../ui/badge";
 import { IconButton } from "../ui/button";
 import { EmptyState } from "../ui/feedback";
 import { SearchField } from "../ui/field";
-import { SearchIcon } from "../ui/icons";
+import { ChevronRightIcon, SearchIcon } from "../ui/icons";
 import { Segmented } from "../ui/segmented";
+import type { CategoryFocus } from "./input-units";
 
 /* Fixed geometry keeps every Sankey node and ribbon aligned with its HTML row. */
 const ROW = 56;
 const HEADER = 30;
+const THREAD_HEADER = 40;
+const BRANCH = 36;
+const AUXILIARY = "auxiliary";
 const NODE_TOP = 20;
 const NODE = 14;
 const GAP = 6;
@@ -26,13 +32,17 @@ const SEARCH_THRESHOLD = 7;
 type Granularity = "layers" | "categories";
 
 type FlowItem =
+  | { kind: "thread"; key: string; label: string; top: number }
   | { kind: "query"; key: string; label: string; top: number }
-  | { kind: "turn"; key: string; index: number; top: number };
+  | { kind: "branch"; depth: number; detail: string; key: string; label: string; name?: string; open: boolean; threadId: string; top: number }
+  | { kind: "turn"; depth: number; key: string; index: number; top: number };
 
 interface NodeData {
   aggregate?: boolean;
   blockIds: string[];
   cached: number;
+  /* The category a Categories node stands for; absent for layers and Others. */
+  category?: InputCategory;
   color: string;
   estimated?: boolean;
   key: string;
@@ -52,9 +62,10 @@ interface FlowRow {
   top: number;
 }
 
-/* Nodes for one turn. Layers: one node per input layer. Categories: blocks sharing a
-   label, with categories under 3% of the turn's input combined as Others. Both keep
-   prompt order (capabilities, instructions, context, conversation, unattributed). */
+/* Nodes for one turn. Layers: one node per input layer. Categories: one node per
+   input category, with categories under 3% of the turn's input combined as Others.
+   Both keep prompt order (capabilities, instructions, context, conversation,
+   unattributed). */
 function nodesFor(turn: TurnModel, granularity: Granularity): NodeData[] {
   if (granularity === "layers") {
     const totals = layerTotals(turn);
@@ -69,21 +80,21 @@ function nodesFor(turn: TurnModel, granularity: Granularity): NodeData[] {
       tokens: totals[layer].tokens,
     }] : []);
   }
-  const grouped = new Map<string, NodeData>();
+  const grouped = new Map<InputCategory, NodeData>();
   for (const category of turn.categories) {
-    const layer = category.layer || "unknown";
-    const current = grouped.get(category.label) || { blockIds: [], cached: 0, color: categoryColor(category.label, layer), key: category.label, label: category.label, layer, tokens: 0 };
-    grouped.set(category.label, { ...current, blockIds: [...current.blockIds, category.id], cached: current.cached + category.cached, estimated: current.estimated || category.estimated, tokens: current.tokens + category.tokens });
+    const meta = CATEGORY_META[category.category];
+    const current = grouped.get(category.category) || { blockIds: [], cached: 0, category: category.category, color: categoryColor(category.category), key: category.category, label: meta.title, layer: meta.layer, tokens: 0 };
+    grouped.set(category.category, { ...current, blockIds: [...current.blockIds, category.id], cached: current.cached + category.cached, estimated: current.estimated || category.estimated, tokens: current.tokens + category.tokens });
   }
   const threshold = turn.input * MIN_SHARE;
   const all = [...grouped.values()];
-  const kept = all.filter((node) => node.tokens >= threshold).sort((left, right) => LAYER_ORDER.indexOf(left.layer) - LAYER_ORDER.indexOf(right.layer) || right.tokens - left.tokens);
+  const kept = all.filter((node) => node.tokens >= threshold).sort((left, right) => CATEGORY_ORDER.indexOf(left.category as InputCategory) - CATEGORY_ORDER.indexOf(right.category as InputCategory));
   const small = all.filter((node) => node.tokens < threshold);
   if (small.length) kept.push({
     aggregate: true,
     blockIds: small.flatMap((node) => node.blockIds),
     cached: small.reduce((sum, node) => sum + node.cached, 0),
-    color: categoryColor("Others"),
+    color: categoryColor("others"),
     estimated: small.some((node) => node.estimated),
     key: "Others",
     label: "Others",
@@ -120,7 +131,7 @@ function selectedIds(selection: TokenSelection | null, turn: TurnModel): string[
   return selection?.turnId === turn.id ? selection.blockIds || [selection.blockId] : [];
 }
 
-export function TurnFlow({ focus = null, onSelectNode, onSelectTurn, selected, selection, turns }: { focus?: { label: string; layer: InputLayer } | null; onSelectNode: (index: number, selection: TokenSelection) => void; onSelectTurn: (index: number | null) => void; selected: number | null; selection: TokenSelection | null; turns: TurnModel[] }) {
+export function TurnFlow({ focus = null, onSelectNode, onSelectTurn, selected, selection, turns }: { focus?: CategoryFocus | null; onSelectNode: (index: number, selection: TokenSelection) => void; onSelectTurn: (index: number | null) => void; selected: number | null; selection: TokenSelection | null; turns: TurnModel[] }) {
   const [query, setQuery] = useState("");
   const [searchOpen, setSearchOpen] = useState(false);
   const [granularity, setGranularity] = useState<Granularity>("layers");
@@ -129,8 +140,23 @@ export function TurnFlow({ focus = null, onSelectNode, onSelectTurn, selected, s
   const canvasRef = useRef<HTMLDivElement | null>(null);
   const rowRefs = useRef(new Map<number, HTMLButtonElement>());
   const normalized = query.trim().toLowerCase();
-  const visible = useMemo(() => turns.map((_, index) => index).filter((index) => matchesTurn(turns[index], normalized)), [normalized, turns]);
-  const groups = useMemo(() => queryGroups(turns), [turns]);
+  const tree = useMemo(() => threadTree(turns), [turns]);
+  // Branches open on demand; the branch holding the selected turn is always open.
+  const [openThreads, setOpenThreads] = useState<Set<string>>(() => new Set());
+  const openIds = useMemo(() => {
+    const ids = new Set(openThreads);
+    if (selected !== null) {
+      for (const id of tree.pathOf.get(selected) || []) ids.add(id);
+      if (tree.auxiliary.includes(selected)) ids.add(AUXILIARY);
+    }
+    return ids;
+  }, [openThreads, selected, tree]);
+  const toggleThread = (id: string) => setOpenThreads((current) => {
+    const next = new Set(current);
+    if (next.has(id)) next.delete(id);
+    else next.add(id);
+    return next;
+  });
   const totalInput = useMemo(() => turns.reduce((sum, turn) => sum + turn.input, 0), [turns]);
 
   // The diagram is drawn in real pixels so hatching, labels, and strokes stay undistorted.
@@ -142,25 +168,77 @@ export function TurnFlow({ focus = null, onSelectNode, onSelectTurn, selected, s
     return () => observer.disconnect();
   }, []);
 
+  /* Rows by thread: each top-level thread is a section, a sub-agent thread is a
+     branch row after the parent turn it followed, and auxiliary requests sit at
+     the end. A search lists matching turns flat, in capture order. */
   const layout = useMemo(() => {
-    const groupOf = new Map<number, { id: string; label: string }>();
-    for (const group of groups) for (const index of group.indices) groupOf.set(index, group);
-    const showHeaders = !normalized && groups.length > 1;
     const items: FlowItem[] = [];
     let top = 0;
-    let lastGroup = "";
-    for (const index of visible) {
-      const group = groupOf.get(index);
-      if (showHeaders && group && group.id !== lastGroup) {
-        items.push({ key: `query-${group.id}-${index}`, kind: "query", label: group.label, top });
-        top += HEADER;
-        lastGroup = group.id;
-      }
-      items.push({ index, key: turns[index].id, kind: "turn", top });
+    const pushTurn = (index: number, depth: number) => {
+      items.push({ depth, index, key: turns[index].id, kind: "turn", top });
       top += ROW;
+    };
+    if (normalized) {
+      turns.forEach((turn, index) => {
+        if (matchesTurn(turn, normalized)) pushTurn(index, 0);
+      });
+      return { height: top, items };
+    }
+    const inputOf = (indices: number[]) => indices.reduce((sum, index) => sum + turns[index].input, 0);
+    const pushBranch = (id: string, label: string, indices: number[], depth: number, note?: string, name?: string) => {
+      const open = openIds.has(id);
+      const counts = `${indices.length} ${indices.length === 1 ? "turn" : "turns"} · ${formatCompact(inputOf(indices))}`;
+      // A spawned agent reads by its task; the kind of thread moves into the detail.
+      items.push({ depth, detail: note || (name ? `${label} · ${counts}` : counts), key: `branch-${id}`, kind: "branch", label, name, open, threadId: id, top });
+      top += BRANCH;
+      return open;
+    };
+    const emit = (node: ThreadNode, depth: number) => {
+      // Query headers mark a new user request in a top-level thread.
+      const groupOf = new Map<number, { id: string; label: string }>();
+      if (depth === 0) {
+        const groups = queryGroups(node.indices.map((index) => turns[index]));
+        if (groups.length > 1) for (const group of groups) for (const position of group.indices) groupOf.set(node.indices[position], group);
+      }
+      const branchesAfter = (index: number) => node.branches.filter((branch) => branch.after === index);
+      const emitBranch = ({ node: child }: { node: ThreadNode }) => {
+        if (pushBranch(child.id, child.label || "Thread", threadIndices(child), depth, undefined, child.name)) emit(child, depth + 1);
+      };
+      branchesAfter(-1).forEach(emitBranch);
+      let lastGroup = "";
+      for (const index of node.indices) {
+        const group = groupOf.get(index);
+        if (group && group.id !== lastGroup) {
+          items.push({ key: `query-${group.id}`, kind: "query", label: group.label, top });
+          top += HEADER;
+          lastGroup = group.id;
+        }
+        pushTurn(index, depth);
+        branchesAfter(index).forEach(emitBranch);
+      }
+    };
+    tree.roots.forEach((root, position) => {
+      if (tree.roots.length > 1) {
+        const asked = root.indices.map((index) => turns[index].queryText).find(Boolean);
+        items.push({ key: `thread-${root.id}`, kind: "thread", label: `Conversation ${position + 1}${asked ? ` · ${asked}` : ""}`, top });
+        top += THREAD_HEADER;
+      }
+      emit(root, 0);
+    });
+    // Work the harness did on its own reads after the conversation, one folded row per thread.
+    if (tree.background.length) {
+      items.push({ key: "thread-background", kind: "thread", label: "Background", top });
+      top += THREAD_HEADER;
+      tree.background.forEach((node) => {
+        if (pushBranch(node.id, node.label || "Background task", threadIndices(node), 0, undefined, node.name)) emit(node, 1);
+      });
+    }
+    if (tree.auxiliary.length && pushBranch(AUXILIARY, "Auxiliary requests", tree.auxiliary, 0, `${tree.auxiliary.length} · title generation and empty requests`)) {
+      for (const index of tree.auxiliary) pushTurn(index, 1);
     }
     return { height: top, items };
-  }, [groups, normalized, turns, visible]);
+  }, [normalized, openIds, tree, turns]);
+  const visible = useMemo(() => layout.items.flatMap((item) => (item.kind === "turn" ? [item.index] : [])), [layout.items]);
 
   const graph = useMemo(() => {
     // Auxiliary requests such as title generation stay in the list but outside the flow.
@@ -246,7 +324,7 @@ export function TurnFlow({ focus = null, onSelectNode, onSelectTurn, selected, s
   // The selected node is outlined; the same layer or category stays bright in every
   // turn so its whole path through the conversation reads at once. The rest fades.
   // Without a selected node, a category focused in the overview does the same.
-  const focusKey = focus ? (granularity === "layers" ? focus.layer : focus.label) : "";
+  const focusKey = focus ? (granularity === "layers" ? focus.layer : focus.category) : "";
   const relatedKeys = selectedNodes
     ? new Set(graph.rows.flatMap((row) => row.nodes.filter((node) => isActive(row, node)).map((node) => node.key)))
     : new Set(focusKey ? [focusKey] : []);
@@ -254,7 +332,7 @@ export function TurnFlow({ focus = null, onSelectNode, onSelectTurn, selected, s
   const pick = (row: FlowRow, node: PlacedNode) => {
     const turn = turns[row.index];
     const layerNode = granularity === "layers" && node.layer !== "unknown";
-    onSelectNode(row.index, { blockId: node.blockIds[0] || "", blockIds: node.blockIds, label: node.label, layer: layerNode ? node.layer : undefined, turnId: turn.id });
+    onSelectNode(row.index, { blockId: node.blockIds[0] || "", blockIds: node.blockIds, category: node.category, label: node.label, layer: layerNode ? node.layer : undefined, turnId: turn.id });
   };
 
   return <aside aria-label="Token flow" className="min-w-0 border-b border-line bg-panel [--text-w:8.5rem] sm:[--text-w:10rem] lg:tf-panel lg:sticky lg:top-[calc(var(--tf-toolbar-height)+0.75rem)] lg:flex lg:h-[calc(100dvh-var(--tf-toolbar-height)-1.5rem)] lg:flex-col">
@@ -266,7 +344,7 @@ export function TurnFlow({ focus = null, onSelectNode, onSelectTurn, selected, s
           <span className="hidden truncate font-mono text-xs text-muted sm:inline">{formatCompact(totalInput)} input</span>
         </button>
         {turns.length >= SEARCH_THRESHOLD ? <IconButton active={searchOpen || Boolean(query)} aria-expanded={searchOpen} label="Search turns" onClick={() => { const next = !searchOpen; setSearchOpen(next); if (!next) setQuery(""); else window.requestAnimationFrame(() => searchRef.current?.focus()); }} title="Search turns (/)"><SearchIcon/></IconButton> : null}
-        <Segmented compact label="Flow nodes" onChange={setGranularity} options={[["layers", "Layers"], ["categories", "Categories"]]} value={granularity}/>
+        <Segmented label="Flow nodes" onChange={setGranularity} options={[["layers", "Layers"], ["categories", "Categories"]]} value={granularity}/>
       </div>
       {searchOpen || query ? <div className="flex"><SearchField autoFocus={!query} inputRef={searchRef} label="Search turns" onChange={setQuery} onKeyDown={(event) => { if (event.key === "Escape") { event.stopPropagation(); setQuery(""); setSearchOpen(false); } }} placeholder="Search turns" value={query}/></div> : null}
       <div aria-label="Legend" className="flex flex-wrap gap-x-3 gap-y-1 pb-0.5 text-xs text-muted" role="list">
@@ -280,7 +358,18 @@ export function TurnFlow({ focus = null, onSelectNode, onSelectTurn, selected, s
       <div className="relative" style={{ height: layout.height }}>
         <ol>
           {layout.items.map((item) => {
+            if (item.kind === "thread") return <li className="tf-inset absolute inset-x-0 flex items-end truncate border-t border-line pb-1.5 text-sm font-semibold text-ink" key={item.key} style={{ height: THREAD_HEADER, top: item.top }} title={item.label}>{item.label}</li>;
             if (item.kind === "query") return <li className="tf-inset absolute inset-x-0 flex items-end truncate pb-1 text-xs font-medium text-muted" key={item.key} style={{ height: HEADER, top: item.top }} title={item.label}>{item.label}</li>;
+            if (item.kind === "branch") return <li className="absolute inset-x-0" key={item.key} style={{ height: BRANCH, top: item.top }}>
+              <button aria-expanded={item.open} className="tf-focus-inset tf-inset flex h-full w-full items-center gap-1.5 border-t border-line text-left text-xs text-muted transition-colors hover:bg-fill-hover hover:text-ink" onClick={() => toggleThread(item.threadId)} type="button">
+                {item.depth ? <span aria-hidden="true" className="shrink-0" style={{ width: item.depth * 14 }}/> : null}
+                <ChevronRightIcon className={`size-3.5 shrink-0 transition-transform ${item.open ? "rotate-90" : ""}`}/>
+                {item.name
+                  ? <span className="shrink-0 text-ink" title={item.name}>↳ <span className="font-mono font-medium">{item.name.startsWith("/") ? item.name.split("/").pop() : item.name}</span></span>
+                  : <span className="shrink-0 font-medium text-ink">↳ {item.label}</span>}
+                <span className="truncate">{item.detail}</span>
+              </button>
+            </li>;
             const turn = turns[item.index];
             const active = item.index === selected;
             const failed = turn.status >= 400;
@@ -297,10 +386,12 @@ export function TurnFlow({ focus = null, onSelectNode, onSelectTurn, selected, s
               >
                 {/* All row text stays in the left column; the right column belongs to the Sankey,
                     whose overlay starts at this row's inset plus the text column and gap. */}
-                <span className="min-w-0 pt-2.5">
+                <span className="min-w-0 pt-2.5" style={item.depth ? { paddingLeft: item.depth * 14 } : undefined}>
                   <span className="flex items-center gap-1.5">
                     <strong className="whitespace-nowrap text-sm">Turn {turn.label}</strong>
                     {auxiliary ? <span className="hidden sm:inline-flex"><Badge title="Auxiliary request in its own thread, outside the flow">Meta</Badge></span> : null}
+                    {turn.kind === "compaction" ? <span className="hidden sm:inline-flex"><Badge title="The harness asked the model to summarize the conversation so far">Compact</Badge></span> : null}
+                    {turn.change?.rewritten ? <span className="hidden sm:inline-flex"><Badge title={`The conversation before this turn was replaced${turn.change.removed ? `; ${turn.change.removed} earlier ${turn.change.removed === 1 ? "item is" : "items are"} gone` : ""}`} tone="warning">Rewritten</Badge></span> : null}
                     {failed ? <Badge mono tone="danger">HTTP {turn.status}</Badge> : null}
                     <b className="ml-auto font-mono text-xs font-semibold">{formatCompact(turn.input)}</b>
                   </span>

@@ -4,7 +4,7 @@ import { useEffect, useLayoutEffect, useRef } from "react";
 
 /* One view switch for the content beside it (Structured, Raw, Changes). The active
    pill slides between options (Tabs sliding). */
-export function Segmented<T extends string>({ compact = false, label, onChange, options, value }: { compact?: boolean; label: string; onChange: (value: T) => void; options: Array<[T, string]>; value: T }) {
+export function Segmented<T extends string>({ label, onChange, options, value }: { label: string; onChange: (value: T) => void; options: Array<[T, string]>; value: T }) {
   const barRef = useRef<HTMLDivElement | null>(null);
   const pillRef = useRef<HTMLSpanElement | null>(null);
   const placedRef = useRef(false);
@@ -41,8 +41,8 @@ export function Segmented<T extends string>({ compact = false, label, onChange, 
     return () => observer.disconnect();
   }, []);
 
-  return <div aria-label={label} className="t-tabs tf-control flex items-center rounded-control bg-canvas text-sm font-medium [--tabs-inset:2px]" ref={barRef} role="group">
-    <span aria-hidden="true" className="t-tabs-pill rounded-[calc(var(--tf-radius-control)-var(--tabs-inset))] bg-panel shadow-raised" ref={pillRef}/>
-    {options.map(([item, text]) => <button aria-pressed={value === item} className={`t-tab min-h-11 rounded-[calc(var(--tf-radius-control)-var(--tabs-inset))] ${compact ? "px-2.5" : "px-3"} ${value === item ? "text-ink" : "text-muted hover:text-ink"}`} key={item} onClick={() => onChange(item)} type="button">{text}</button>)}
+  return <div aria-label={label} className="t-tabs tf-control grid grid-flow-col auto-cols-fr items-center rounded-control bg-canvas p-0.5 text-sm font-medium [--tabs-inset:2px]" ref={barRef} role="group">
+    <span aria-hidden="true" className="t-tabs-pill rounded-[calc(var(--tf-radius-control)-var(--tabs-inset))] border border-line bg-panel shadow-raised" ref={pillRef}/>
+    {options.map(([item, text]) => <button aria-pressed={value === item} className={`t-tab min-h-11 w-full rounded-[calc(var(--tf-radius-control)-var(--tabs-inset))] px-3 ${value === item ? "text-ink" : "text-muted hover:text-ink"}`} key={item} onClick={() => onChange(item)} type="button">{text}</button>)}
   </div>;
 }

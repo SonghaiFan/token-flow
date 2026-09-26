@@ -25,7 +25,7 @@ from token_tap.storage.trace_store import SessionQuery, TraceStore, get_trace_st
 _DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 
 CLIENT_LABELS = dashboard_labels()
-DASHBOARD_SUMMARY_VERSION = 8
+DASHBOARD_SUMMARY_VERSION = 10
 VALID_SESSION_STATUSES = {"active", "complete", "error", "empty"}
 _REDACTED_VALUE = "REDACTED"
 _SENSITIVE_KEY_NAMES = {
@@ -630,7 +630,9 @@ def _summarize_session(
     elif not records:
         resolved_status = "empty"
     else:
-        resolved_status = status if status in {"active", "complete", "error", "empty"} else "complete"
+        # A stored "error" is an earlier verdict on these same records; only the
+        # records decide it, so a rule that now reads them as clean clears it.
+        resolved_status = status if status in {"active", "complete", "empty"} else "complete"
 
     error_display_records = error_records or (auxiliary_error_records if has_error else [])
     preview_records = _preview_records(records)
@@ -1099,7 +1101,7 @@ def _is_auxiliary_record(record: dict[str, Any]) -> bool:
     if _is_protobuf_noise_record(record) or is_non_model_request(record):
         return True
     path = _record_path(record).lower()
-    if is_model_probe_path(path):
+    if is_model_probe_path(path) or _is_one_token_probe(record):
         return True
     auxiliary_fragments = (
         "/token",
@@ -1120,6 +1122,15 @@ def _is_auxiliary_record(record: dict[str, Any]) -> bool:
         "/v1/traces",
     )
     return any(fragment in path for fragment in auxiliary_fragments)
+
+
+def _is_one_token_probe(record: dict[str, Any]) -> bool:
+    """A request capped at one output token checks access or quota; it is not a turn."""
+    request = record.get("request")
+    body = request.get("body") if isinstance(request, dict) else None
+    if not isinstance(body, dict):
+        return False
+    return any(body.get(key) == 1 for key in ("max_tokens", "max_output_tokens", "max_completion_tokens"))
 
 
 def _is_session_error_record(record: dict[str, Any]) -> bool:

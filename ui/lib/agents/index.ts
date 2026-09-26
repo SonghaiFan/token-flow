@@ -1,6 +1,7 @@
 import { asObject } from "../json";
 import type { TraceRecord } from "../types";
-import { claude } from "./claude";
+import { antigravity } from "./antigravity";
+import { claude, REMINDER_PATTERN } from "./claude";
 import { codex } from "./codex";
 import { pi } from "./pi";
 import type { AgentPlugin } from "./types";
@@ -9,7 +10,7 @@ export type { AgentPlugin, SectionFact, SectionView } from "./types";
 
 /* Add an agent by writing a plugin and listing it here. Its capture side is the
    matching `token_tap/agents/<id>.py`. */
-const AGENTS: AgentPlugin[] = [codex, pi, claude];
+const AGENTS: AgentPlugin[] = [codex, pi, claude, antigravity];
 
 /* Agents without their own plugin, and records captured before `capture.client`
    existed, keep the conventions every known harness uses. Those rules only match
@@ -19,8 +20,8 @@ export const fallbackAgent: AgentPlugin = {
   clients: [],
   declaredKind: codex.declaredKind,
   contentKinds: codex.contentKinds,
-  textPatterns: [...(codex.textPatterns || []), ...(claude.textPatterns || [])],
-  injectedUserPrefixes: [...(codex.injectedUserPrefixes || []), ...(claude.injectedUserPrefixes || [])],
+  textPatterns: [...(codex.textPatterns || []), REMINDER_PATTERN],
+  injectedUserPrefixes: [...(codex.injectedUserPrefixes || []), "<system-reminder"],
   metadataPrompts: codex.metadataPrompts,
   cleanPrompt: codex.cleanPrompt,
   sections: codex.sections,

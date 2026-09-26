@@ -8,7 +8,7 @@ import { AppShell, LiveStatus, type LiveState } from "../app-shell";
 import { AgentMark } from "../agent-mark";
 import { CaptureButton } from "../capture-menu";
 import { Badge, StatusDot } from "../ui/badge";
-import { Chip, IconButton } from "../ui/button";
+import { Button, Chip, IconButton } from "../ui/button";
 import { ConfirmDialog } from "../ui/dialog";
 import { EmptyState, Notice } from "../ui/feedback";
 import { SearchField, Select } from "../ui/field";
@@ -31,7 +31,7 @@ function StatusMark({ session }: { session: SessionSummary }) {
   return null;
 }
 
-function ConversationRow({ onDelete, onOpen, session }: { onDelete: () => void; onOpen: () => void; session: SessionSummary }) {
+function ConversationRow({ onDelete, onOpen, onToggle, selected, session }: { onDelete: () => void; onOpen: () => void; onToggle: () => void; selected: boolean; session: SessionSummary }) {
   const active = isActive(session);
   const title = session.first_user || "Untitled conversation";
   const turns = session.turn_count ?? session.record_count ?? 0;
@@ -40,6 +40,8 @@ function ConversationRow({ onDelete, onOpen, session }: { onDelete: () => void; 
   const agent = session.agent || "Unknown";
   return <div className={`group relative grid grid-cols-[minmax(0,1fr)_2.75rem] items-center gap-x-3 gap-y-1 py-3 pl-4 pr-2 transition-colors hover:bg-fill-hover lg:min-h-14 lg:gap-4 lg:pl-5 ${ROW_GRID}`}>
     <div className="flex min-w-0 items-center gap-2.5">
+      {/* Above the row's open target, so choosing a conversation to compare never opens it. */}
+      <input aria-label={`Compare “${title}” (${agent})`} checked={selected} className="relative z-10 size-4 shrink-0 cursor-pointer accent-(--ink)" onChange={onToggle} type="checkbox"/>
       <StatusDot tone={active ? "success" : "none"}/>
       <button className="min-w-0 truncate text-left text-sm font-medium text-ink after:absolute after:inset-0 after:content-[''] focus-visible:outline-none focus-visible:after:rounded-control focus-visible:after:outline-2 focus-visible:after:-outline-offset-2 focus-visible:after:outline-(--focus)" onClick={onOpen} title={title} type="button">{title}</button>
       {active ? <span className="sr-only">Active</span> : null}
@@ -57,13 +59,13 @@ function ConversationRow({ onDelete, onOpen, session }: { onDelete: () => void; 
         </>}
       </Menu>
     </div>
-    <p className="col-start-1 flex min-w-0 items-center gap-1.5 pl-[18px] text-xs text-muted lg:hidden">
+    <p className="col-start-1 flex min-w-0 items-center gap-1.5 pl-[44px] text-xs text-muted lg:hidden">
       <AgentMark label={agent}/><span className="truncate">{agent} · {formatDay(started)} · {tokens ? `${formatCompact(tokens)} tokens` : "no tokens"}</span>
     </p>
   </div>;
 }
 
-export function ConversationsView({ onOpen }: { onOpen: (id: string) => void }) {
+export function ConversationsView({ onCompare, onOpen }: { onCompare: (ids: string[]) => void; onOpen: (id: string) => void }) {
   const [payload, setPayload] = useState(EMPTY);
   const [agents, setAgents] = useState<AgentBucket[]>([]);
   const [agent, setAgent] = useState("");
@@ -77,6 +79,9 @@ export function ConversationsView({ onOpen }: { onOpen: (id: string) => void }) 
   const [deleteError, setDeleteError] = useState("");
   const [deleting, setDeleting] = useState(false);
   const [liveState, setLiveState] = useState<LiveState>("connecting");
+  // Conversations chosen for comparison, kept across searches and filters.
+  const [chosen, setChosen] = useState<string[]>([]);
+  const toggleChosen = (id: string) => setChosen((current) => (current.includes(id) ? current.filter((item) => item !== id) : [...current, id]));
 
   const load = useCallback(async (signal?: AbortSignal) => {
     setLoading(true);
@@ -194,12 +199,18 @@ export function ConversationsView({ onOpen }: { onOpen: (id: string) => void }) 
         {error ? <div className="mt-4"><Notice tone="danger">{error}</Notice></div> : null}
         {notice ? <div className="mt-4"><Notice onDismiss={() => setNotice("")} tone="success">{notice}</Notice></div> : null}
 
+        {chosen.length ? <div className="mt-4 flex flex-wrap items-center gap-3 rounded-control border border-line bg-panel py-1.5 pl-4 pr-1.5">
+          <span className="min-w-0 flex-1 text-sm text-ink">{chosen.length} selected{chosen.length < 2 ? <span className="text-muted"> · choose one more to compare</span> : null}</span>
+          <Button compact onClick={() => setChosen([])} variant="ghost">Clear</Button>
+          <Button compact disabled={chosen.length < 2} onClick={() => onCompare(chosen)} variant="primary">Compare</Button>
+        </div> : null}
+
         <section aria-label="Conversations" className="mt-6">
           <div className={`tf-eyebrow hidden gap-4 border-b border-line pb-2 pl-5 pr-2 lg:grid ${ROW_GRID}`}>
-            <span className="pl-[18px]">Conversation</span><span>Agent</span><span className="text-ink">Started ↓</span><span>Turns</span><span>Tokens</span><span className="sr-only">Actions</span>
+            <span className="pl-[44px]">Conversation</span><span>Agent</span><span className="text-ink">Started ↓</span><span>Turns</span><span>Tokens</span><span className="sr-only">Actions</span>
           </div>
           <div className="divide-y divide-line border-b border-line">
-            {rows.map((session) => <ConversationRow key={session.id} onDelete={() => { setDeleteError(""); setDeleteTarget(session); }} onOpen={() => onOpen(session.id)} session={session}/>)}
+            {rows.map((session) => <ConversationRow key={session.id} onDelete={() => { setDeleteError(""); setDeleteTarget(session); }} onOpen={() => onOpen(session.id)} onToggle={() => toggleChosen(session.id)} selected={chosen.includes(session.id)} session={session}/>)}
             {!loading && !payload.sessions.length && filtered ? <EmptyState title="No conversations match these filters">Clear the search or choose All agents and All statuses.</EmptyState> : null}
             {!loading && !payload.sessions.length && !filtered ? <EmptyState title="No conversations yet">Use Capture to open an agent through Token Flow. Each conversation it runs appears here as it happens.</EmptyState> : null}
             {loading && !payload.sessions.length ? <EmptyState>Loading conversations…</EmptyState> : null}

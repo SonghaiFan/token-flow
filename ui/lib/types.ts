@@ -109,7 +109,14 @@ export type InputLayer = "capabilities" | "instructions" | "context" | "conversa
    decided only by its captured item id and content. */
 export type ItemState = "new" | "carried" | "changed";
 
+/* What changes a block, one driver per category (`.agents/docs/standards/token-model.md`).
+   The set is closed; plugins put their own vocabulary in the class label. */
+export type InputCategory = "tools" | "harness" | "project" | "runtime" | "user" | "model" | "results" | "unknown";
+
+/* A block's category, the layer it belongs to, and its detail label. Built with
+   `inputClass()`, which derives the layer from the category. */
 export interface InputClass {
+  category: InputCategory;
   layer: InputLayer;
   label: string;
 }
@@ -118,6 +125,7 @@ export interface TokenCategory {
   id: string;
   memberIds?: string[];
   label: string;
+  category: InputCategory;
   layer?: InputLayer;
   state?: ItemState;
   tokens: number;
@@ -134,8 +142,32 @@ export interface TokenSelection {
   blockId: string;
   blockIds?: string[];
   label: string;
+  /* Category of the selected blocks, for their color; absent when they differ. */
+  category?: InputCategory;
   /* Set when a whole input layer of the turn is selected rather than one block. */
   layer?: InputLayer;
+}
+
+export interface TurnThread {
+  id: string;
+  parentId?: string;
+  /* What kind of thread it is, such as "Sub-agent" or "Guardian review". */
+  label?: string;
+  /* The agent's own name when it was spawned for a task, such as "/root/release_docs". */
+  name?: string;
+  /* Work the harness does on its own (memory writing, summaries), not in answer
+     to the conversation. Shown apart from the conversation it runs beside. */
+  background?: boolean;
+}
+
+/* How a turn's input differs from the previous turn of its thread
+   (`.agents/docs/standards/token-model.md`, State). */
+export interface TurnChange {
+  /* Items of the previous turn that this turn no longer sends. */
+  removed: number;
+  /* The previous turn's history no longer starts this turn's input: it was
+     replaced, as compaction does. */
+  rewritten: boolean;
 }
 
 export interface TurnModel {
@@ -146,7 +178,8 @@ export interface TurnModel {
   title: string;
   /* What this turn added to the conversation, such as its prompt or tool calls. */
   step: string;
-  kind: "user" | "metadata" | "tool" | "unknown";
+  /* `compaction`: the harness asked the model to summarize the conversation so far. */
+  kind: "user" | "metadata" | "compaction" | "tool" | "unknown";
   queryText: string;
   queryUserIndex: number;
   queryMessageCount: number;
@@ -161,7 +194,9 @@ export interface TurnModel {
   cached: number;
   fresh: number;
   categories: TokenCategory[];
+  /* States by item id; items without an id are keyed `@<position>` in `context.input`. */
   itemStates: Record<string, ItemState>;
+  change?: TurnChange;
   /* The input the model received: the request's own input, preceded by the context
      and output of the turn named by `previous_response_id` when that was captured. */
   context: {
@@ -179,6 +214,9 @@ export interface TurnModel {
   };
   /* Captured thread identity; the token flow only connects turns in the same lane. */
   lane: string;
+  /* The agent thread this request belongs to. A thread with a parent is a sub-agent
+     branch of that thread; `label` names what kind of thread it is. */
+  thread: TurnThread;
   /* Plugins that read this turn: the wire protocol and the agent harness. */
   protocol: string;
   agent: string;

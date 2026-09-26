@@ -3,8 +3,11 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { formatDuration, formatNumber } from "@/lib/format";
 import type { SectionView } from "@/lib/agents";
-import { classifyInput, LAYER_META, LAYER_ORDER, turnPlugins } from "@/lib/token-model";
-import type { InputClass, InputLayer, ItemState, TokenSelection, TraceRecord, TurnModel } from "@/lib/types";
+import { callReadSource, cleanWebText, inferOutputFormat, type OutputFormat, type OutputKind } from "@/lib/output-format";
+import { genericResultParts, scriptToolCalls, type ResultPart, type ToolCall } from "@/lib/tool-results";
+import { toolDeclarations } from "@/lib/protocols";
+import { classifyInput, itemStateOf, LAYER_META, LAYER_ORDER, messageParts, turnPlugins } from "@/lib/token-model";
+import type { InputCategory, InputClass, InputLayer, ItemState, TokenSelection, TraceRecord, TurnModel } from "@/lib/types";
 import { categoryColor } from "@/lib/category-palette";
 import { CategorySwatch } from "../charts/category-legend";
 import { activateOnKey, motionMs, useAccordion } from "../motion";
@@ -19,7 +22,7 @@ import { humanizeField, previewText, ReadableText, RichText, stableValue } from 
 import { clearCurrentMatch, clearHighlights, focusMatch, highlightMatches, MIN_QUERY, SEARCH_HIT_LIMIT, searchRecord, type JsonPathPart, type SearchHit } from "./request-search";
 
 type UnknownRecord = Record<string, unknown>;
-type RequestMode = "structured" | "raw";
+type RequestMode = "timeline" | "structured" | "raw";
 type RequestScope = "turn" | "changes";
 
 function asRecord(value: unknown): UnknownRecord {
@@ -220,42 +223,9 @@ function parseJsonValue(value: string): unknown | undefined {
   }
 }
 
-function matchingBrace(value: string, start: number): number {
-  let depth = 0;
-  let quote = "";
-  let escaped = false;
-  for (let index = start; index < value.length; index += 1) {
-    const character = value[index];
-    if (quote) {
-      if (escaped) escaped = false;
-      else if (character === "\\") escaped = true;
-      else if (character === quote) quote = "";
-      continue;
-    }
-    if (character === '"' || character === "'") {
-      quote = character;
-      continue;
-    }
-    if (character === "{") depth += 1;
-    if (character === "}") {
-      depth -= 1;
-      if (depth === 0) return index;
-    }
-  }
-  return -1;
-}
-
 function parseWrappedToolCall(value: string): ParsedWrappedToolCall | null {
-  const call = /tools\.([A-Za-z_$][\w$]*)\s*\(\s*\{/.exec(value);
-  if (!call || call.index === undefined) return null;
-  const start = value.indexOf("{", call.index + call[0].length - 1);
-  const end = matchingBrace(value, start);
-  if (start < 0 || end < 0) return null;
-  const objectLiteral = value.slice(start, end + 1)
-    .replace(/([{,]\s*)([A-Za-z_$][\w$]*)(\s*:)/g, '$1"$2"$3');
-  const parsed = parseJsonValue(objectLiteral);
-  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return null;
-  return { input: asRecord(parsed), name: call[1] };
+  const call = scriptToolCalls(value)[0];
+  return call?.input ? { input: asRecord(call.input), name: call.name } : null;
 }
 
 function parseToolResult(value: string): ParsedToolResult {
@@ -349,14 +319,85 @@ function ToolResultCatalog({ tools }: { tools: ToolResultDefinition[] }) {
   </section>;
 }
 
-function StructuredValue({ value }: { value: unknown }) {
-  if (Array.isArray(value) && value.length && value.every(isToolResultDefinition)) return <ToolResultCatalog tools={value}/>;
-  if (Array.isArray(value)) return <section className="space-y-2"><div className="flex items-center gap-2"><strong className="text-xs">Structured list</strong><Badge mono>{value.length} items</Badge></div>{value.map((item, index) => <Disclosure key={index} summary={<><strong className="text-xs">Item {index + 1}</strong><span className="min-w-0 truncate text-xs text-muted">{previewText(item)}</span></>}><StructuredValue value={item}/></Disclosure>)}</section>;
-  if (value && typeof value === "object") {
-    const entries = Object.entries(asRecord(value));
-    return <dl className="tf-card divide-y divide-line overflow-hidden">{entries.map(([key, item]) => <div className="tf-inset grid gap-1 py-3 text-xs sm:grid-cols-[10rem_minmax(0,1fr)]" key={key}><dt className="break-all font-mono text-xs font-medium text-muted">{key}</dt><dd className="min-w-0 break-words text-ink">{item && typeof item === "object" ? <Disclosure summary={<><span className="text-xs">{Array.isArray(item) ? `${item.length} items` : `${Object.keys(asRecord(item)).length} fields`}</span><span className="min-w-0 truncate text-xs text-muted">{previewText(item)}</span></>}><StructuredValue value={item}/></Disclosure> : <span className="whitespace-pre-wrap">{textValue(item) || (item === null ? "null" : "")}</span>}</dd></div>)}</dl>;
+/* Structured values render by size, not by shape, so nothing small hides behind
+   a disclosure: a single-field object is its value, short items sit on one line,
+   short lists are numbered rows, and objects are a plain key/value grid. Only a
+   large or deeply nested element folds, and its summary previews its content. */
+const INLINE_CHARS = 140;
+const FOLD_CHARS = 600;
+
+function isScalar(value: unknown): boolean {
+  return value === null || typeof value !== "object";
+}
+
+/* The value an object stands for when it has one field, followed through nesting. */
+function soleValue(value: unknown): unknown {
+  let current = value;
+  while (current && typeof current === "object" && !Array.isArray(current)) {
+    const entries = Object.entries(current as UnknownRecord);
+    if (entries.length !== 1) break;
+    current = entries[0][1];
   }
-  return <span className="whitespace-pre-wrap text-xs text-ink">{textValue(value) || (value === null ? "null" : "")}</span>;
+  return current;
+}
+
+/* One line for a value that fits on one: a scalar, or an object of scalars. */
+function inlineText(value: unknown): string | null {
+  const sole = soleValue(value);
+  if (isScalar(sole)) {
+    const text = sole === null ? "null" : textValue(sole);
+    return text.length <= INLINE_CHARS && !text.includes("\n") ? text : null;
+  }
+  if (Array.isArray(sole)) return null;
+  const entries = Object.entries(sole as UnknownRecord);
+  if (!entries.every(([, item]) => isScalar(item))) return null;
+  const text = entries.map(([key, item]) => `${key}: ${item === null ? "null" : textValue(item)}`).join(" · ");
+  return text.length <= INLINE_CHARS ? text : null;
+}
+
+function ScalarView({ value }: { value: unknown }) {
+  const text = value === null ? "null" : textValue(value);
+  if (/^https?:\/\/\S+$/.test(text)) {
+    return <a className="break-all underline decoration-line underline-offset-4 hover:decoration-ink" href={text} rel="noreferrer" target="_blank" title={text}>{text.replace(/^https?:\/\//, "")}</a>;
+  }
+  return <span className="whitespace-pre-wrap break-words">{text}</span>;
+}
+
+function InlineValue({ value }: { value: unknown }) {
+  const sole = soleValue(value);
+  if (isScalar(sole)) return <span title={sole === value ? undefined : Object.keys(asRecord(value)).join(" › ")}><ScalarView value={sole}/></span>;
+  const entries = Object.entries(asRecord(sole));
+  return <span>{entries.map(([key, item], index) => <span key={key}>{index ? <span className="text-muted"> · </span> : null}<span className="text-muted">{key}</span> <ScalarView value={item}/></span>)}</span>;
+}
+
+function StructuredValue({ depth = 0, value }: { depth?: number; value: unknown }) {
+  if (Array.isArray(value) && value.length && value.every(isToolResultDefinition)) return <ToolResultCatalog tools={value}/>;
+  const sole = soleValue(value);
+  if (isScalar(sole)) return <span className="text-xs text-ink"><ScalarView value={sole}/></span>;
+  if (Array.isArray(sole)) {
+    if (!sole.length) return <span className="text-xs text-muted">Empty list</span>;
+    return <ol className="space-y-1 text-xs text-ink">{sole.map((item, index) => {
+      const inline = inlineText(item);
+      const size = stableValue(item).length;
+      return <li className="grid grid-cols-[1.25rem_minmax(0,1fr)] gap-2" key={index}>
+        <span className="select-none text-right font-mono text-muted">{index + 1}</span>
+        <div className="min-w-0">{inline !== null ? <InlineValue value={item}/>
+          : size > FOLD_CHARS || depth >= 2 ? <Disclosure summary={<span className="min-w-0 truncate text-xs text-muted">{previewText(item) || `${size.toLocaleString()} characters`}</span>}><StructuredValue depth={depth + 1} value={item}/></Disclosure>
+            : <StructuredValue depth={depth + 1} value={item}/>}</div>
+      </li>;
+    })}</ol>;
+  }
+  const entries = Object.entries(asRecord(sole));
+  return <dl className="grid grid-cols-[minmax(0,7.5rem)_minmax(0,1fr)] gap-x-4 gap-y-1.5 text-xs">{entries.map(([key, item]) => {
+    const inline = inlineText(item);
+    const size = stableValue(item).length;
+    return <div className="contents" key={key}>
+      <dt className="truncate font-mono text-muted" title={key}>{key}</dt>
+      <dd className="min-w-0 text-ink">{inline !== null ? <InlineValue value={item}/>
+        : size > FOLD_CHARS || depth >= 2 ? <Disclosure summary={<span className="min-w-0 truncate text-xs text-muted">{previewText(item) || `${size.toLocaleString()} characters`}</span>}><StructuredValue depth={depth + 1} value={item}/></Disclosure>
+          : <StructuredValue depth={depth + 1} value={item}/>}</dd>
+    </div>;
+  })}</dl>;
 }
 
 function StructuredText({ children }: { children: string }) {
@@ -415,53 +456,84 @@ function HtmlOutput({ value }: { value: string }) {
   </section>;
 }
 
-function TextOutput({ value }: { value: string }) {
-  const lines = value.split("\n");
-  if (!value) return <EmptyState framed>The tool completed without captured output.</EmptyState>;
-  if (/too many requests|rate limit/i.test(value)) return <Notice compact title="Rate limited" tone="warning">{value.trim()}</Notice>;
-  return <section><BlockHeading aside={`${lines.length} ${lines.length === 1 ? "line" : "lines"}`}>Output</BlockHeading><ol className="tf-code tf-well max-h-[28rem] overflow-auto py-2 text-ink">{lines.map((line, index) => <li className="grid grid-cols-[2.5rem_minmax(0,1fr)] px-3" key={index}><span className="select-none pr-3 text-right text-muted/70">{index + 1}</span><span className="whitespace-pre-wrap break-words">{line || " "}</span></li>)}</ol></section>;
+function lineCount(value: string): string {
+  const count = value.split("\n").length;
+  return `${count} ${count === 1 ? "line" : "lines"}`;
 }
 
-function looksLikeMarkdown(value: string): boolean {
-  const headingCount = value.match(/^#{1,6}\s+\S/gm)?.length || 0;
-  if (headingCount >= 2 || /^\s*(?:```|~~~)/m.test(value)) return true;
-  const signals = [
-    /^\s*[-*+]\s+\S/m.test(value),
-    /^\s*\d+\.\s+\S/m.test(value),
-    /^\s*>\s+\S/m.test(value),
-    /\[[^\]\n]+\]\([^\s)]+(?:\s+["'][^"']*["'])?\)/.test(value),
-    /(?:^|[^*])\*\*[^*\n]+\*\*/m.test(value),
-    /^\s*\|.+\|\s*$/m.test(value) && /^\s*\|?\s*:?-{3,}/m.test(value),
-  ].filter(Boolean).length;
-  return headingCount + signals >= 2;
+function TextOutput({ label = "Output", value }: { label?: string; value: string }) {
+  const lines = value.split("\n");
+  if (!value) return <EmptyState framed>The tool completed without captured output.</EmptyState>;
+  // A rate-limit reply is short; a long output that mentions rate limits is output.
+  if (value.length < 400 && /too many requests|rate limit/i.test(value)) return <Notice compact title="Rate limited" tone="warning">{value.trim()}</Notice>;
+  return <section><BlockHeading aside={lineCount(value)}>{label}</BlockHeading><ol className="tf-code tf-well max-h-[28rem] overflow-auto py-2 text-ink">{lines.map((line, index) => <li className="grid grid-cols-[2.5rem_minmax(0,1fr)] px-3" key={index}><span className="select-none pr-3 text-right text-muted/70">{index + 1}</span><span className="whitespace-pre-wrap break-words">{line || " "}</span></li>)}</ol></section>;
 }
 
 function MarkdownOutput({ value }: { value: string }) {
-  const lineCount = value.split("\n").length;
-  return <section><BlockHeading aside={`${lineCount} ${lineCount === 1 ? "line" : "lines"}`}>Rendered Markdown · exact source in Raw</BlockHeading><div className="tf-well max-h-[40rem] overflow-auto px-4 py-3"><RichText>{value}</RichText></div></section>;
+  return <section><BlockHeading aside={lineCount(value)}>Rendered Markdown</BlockHeading><div className="tf-well max-h-[40rem] overflow-auto px-4 py-3"><RichText>{value}</RichText></div></section>;
 }
 
-type DetectedToolOutput =
-  | { kind: "html"; value: string }
-  | { kind: "markdown"; value: string }
-  | { kind: "structured"; value: ParsedStructuredText }
-  | { kind: "text"; value: string };
+function DiffOutput({ value }: { value: string }) {
+  const tone = (line: string) => line.startsWith("+++") || line.startsWith("---") || /^(?:diff |index |commit |Author:|Date:)/.test(line) ? "font-semibold text-ink"
+    : line.startsWith("@@") ? "text-muted"
+      : line.startsWith("+") ? "bg-success-soft text-success-ink"
+        : line.startsWith("-") ? "bg-danger-soft text-danger-ink" : "text-ink";
+  return <section><BlockHeading aside={lineCount(value)}>Diff</BlockHeading><pre className="tf-code tf-well max-h-[32rem] overflow-auto py-2">{value.split("\n").map((line, index) => <div className={`whitespace-pre-wrap break-words px-3 ${tone(line)}`} key={index}>{line || " "}</div>)}</pre></section>;
+}
 
-function detectToolOutput(value: string): DetectedToolOutput {
+/* A fetched web page reads as prose once citation markers are removed. */
+function WebOutput({ value }: { value: string }) {
+  const text = cleanWebText(value).trim();
+  return <section><BlockHeading aside={lineCount(text)}>Web page · citation markers removed</BlockHeading><div className="tf-well max-h-[32rem] overflow-auto whitespace-pre-wrap break-words px-4 py-3 text-sm leading-6 text-ink">{text}</div></section>;
+}
+
+type OutputView = OutputKind | "structured" | "html";
+
+const VIEW_LABELS: Record<OutputView, string> = {
+  code: "Code",
+  diff: "Diff",
+  html: "Document",
+  markdown: "Markdown",
+  structured: "Structured",
+  text: "Plain",
+  web: "Web page",
+};
+
+/* A tool result, shown the way the call that produced it says it should be: a
+   Markdown file renders, source reads as code, a diff is colored, a web page is
+   cleaned. Without that evidence it stays plain text; only JSON that parses and
+   complete HTML documents are recognized from content. The reader can always
+   switch between the inferred view, Plain, and Markdown. */
+/* `title` names this output when it is one part of a result; it replaces the
+   format evidence on the switch line. */
+function ToolOutputView({ format, title, value }: { format: OutputFormat; title?: ReactNode; value: string }) {
   const trimmed = value.trim();
-  if (/^<!doctype\s+html|^<html\b/i.test(trimmed)) return { kind: "html", value: trimmed };
-  const structured = parseStructuredText(trimmed);
-  if (structured) return { kind: "structured", value: structured };
-  if (looksLikeMarkdown(trimmed)) return { kind: "markdown", value: trimmed };
-  return { kind: "text", value: trimmed };
-}
-
-function ToolOutputView({ value }: { value: string }) {
-  const output = detectToolOutput(value);
-  if (output.kind === "html") return <HtmlOutput value={output.value}/>;
-  if (output.kind === "structured") return <StructuredOutput parsed={output.value}/>;
-  if (output.kind === "markdown") return <MarkdownOutput value={output.value}/>;
-  return <TextOutput value={output.value}/>;
+  // Only output that is JSON from its first character reads as structured; JSON
+  // printed partway through (a `cat package.json` after other commands) is text.
+  const structured = useMemo(() => {
+    const parsed = format.kind === "text" ? parseStructuredText(trimmed) : null;
+    return parsed && !parsed.prefix ? parsed : null;
+  }, [format.kind, trimmed]);
+  const auto: OutputView = /^<!doctype\s+html|^<html\b/i.test(trimmed) ? "html" : format.kind !== "text" ? format.kind : structured ? "structured" : "text";
+  const [chosen, setChosen] = useState<OutputView | null>(null);
+  const view = chosen ?? auto;
+  const options = [...new Set<OutputView>([auto, "text", "markdown"])];
+  const language = format.kind === "code" ? format.language : undefined;
+  return <div className="space-y-2">
+    {trimmed || title ? <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted">
+      {title ?? <span className="min-w-0 truncate">{format.reason ? <>From <code className="font-mono text-ink">{format.reason}</code></> : "No format declared by the call"}</span>}
+      {trimmed ? <span aria-label="Output view" className="ml-auto inline-flex rounded-md border border-line p-0.5" role="group" title={title && format.reason ? `Format from ${format.reason}` : undefined}>
+        {options.map((option) => <button aria-pressed={view === option} className={`rounded px-2 py-0.5 ${view === option ? "bg-canvas font-medium text-ink" : "hover:text-ink"}`} key={option} onClick={() => setChosen(option)} type="button">{option === "code" && language ? language : VIEW_LABELS[option]}</button>)}
+      </span> : null}
+    </div> : null}
+    {view === "html" ? <HtmlOutput value={trimmed}/>
+      : view === "structured" && structured ? <StructuredOutput parsed={structured}/>
+        : view === "markdown" ? <MarkdownOutput value={trimmed}/>
+          : view === "diff" ? <DiffOutput value={trimmed}/>
+            : view === "web" ? <WebOutput value={trimmed}/>
+              : view === "code" ? <TextOutput label={language || "Code"} value={trimmed}/>
+                : <TextOutput value={trimmed}/>}
+  </div>;
 }
 
 function Disclosure({ children, defaultOpen = false, summary }: { children: ReactNode; defaultOpen?: boolean; summary: ReactNode }) {
@@ -493,7 +565,10 @@ function splitBlockId(blockId: string): { itemId: string; partIndex: number | nu
 function selectedJsonPath(record: TraceRecord, selection: TokenSelection | null, turnId: string): Array<number | string> | null {
   if (!selection || selection.turnId !== turnId) return null;
   const body = asRecord(record.request?.body);
-  if (selection.label === "Tool definitions" && Array.isArray(body.tools)) return ["trace", "request", "body", "tools"];
+  if (selection.label === "Tool definitions" || selection.category === "tools") {
+    if (Array.isArray(body.tools)) return ["trace", "request", "body", "tools"];
+    if (Array.isArray(asRecord(body.request).tools)) return ["trace", "request", "body", "request", "tools"];
+  }
 
   const sourceKey = ["input", "messages", "contents"].find((key) => Array.isArray(body[key]));
   if (!sourceKey) return null;
@@ -539,7 +614,8 @@ function systemParts(turn: TurnModel, system: unknown): unknown {
   if (!Array.isArray(system)) return system;
   return system.flatMap((raw) => {
     const block = asRecord(raw);
-    if (block.type !== "text" || typeof block.text !== "string") return [raw];
+    // Gemini text parts are `{text}` without a type.
+    if ((block.type !== undefined && block.type !== "text") || typeof block.text !== "string") return [raw];
     const sections = split(block.text);
     return sections.length > 1 ? sections.map((text) => ({ ...block, text })) : [raw];
   });
@@ -577,7 +653,7 @@ function requestToolNames(turn: TurnModel): string[] {
       }
     }
   };
-  addTools(body.tools);
+  addTools(toolDeclarations(turnPlugins(turn).protocol, body));
   for (const item of collectInput(turn)) {
     const record = asRecord(item);
     if (record.type === "additional_tools") addTools(record.tools);
@@ -662,7 +738,7 @@ function LayerDiffSection({ diff }: { diff: LayerDiff }) {
   return <Disclosure summary={summary}>
     <ul className="divide-y divide-line text-xs">
       {diff.rows.map(({ change, entry }) => <li className="flex items-center gap-2 py-2" key={`${change}-${entry.key}`}>
-        <CategorySwatch label={entry.inputClass.label} layer={entry.inputClass.layer}/>
+        <CategorySwatch category={entry.inputClass.category}/>
         <span className="shrink-0 font-medium">{entry.inputClass.label}</span>
         <Badge tone={CHANGE_TONES[change]}>{change}</Badge>
         <span className="min-w-0 flex-1 truncate text-muted">{entryPreview(entry)}</span>
@@ -739,11 +815,27 @@ interface InputEntry {
   result?: InputEntry;
   /* State shown on the row; omitted when every item is new so rows stay quiet. */
   rowState?: ItemState;
+  /* How the tool result of this call (or answering this result's call) is shown. */
+  outputFormat?: OutputFormat;
+  /* A tool result captured as parts, read part by part. */
+  readout?: ResultReadout;
   /* The agent's view for this section label, when it has one. */
   section?: SectionView;
   state?: ItemState;
   tokens?: { cached: number; tokens: number };
 }
+
+type TokenCount = { cached: number; tokens: number };
+
+/* A multi-part tool result: the header part's status, then each output part with
+   the format of the call that produced it. */
+interface ResultReadout {
+  elapsed: string;
+  parts: Array<ResultPart & { format: OutputFormat; tokens?: TokenCount }>;
+  status: string;
+}
+
+const TEXT_FORMAT: OutputFormat = { kind: "text" };
 
 function isMessagePartItem(message: UnknownRecord): boolean {
   return !toolEventKind(message) && Boolean(textValue(message.role)) && textValue(message.type) !== "additional_tools";
@@ -766,15 +858,24 @@ function inputEntries(turn: TurnModel, items: unknown[]): InputEntry[] {
   const tokens = tokenIndex(turn);
   const { agent } = turnPlugins(turn);
   const withView = (entry: InputEntry): InputEntry => ({ ...entry, section: agent.sections?.[entry.inputClass.label] });
+  // A result's format comes from the call that produced it: its command or the file it reads.
+  const formatForCall = (call: ToolCall): OutputFormat => {
+    const source = callReadSource(call.name, call.input);
+    return agent.outputFormat?.(source) ?? inferOutputFormat(source);
+  };
+  const formatFor = (item: UnknownRecord): OutputFormat => {
+    const presentation = toolCallPresentation(item);
+    return formatForCall({ input: presentation.input, name: [presentation.name, presentation.wrapperName].filter(Boolean).join(" ") });
+  };
   const entries: InputEntry[] = items.flatMap((raw, itemIndex) => {
     const item = asRecord(raw);
     const itemId = textValue(item.id);
-    const state = itemId ? turn.itemStates[itemId] : undefined;
+    const state = itemStateOf(turn, raw);
     const key = itemId || `item-${itemIndex}`;
     if (!isMessagePartItem(item)) {
-      return [withView({ blockId: itemId || undefined, inputClass: classifyInput(turn.record, item), item, itemId, key, state, tokens: itemId ? tokens.get(`item:${itemId}`) : undefined })];
+      return [withView({ blockId: itemId || undefined, inputClass: classifyInput(turn.record, item), item, itemId, key, outputFormat: toolEventKind(item) === "call" ? formatFor(item) : undefined, state, tokens: itemId ? tokens.get(`item:${itemId}`) : undefined })];
     }
-    const parts = inputItemParts(item);
+    const parts = messageParts(agent, item) ?? inputItemParts(item);
     return parts.map((part, partIndex) => {
       const blockId = itemId ? `${itemId}:${partIndex}` : undefined;
       const partTokens = blockId ? tokens.get(blockId) ?? (parts.length === 1 ? tokens.get(`item:${itemId}`) : undefined) : undefined;
@@ -782,7 +883,43 @@ function inputEntries(turn: TurnModel, items: unknown[]): InputEntry[] {
     });
   });
   const mixed = entries.some((entry) => entry.state && entry.state !== "new");
-  return entries.map((entry) => ({ ...entry, rowState: mixed ? entry.state : undefined }));
+  const callFormats = new Map(entries.filter((entry) => entry.outputFormat).map((entry) => [textValue(entry.item.call_id), entry.outputFormat as OutputFormat] as const));
+  const callItems = new Map(entries.filter((entry) => toolEventKind(entry.item) === "call").map((entry) => [textValue(entry.item.call_id), entry.item] as const));
+  // A result captured as parts reads part by part; the first part can be a header
+  // (status and wall time) before the output parts.
+  const readout = (entry: InputEntry, outer: OutputFormat | undefined): ResultReadout | undefined => {
+    const captured = entry.item.output ?? entry.item.content;
+    // A single text result is read by part only when the agent says how.
+    const list = Array.isArray(captured) ? captured : typeof captured === "string" && agent.resultParts ? [captured] : undefined;
+    if (!list) return undefined;
+    const parts = list.map((part, partIndex) => ({ part, partIndex }));
+    const first = capturedText(list[0]);
+    const head = parseToolResult(first);
+    // Metadata lines before an `Output:` line are the header, not output.
+    if (/^Output:\s*$/im.test(first)) {
+      if (head.output) parts[0] = { part: head.output, partIndex: 0 };
+      else parts.shift();
+    }
+    const callItem = callItems.get(textValue(entry.item.call_id));
+    const call = callItem ? { input: callItem.arguments ?? callItem.input, name: textValue(callItem.name) } : undefined;
+    const declared = agent.resultParts?.(call, parts);
+    if (!declared && !Array.isArray(captured)) return undefined;
+    const read = declared ?? genericResultParts(parts);
+    return {
+      elapsed: head.elapsed,
+      parts: read.map((part) => ({
+        ...part,
+        format: part.call ? formatForCall(part.call) : read.length === 1 && outer ? outer : TEXT_FORMAT,
+        tokens: entry.itemId ? tokens.get(`${entry.itemId}:${part.partIndex}`) : undefined,
+      })),
+      status: head.status,
+    };
+  };
+  return entries.map((entry) => {
+    const result = toolEventKind(entry.item) === "result";
+    const outputFormat = entry.outputFormat ?? (result ? callFormats.get(textValue(entry.item.call_id)) : undefined);
+    return { ...entry, outputFormat, readout: result ? readout(entry, outputFormat) : undefined, rowState: mixed ? entry.state : undefined };
+  });
 }
 
 function sumTokens(entries: InputEntry[]): { cached: number; tokens: number } | undefined {
@@ -820,11 +957,11 @@ function selectionHits(entries: Array<InputEntry | undefined>, selection: TokenS
 
 /* How a row reflects the shared selection: matching rows take their category color,
    the focused block opens, and everything else in the turn steps back. */
-function rowMarks(entries: Array<InputEntry | undefined>, label: string, layer: InputLayer, selection: TokenSelection | null, turnId: string): { accent?: string; dimmed: boolean; open: boolean } {
+function rowMarks(entries: Array<InputEntry | undefined>, category: InputCategory, selection: TokenSelection | null, turnId: string): { accent?: string; dimmed: boolean; open: boolean } {
   const ids = selectionIds(selection, turnId);
   const matched = entries.some((entry) => entryHit(entry, ids));
   return {
-    accent: matched ? categoryColor(label, layer) : undefined,
+    accent: matched ? categoryColor(category) : undefined,
     dimmed: ids.length > 0 && !matched,
     open: entries.some((entry) => entryHit(entry, selectionIds(selection, turnId, true))),
   };
@@ -866,12 +1003,12 @@ function RowEnd({ badge, tokens }: { badge?: ReactNode; tokens?: { cached: numbe
 
 /* The row's one leading mark: a category swatch, or an icon tinted with the category
    color. It also links the row's blocks to Composition and Token flow. */
-function LinkSwatch({ blockIds, icon, label, layer, onSelectToken, selection, turnId }: { blockIds: string[]; icon?: IconComponent; label: string; layer: InputLayer; onSelectToken: (selection: TokenSelection | null) => void; selection: TokenSelection | null; turnId: string }) {
+function LinkSwatch({ blockIds, category, icon, label, onSelectToken, selection, turnId }: { blockIds: string[]; category: InputCategory; icon?: IconComponent; label: string; onSelectToken: (selection: TokenSelection | null) => void; selection: TokenSelection | null; turnId: string }) {
   const selectedIds = selection?.turnId === turnId ? selection.blockIds || [selection.blockId] : [];
   const active = blockIds.some((id) => selectedIds.includes(id));
-  const mark = icon ? <RowIcon color={categoryColor(label, layer)} icon={icon}/> : <CategorySwatch label={label} layer={layer}/>;
+  const mark = icon ? <RowIcon color={categoryColor(category)} icon={icon}/> : <CategorySwatch category={category}/>;
   if (!blockIds.length) return <span className="grid size-5 shrink-0 place-items-center">{mark}</span>;
-  return <button aria-label={active ? `Unlink ${label}` : `Link ${label} in the charts`} aria-pressed={active} className={`grid size-5 shrink-0 place-items-center rounded-tag ${active ? "ring-2 ring-ink" : "hover:ring-1 hover:ring-line"}`} onClick={(event) => { event.preventDefault(); event.stopPropagation(); onSelectToken(active ? null : { blockId: blockIds[0], blockIds, label, turnId }); }} title={`${label} · link in charts`} type="button">{mark}</button>;
+  return <button aria-label={active ? `Unlink ${label}` : `Link ${label} in the charts`} aria-pressed={active} className={`grid size-5 shrink-0 place-items-center rounded-tag ${active ? "ring-2 ring-ink" : "hover:ring-1 hover:ring-line"}`} onClick={(event) => { event.preventDefault(); event.stopPropagation(); onSelectToken(active ? null : { blockId: blockIds[0], blockIds, category, label, turnId }); }} title={`${label} · link in charts`} type="button">{mark}</button>;
 }
 
 /* Invisible scroll targets for one or more captured blocks; the row carries the highlight. */
@@ -940,6 +1077,8 @@ function LayerSection({ badge, children, entries, layer, selection, turnId }: { 
 
 interface RowProps {
   defaultOpen?: boolean;
+  /* The row is part of this turn's response, so a call's result comes next turn. */
+  inResponse?: boolean;
   onSelectToken: (selection: TokenSelection | null) => void;
   selection: TokenSelection | null;
   turnId: string;
@@ -961,9 +1100,9 @@ function ToolDefinitionRow({ entry, onSelectToken, selection, tools, turnId }: R
   const total = groups.reduce((sum, group) => sum + group.tools.length, 0);
   const blockIds = entry?.blockId ? [entry.blockId] : [];
   if (!total) return null;
-  const marks = rowMarks([entry], "Tool definitions", "capabilities", selection, turnId);
+  const marks = rowMarks([entry], "tools", selection, turnId);
   return <Row accent={marks.accent} defaultOpen={marks.open} dimmed={marks.dimmed} summary={<>
-    <LinkSwatch blockIds={blockIds} label="Tool definitions" layer="capabilities" onSelectToken={onSelectToken} selection={selection} turnId={turnId}/>
+    <LinkSwatch blockIds={blockIds} category="tools" label="Tool definitions" onSelectToken={onSelectToken} selection={selection} turnId={turnId}/>
     <span className="min-w-0 flex-1 truncate">{groups.map((group, index) => <span key={group.name}>{index ? <span className="text-muted"> · </span> : null}<span className="font-mono text-sm text-ink">{group.name}</span> <span className="text-xs text-muted">{group.tools.length}</span></span>)}</span>
     <RowEnd badge={<StateBadge state={entry?.rowState}/>} tokens={entry?.tokens}/>
   </>}>
@@ -1012,10 +1151,10 @@ function PartRow({ defaultOpen = false, entry, onSelectToken, previous, selectio
   const blockIds = entry.blockId ? [entry.blockId] : [];
   const changes = entry.section?.changes?.(text, previous) || [];
   const badge = changes.length ? <Badge tone="warning">{changes.length === 1 ? `${changes[0]} changed` : `${changes.length} fields changed`}</Badge> : <StateBadge state={entry.rowState}/>;
-  const marks = rowMarks([entry], label, entry.inputClass.layer, selection, turnId);
+  const marks = rowMarks([entry], entry.inputClass.category, selection, turnId);
   return <Row accent={marks.accent} defaultOpen={defaultOpen || marks.open || isFresh(entry)} dimmed={marks.dimmed} hint={isPrompt ? undefined : sectionPreview(entry.section, text)} summary={<>
-    <LinkSwatch blockIds={blockIds} icon={isPrompt ? UserIcon : label === "Assistant messages" ? ChatIcon : undefined} label={label} layer={entry.inputClass.layer} onSelectToken={onSelectToken} selection={selection} turnId={turnId}/>
-    {isPrompt ? <span className="min-w-0 flex-1 truncate font-medium text-ink">{previewText(entry.part) || "Empty prompt"}</span> : <>
+    <LinkSwatch blockIds={blockIds} category={entry.inputClass.category} icon={isPrompt ? UserIcon : label === "Assistant messages" ? ChatIcon : undefined} label={label} onSelectToken={onSelectToken} selection={selection} turnId={turnId}/>
+    {isPrompt ? <span className="min-w-0 flex-1 truncate font-medium text-ink">{entry.section?.preview?.(text) || previewText(entry.part) || "Empty prompt"}</span> : <>
       <span className="shrink-0 text-ink">{label === "Assistant messages" ? "Assistant" : label}</span>
       <Meta mono={fact.mono}>{fact.value}</Meta>
     </>}
@@ -1029,14 +1168,14 @@ function reasoningSummary(item: UnknownRecord): string {
   return asArray(item.summary).map((part) => textValue(asRecord(part).text) || textValue(part)).filter(Boolean).join("\n\n");
 }
 
-function ReasoningRow({ entry, onSelectToken, selection, turnId }: RowProps & { entry: InputEntry }) {
+function ReasoningRow({ defaultOpen = false, entry, onSelectToken, selection, turnId }: RowProps & { entry: InputEntry }) {
   const summary = reasoningSummary(entry.item);
   const encrypted = Boolean(textValue(entry.item.encrypted_content));
   const blockIds = entryBlockIds([entry]);
   const detail = [encrypted ? "encrypted" : "", summary ? previewText(summary) : "no summary"].filter(Boolean).join(" · ");
-  const marks = rowMarks([entry], "Reasoning", "conversation", selection, turnId);
-  return <Row accent={marks.accent} defaultOpen={marks.open || isFresh(entry)} dimmed={marks.dimmed} summary={<>
-    <LinkSwatch blockIds={blockIds} icon={SparkleIcon} label="Reasoning" layer="conversation" onSelectToken={onSelectToken} selection={selection} turnId={turnId}/>
+  const marks = rowMarks([entry], "model", selection, turnId);
+  return <Row accent={marks.accent} defaultOpen={defaultOpen || marks.open || isFresh(entry)} dimmed={marks.dimmed} summary={<>
+    <LinkSwatch blockIds={blockIds} category="model" icon={SparkleIcon} label="Reasoning" onSelectToken={onSelectToken} selection={selection} turnId={turnId}/>
     <span className="shrink-0 text-ink">Reasoning</span>
     <Meta>{detail}</Meta>
     <RowEnd badge={<StateBadge state={entry.rowState}/>} tokens={entry.tokens}/>
@@ -1074,24 +1213,27 @@ function tokenAside(tokens: { cached: number; tokens: number } | undefined): str
   return tokens ? `${tokens.tokens.toLocaleString()} tok` : undefined;
 }
 
-function ToolExchangeRow({ call, onSelectToken, result, selection, turnId }: RowProps & { call?: InputEntry; result?: InputEntry }) {
+function ToolExchangeRow({ call, defaultOpen = false, inResponse = false, onSelectToken, result, selection, turnId }: RowProps & { call?: InputEntry; result?: InputEntry }) {
   const callItem = call?.item;
   const resultItem = result?.item;
   const presentation = callItem ? toolCallPresentation(callItem) : null;
-  const outcome = resultItem ? parseToolResult(capturedText(resultItem.output ?? resultItem.content ?? resultItem.text)) : null;
+  const readout = result?.readout;
+  const plain = resultItem && !readout ? parseToolResult(capturedText(resultItem.output ?? resultItem.content ?? resultItem.text)) : null;
+  const outcome = readout ?? plain;
   const failed = Boolean(outcome && /failed|error|timed out/i.test(outcome.status));
+  const failedParts = readout?.parts.filter((part) => part.failure).length ?? 0;
   const namespace = textValue(callItem?.namespace);
-  const title = textValue(asRecord(presentation?.input).title) || presentation?.preview || outcome?.status || "";
+  // Some clients have the model label its own call (Antigravity's `toolSummary`).
+  const title = textValue(asRecord(presentation?.input).title) || textValue(asRecord(presentation?.input).toolSummary) || presentation?.preview || outcome?.status || "";
   const tokens = sumTokens([call, result].filter((entry): entry is InputEntry => Boolean(entry)));
   const blockIds = entryBlockIds([call, result]);
   const state = result?.rowState ?? call?.rowState;
-  const resultParts = resultItem ? inputItemParts(resultItem).length : 0;
-  const marks = rowMarks([call, result], result && selectionHits([result], selection, turnId) ? "Tool results" : "Tool calls", "conversation", selection, turnId);
-  return <Row accent={marks.accent} defaultOpen={marks.open || isFresh(call, result)} dimmed={marks.dimmed} summary={<>
-    <LinkSwatch blockIds={blockIds} icon={TerminalIcon} label={call ? "Tool calls" : "Tool results"} layer="conversation" onSelectToken={onSelectToken} selection={selection} turnId={turnId}/>
+  const marks = rowMarks([call, result], result && selectionHits([result], selection, turnId) ? "results" : "model", selection, turnId);
+  return <Row accent={marks.accent} defaultOpen={defaultOpen || marks.open || isFresh(call, result)} dimmed={marks.dimmed} summary={<>
+    <LinkSwatch blockIds={blockIds} category={call ? "model" : "results"} icon={TerminalIcon} label={call ? "Tool calls" : "Tool results"} onSelectToken={onSelectToken} selection={selection} turnId={turnId}/>
     <span className="shrink-0 font-mono text-sm text-ink">{namespace ? <span className="text-muted">{namespace}.</span> : null}{presentation?.name || "Tool result"}</span>
     <Meta>{title}</Meta>
-    <RowEnd badge={failed ? <Badge tone="danger">failed</Badge> : <StateBadge state={state}/>} tokens={tokens}/>
+    <RowEnd badge={failed ? <Badge tone="danger">failed</Badge> : failedParts ? <Badge tone="danger">{readout && readout.parts.length > 1 ? `${failedParts} failed` : "failed"}</Badge> : <StateBadge state={state}/>} tokens={tokens}/>
   </>}>
     <div className="space-y-4">
       {call && callItem && presentation ? <BlockAnchor blockIds={entryBlockIds([call])} turnId={turnId}>
@@ -1099,18 +1241,57 @@ function ToolExchangeRow({ call, onSelectToken, result, selection, turnId }: Row
         <CallInput value={presentation.input}/>
       </BlockAnchor> : null}
       {result && resultItem && outcome ? <BlockAnchor blockIds={entryBlockIds([result])} turnId={turnId}>
-        <BlockHeading aside={tokenAside(result.tokens)}>{["Result", outcome.status, outcome.elapsed && `wall ${outcome.elapsed}`, resultParts > 1 ? `${resultParts} parts` : ""].filter(Boolean).join(" · ")}</BlockHeading>
-        <ToolOutputView value={outcome.output}/>
-      </BlockAnchor> : <p className="text-xs text-muted">The result is not part of this request.</p>}
+        <BlockHeading aside={tokenAside(result.tokens)}>{["Result", outcome.status, outcome.elapsed && `wall ${outcome.elapsed}`, readout && readout.parts.length > 1 ? `${readout.parts.length} outputs` : ""].filter(Boolean).join(" · ")}</BlockHeading>
+        {readout ? <ResultPartsView parts={readout.parts}/>
+          : <ToolOutputView format={call?.outputFormat ?? result.outputFormat ?? TEXT_FORMAT} key={plain?.output.length} value={plain?.output ?? ""}/>}
+      </BlockAnchor> : <p className="text-xs text-muted">{inResponse ? "The model called this tool in its response; the result is part of the next turn." : "The result is not part of this request."}</p>}
     </div>
   </Row>;
 }
 
-function GenericRow({ entry, onSelectToken, selection, turnId }: RowProps & { entry: InputEntry }) {
+/* The command a nested call runs, as its first line. */
+function callCommand(call: ToolCall): string {
+  const input = asRecord(call.input);
+  const source = CALL_SOURCE_KEYS.map((key) => input[key]).find((value): value is string => typeof value === "string") ?? "";
+  const lines = source.trim().split("\n");
+  return lines.length > 1 ? `${lines[0]} …` : lines[0];
+}
+
+/* Each output of a multi-part result under its own line: the nested call that
+   produced it, its command, and only the facts worth a glance. */
+function ResultPartsView({ parts }: { parts: ResultReadout["parts"] }) {
+  if (!parts.length) return <EmptyState framed>The tool completed without captured output.</EmptyState>;
+  const numbered = parts.length > 1;
+  return <div className="space-y-4">{parts.map((part, position) => {
+    const command = part.call ? callCommand(part.call) : "";
+    const fullCommand = part.call ? textValue(CALL_SOURCE_KEYS.map((key) => asRecord(part.call?.input)[key]).find((value) => typeof value === "string")) : "";
+    const headed = numbered || part.call || part.failure || part.facts.length || part.truncated;
+    const title = headed ? <span className="flex min-w-0 flex-1 items-center gap-2">
+      {numbered ? <span className="w-4 shrink-0 text-right font-mono">{position + 1}</span> : null}
+      {part.call ? <span className="shrink-0 font-mono text-ink">{part.call.name}</span> : null}
+      {command ? <span className="min-w-0 truncate font-mono" title={fullCommand}>{command}</span> : null}
+      {part.failure ? <Badge tone="danger">{part.failure}</Badge> : null}
+      {part.truncated ? <span className="shrink-0" title={[part.truncated.tokens && `Original ${part.truncated.tokens.toLocaleString()} tokens`, part.truncated.lines && `${part.truncated.lines.toLocaleString()} lines`].filter(Boolean).join(" · ")}><Badge tone="warning">truncated</Badge></span> : null}
+      {part.facts.length ? <span className="shrink-0">{part.facts.join(" · ")}</span> : null}
+      {part.tokens ? <span className="ml-auto shrink-0 font-mono">{part.tokens.tokens.toLocaleString()} tok</span> : null}
+    </span> : undefined;
+    const body = part.body;
+    return <div className={position ? "border-t border-line pt-4" : undefined} key={part.partIndex}>
+      {body.kind === "text" ? <ToolOutputView format={part.format} key={body.text.length} title={title} value={body.text}/>
+        : <div className="space-y-2">
+          {title ? <div className="flex items-center text-xs text-muted">{title}</div> : null}
+          {body.kind === "value" ? <StructuredValue value={body.value}/>
+            : <div className="flex flex-wrap items-center gap-2"><Badge mono>{body.type}</Badge><span className="text-xs text-muted">Attachment metadata is available in Raw JSON.</span></div>}
+        </div>}
+    </div>;
+  })}</div>;
+}
+
+function GenericRow({ defaultOpen = false, entry, onSelectToken, selection, turnId }: RowProps & { entry: InputEntry }) {
   const blockIds = entryBlockIds([entry]);
-  const marks = rowMarks([entry], entry.inputClass.label, entry.inputClass.layer, selection, turnId);
-  return <Row accent={marks.accent} defaultOpen={marks.open || isFresh(entry)} dimmed={marks.dimmed} summary={<>
-    <LinkSwatch blockIds={blockIds} label={entry.inputClass.label} layer={entry.inputClass.layer} onSelectToken={onSelectToken} selection={selection} turnId={turnId}/>
+  const marks = rowMarks([entry], entry.inputClass.category, selection, turnId);
+  return <Row accent={marks.accent} defaultOpen={defaultOpen || marks.open || isFresh(entry)} dimmed={marks.dimmed} summary={<>
+    <LinkSwatch blockIds={blockIds} category={entry.inputClass.category} label={entry.inputClass.label} onSelectToken={onSelectToken} selection={selection} turnId={turnId}/>
     <span className="shrink-0 text-ink">{entry.inputClass.label}</span>
     <Meta mono>{textValue(entry.item.type) || "input"}</Meta>
     <RowEnd badge={<StateBadge state={entry.rowState}/>} tokens={entry.tokens}/>
@@ -1209,9 +1390,10 @@ function groupMinorRows(entries: InputEntry[]): Array<InputEntry | InputEntry[]>
 
 function MinorRowsGroup({ entries, ...props }: RowProps & { entries: InputEntry[] }) {
   const labels = [...new Set(entries.map((entry) => entry.inputClass.label))];
+  const swatches = [...new Map(entries.map((entry) => [entry.inputClass.label, entry.inputClass.category])).entries()];
   const matched = entries.find((entry) => selectionHits([entry], props.selection, props.turnId));
-  return <Row accent={matched ? categoryColor(matched.inputClass.label, matched.inputClass.layer) : undefined} defaultOpen={Boolean(matched)} dimmed={selectionIds(props.selection, props.turnId).length > 0 && !matched} summary={<>
-    <span className="flex shrink-0 -space-x-1">{labels.slice(0, 4).map((label) => <span className="rounded-mark ring-2 ring-panel" key={label}><CategorySwatch label={label} layer={entries[0].inputClass.layer}/></span>)}</span>
+  return <Row accent={matched ? categoryColor(matched.inputClass.category) : undefined} defaultOpen={Boolean(matched)} dimmed={selectionIds(props.selection, props.turnId).length > 0 && !matched} summary={<>
+    <span className="flex shrink-0 -space-x-1">{swatches.slice(0, 4).map(([label, category]) => <span className="rounded-mark ring-2 ring-panel" key={label}><CategorySwatch category={category}/></span>)}</span>
     <span className="min-w-0 flex-1 truncate text-ink">{labels.join(" · ")}</span>
     <RowEnd badge={<StateBadge state={entries.find((entry) => entry.rowState)?.rowState}/>} tokens={sumTokens(entries)}/>
   </>}><NestedRows>{entries.map((entry) => <EntryRow entry={entry} key={entry.key} {...props}/>)}</NestedRows></Row>;
@@ -1286,7 +1468,7 @@ function earlierEnvironment(earlierTurns: TurnModel[]): string | undefined {
     for (const raw of collectInput(turn)) {
       const item = asRecord(raw);
       if (!isMessagePartItem(item)) continue;
-      const parts = inputItemParts(item);
+      const parts = messageParts(turnPlugins(turn).agent, item) ?? inputItemParts(item);
       for (let partIndex = 0; partIndex < parts.length; partIndex += 1) {
         if (classifyInput(turn.record, item, parts[partIndex], partIndex).label === "Environment") return capturedText(parts[partIndex]);
       }
@@ -1339,7 +1521,7 @@ function StructuredRequest({ earlierTurns, onSelectToken, selection, turn }: { e
   const input = useMemo(() => collectInput(turn), [turn]);
   const entries = useMemo(() => inputEntries(turn, input), [turn, input]);
   const previousEnvironment = useMemo(() => earlierEnvironment(earlierTurns), [earlierTurns]);
-  const topLevelTools = asArray(body.tools);
+  const topLevelTools = toolDeclarations(turnPlugins(turn).protocol, body);
   const byLayer = new Map<InputLayer, InputEntry[]>();
   for (const entry of entries) byLayer.set(entry.inputClass.layer, [...(byLayer.get(entry.inputClass.layer) || []), entry]);
   const lastPromptKey = [...entries].reverse().find((entry) => entry.inputClass.label === "User prompt")?.key || "";
@@ -1354,9 +1536,13 @@ function StructuredRequest({ earlierTurns, onSelectToken, selection, turn }: { e
       const layerEntries = byLayer.get(layer) || [];
       if (layer === "capabilities") {
         if (!layerEntries.length && !topLevelTools.length) return null;
+        // Tool declarations read as a tool list; catalogs (skills, MCP servers, …)
+        // are sections of text like any other.
         return <LayerSection entries={layerEntries} key={layer} layer={layer} selection={selection} turnId={turnId}>
           {topLevelTools.length ? <ToolDefinitionRow tools={topLevelTools} {...rowProps}/> : null}
-          {layerEntries.map((entry) => <ToolDefinitionRow entry={entry} key={entry.key} tools={entry.item.tools} {...rowProps}/>)}
+          {layerEntries.map((entry) => Array.isArray(entry.item.tools)
+            ? <ToolDefinitionRow entry={entry} key={entry.key} tools={entry.item.tools} {...rowProps}/>
+            : <EntryRow entry={entry} key={entry.key} {...rowProps}/>)}
         </LayerSection>;
       }
       if (!layerEntries.length) return null;
@@ -1378,10 +1564,186 @@ function StructuredRequest({ earlierTurns, onSelectToken, selection, turn }: { e
   </div>;
 }
 
+/* ── Timeline ────────────────────────────────────────────────────────────────
+   A turn is the moment the model is called; the conversation is the trajectory
+   before it. The timeline reads that trajectory in order as steps by role: the
+   user's prompt, the model's reasoning, messages, and tool calls (each with its
+   result), results without a captured call, and context the harness injected.
+   Harness instructions and tool definitions belong to Tokens, not the timeline.
+   Steps the previous turn already had fold into "Earlier"; what this turn adds
+   stays open, and the turn's own response closes the timeline. */
+
+type StepRole = "user" | "model" | "tool" | "context";
+
+interface TimelineStep {
+  entries: InputEntry[];
+  fresh: boolean;
+  key: string;
+  role: StepRole;
+}
+
+const STEP_META: Record<StepRole, { icon: IconComponent; label: string }> = {
+  context: { icon: PinIcon, label: "Context" },
+  model: { icon: SparkleIcon, label: "Model" },
+  tool: { icon: TerminalIcon, label: "Tool" },
+  user: { icon: UserIcon, label: "User" },
+};
+
+function stepRole(entry: InputEntry): StepRole {
+  const kind = entry.part === undefined ? toolEventKind(entry.item) : null;
+  if (kind === "result") return "tool";
+  if (kind === "call") return "model";
+  const label = entry.inputClass.label;
+  if (label === "Tool results") return "tool";
+  if (label === "Reasoning" || label === "Assistant messages" || label === "Tool calls") return "model";
+  if (label === "User prompt") return "user";
+  if (entry.inputClass.layer === "context") return "context";
+  const role = textValue(entry.item.role).toLowerCase();
+  return role === "assistant" || role === "model" ? "model" : role === "user" ? "user" : "context";
+}
+
+/* Items the previous turn in the same thread already had: the longest shared
+   prefix of its input and output with this turn's input. Protocols with item ids
+   answer this per item instead (see itemStatesByTurn). */
+/* The turn's items as timeline steps; protocols that pack several steps into one
+   message split them (see ProtocolAdapter.expand). */
+function timelineItems(turn: TurnModel, items: unknown[]): unknown[] {
+  const expand = turnPlugins(turn).protocol?.expand;
+  return expand ? items.flatMap((item) => expand(item)) : items;
+}
+
+function previousInThread(turn: TurnModel, earlierTurns: TurnModel[]): TurnModel | undefined {
+  return [...earlierTurns].reverse().find((candidate) => candidate.lane === turn.lane && candidate.protocol === turn.protocol);
+}
+
+/* Item ids the previous turn in this thread returned. The model's own steps first
+   appear in the next request's input, so by input alone they would read as new. */
+function previousOutputIds(turn: TurnModel, earlierTurns: TurnModel[]): Set<string> {
+  const previous = previousInThread(turn, earlierTurns);
+  const output = previous ? turnPlugins(previous).protocol?.output?.(previous.record) || [] : [];
+  return new Set(output.map((item) => textValue(asRecord(item).id)).filter(Boolean));
+}
+
+function carriedPrefix(turn: TurnModel, earlierTurns: TurnModel[]): number {
+  const previous = previousInThread(turn, earlierTurns);
+  if (!previous) return 0;
+  // Compare what a step says, not how it was serialized: a response and the next
+  // request carry the same step with different envelopes (thinking signatures,
+  // cache breakpoints, extra metadata fields).
+  const signature = (value: unknown) => {
+    const item = asRecord(value);
+    return stableValue({ arguments: item.arguments, call: item.call_id, name: item.name, output: item.output, role: item.role, text: capturedText(item.content ?? item.summary ?? item.text), type: item.type });
+  };
+  const before = timelineItems(previous, [...collectInput(previous), ...(turnPlugins(previous).protocol?.output?.(previous.record) || [])]).map(signature);
+  const current = timelineItems(turn, collectInput(turn)).map(signature);
+  let shared = 0;
+  while (shared < current.length && shared < before.length && current[shared] === before[shared]) shared += 1;
+  return shared;
+}
+
+function itemIndexOf(entry: InputEntry): number {
+  const match = /^item-(\d+)/.exec(entry.key);
+  return match ? Number(match[1]) : -1;
+}
+
+function groupSteps(entries: InputEntry[], isFreshEntry: (entry: InputEntry) => boolean, prefix: string): TimelineStep[] {
+  const steps: TimelineStep[] = [];
+  for (const entry of pairToolExchanges(entries.filter((item) => item.inputClass.layer !== "instructions" && item.inputClass.layer !== "capabilities"))) {
+    const resultOnly = Boolean(entry.result && !isFreshEntry(entry) && isFreshEntry(entry.result));
+    // A call from an earlier turn whose result arrives now is this turn's tool step.
+    const role = resultOnly ? "tool" : stepRole(entry);
+    const fresh = isFreshEntry(entry) || resultOnly;
+    const last = steps[steps.length - 1];
+    if (last && last.role === role && last.fresh === fresh) last.entries.push(entry);
+    else steps.push({ entries: [entry], fresh, key: `${prefix}${entry.key}`, role });
+  }
+  return steps;
+}
+
+function stepSummary(step: TimelineStep): string {
+  if (step.role === "user") return "";
+  const calls = step.entries.filter((entry) => entry.part === undefined && toolEventKind(entry.item) === "call").length
+    + step.entries.filter((entry) => entry.inputClass.label === "Tool calls" && entry.part !== undefined).length;
+  const reasoning = step.entries.some((entry) => entry.inputClass.label === "Reasoning");
+  const message = step.entries.some((entry) => entry.inputClass.label === "Assistant messages");
+  if (step.role === "model") return [reasoning ? "reasoning" : "", message ? "message" : "", calls ? `${calls} ${calls === 1 ? "call" : "calls"}` : ""].filter(Boolean).join(" · ");
+  return `${step.entries.length} ${step.entries.length === 1 ? "item" : "items"}`;
+}
+
+function TimelineStepView({ open, outputTokens, rowProps, step, tone }: { open: boolean; outputTokens?: number; rowProps: RowProps; step: TimelineStep; tone?: "carried" | "response" }) {
+  const meta = STEP_META[step.role];
+  // Output has no per-item counts; the response shows the turn's measured output tokens.
+  const tokens = tone === "response" ? (outputTokens ? { cached: 0, tokens: outputTokens } : undefined) : sumTokens(step.entries);
+  const summary = stepSummary(step);
+  return <li className={`t-row relative pl-8 ${tone === "carried" ? "opacity-70" : ""}`}>
+    <span aria-hidden="true" className={`absolute left-0 top-0.5 grid size-6 place-items-center rounded-full border bg-panel ${tone === "response" ? "border-ink text-ink" : "border-line text-muted"}`}><meta.icon className="size-3.5"/></span>
+    <div className="mb-1.5 flex min-h-6 items-center gap-2 text-xs">
+      <span className="font-semibold text-ink">{tone === "response" ? "Response" : meta.label}</span>
+      {summary ? <span className="truncate text-muted">{summary}</span> : null}
+      {step.fresh && tone !== "response" ? <Badge tone="success">new</Badge> : null}
+      {tokens ? <span className="ml-auto font-mono tabular-nums text-muted">{tokens.tokens.toLocaleString()}</span> : null}
+    </div>
+    <div className="divide-y divide-line overflow-hidden rounded-inset border border-line">
+      {step.entries.map((entry) => <EntryRow entry={entry} key={entry.key} {...rowProps} defaultOpen={open && step.role !== "context"} inResponse={tone === "response"}/>)}
+    </div>
+  </li>;
+}
+
+/* A run of steps this request carries from before, folded to one line. */
+function CarriedSteps({ label, note, rowProps, steps }: { label: string; note: string; rowProps: RowProps; steps: TimelineStep[] }) {
+  const [open, setOpen] = useState(false);
+  if (!steps.length) return null;
+  return <li className="relative pl-8">
+    <span aria-hidden="true" className="absolute left-0 top-0 grid size-6 place-items-center rounded-full border border-line bg-panel text-muted"><HistoryIcon className="size-3.5"/></span>
+    <button aria-expanded={open} className="flex min-h-6 items-center gap-2 text-xs text-muted hover:text-ink" onClick={() => setOpen((value) => !value)} type="button">
+      <ChevronRightIcon className={`size-3.5 transition-transform ${open ? "rotate-90" : ""}`}/>
+      <span className="font-semibold">{label}</span>
+      <span>{steps.length} {steps.length === 1 ? "step" : "steps"} {note}</span>
+    </button>
+    {open ? <ol className="mt-3 space-y-5">{steps.map((step) => <TimelineStepView key={step.key} open={false} rowProps={rowProps} step={step} tone="carried"/>)}</ol> : null}
+  </li>;
+}
+
+function TimelineRequest({ earlierTurns, onSelectToken, selection, turn }: { earlierTurns: TurnModel[]; onSelectToken: (selection: TokenSelection | null) => void; selection: TokenSelection | null; turn: TurnModel }) {
+  const input = useMemo(() => timelineItems(turn, collectInput(turn)), [turn]);
+  const entries = useMemo(() => inputEntries(turn, input), [turn, input]);
+  const hasIds = entries.some((entry) => entry.state);
+  const prefix = useMemo(() => (hasIds ? 0 : carriedPrefix(turn, earlierTurns)), [earlierTurns, hasIds, turn]);
+  const returned = useMemo(() => (hasIds ? previousOutputIds(turn, earlierTurns) : new Set<string>()), [earlierTurns, hasIds, turn]);
+  const isFreshEntry = (entry: InputEntry) => (hasIds ? (entry.state === "new" || entry.state === "changed") && !returned.has(entry.itemId) : itemIndexOf(entry) >= prefix);
+  const steps = groupSteps(entries, isFreshEntry, "in:");
+  const output = useMemo(() => timelineItems(turn, turnPlugins(turn).protocol?.output?.(turn.record) || []), [turn]);
+  const response = useMemo(() => groupSteps(inputEntries(turn, output), () => true, "out:"), [output, turn]);
+  const rowProps: RowProps = { onSelectToken, selection, turnId: turn.id };
+
+  // Steps stay in order. Carried steps fold in two runs around the prompt that
+  // started this query, which stays visible so the new steps have their context.
+  const firstFresh = steps.findIndex((step) => step.fresh);
+  const splitAt = firstFresh < 0 ? steps.length : firstFresh;
+  const promptIndex = steps.slice(0, splitAt).map((step) => step.role).lastIndexOf("user");
+  const beforePrompt = promptIndex >= 0 ? steps.slice(0, promptIndex) : steps.slice(0, splitAt);
+  const prompt = promptIndex >= 0 ? steps[promptIndex] : undefined;
+  const sincePrompt = promptIndex >= 0 ? steps.slice(promptIndex + 1, splitAt) : [];
+  const current = steps.slice(splitAt);
+
+  return <div className="space-y-4 tf-pad">
+    <ChainNote turn={turn}/>
+    <ol className="relative space-y-5 before:absolute before:bottom-3 before:left-3 before:top-3 before:w-px before:bg-line">
+      <CarriedSteps label="Earlier" note="before this query" rowProps={rowProps} steps={beforePrompt}/>
+      {prompt ? <TimelineStepView key={prompt.key} open rowProps={rowProps} step={prompt}/> : null}
+      <CarriedSteps label="So far" note="in this query, before this turn" rowProps={rowProps} steps={sincePrompt}/>
+      {current.map((step) => <TimelineStepView key={step.key} open rowProps={rowProps} step={step}/>)}
+      {response.map((step, index) => <TimelineStepView key={step.key} open outputTokens={index === 0 ? turn.output : undefined} rowProps={rowProps} step={step} tone="response"/>)}
+    </ol>
+    {!steps.length && !response.length ? <EmptyState framed>No conversation items were captured for this turn.</EmptyState> : null}
+  </div>;
+}
+
 function RequestBody({ earlierTurns, focusPath, mode, onSelectToken, selection, turn }: { earlierTurns: TurnModel[]; focusPath?: JsonPathPart[] | null; mode: RequestMode; onSelectToken: (selection: TokenSelection | null) => void; selection: TokenSelection | null; turn: TurnModel }) {
   const record = turn.record;
   const turnId = turn.id;
   const selectedPath = useMemo(() => focusPath || selectedJsonPath(record, selection, turnId), [focusPath, record, selection, turnId]);
+  if (mode === "timeline") return <TimelineRequest earlierTurns={earlierTurns} onSelectToken={onSelectToken} selection={selection} turn={turn}/>;
   if (mode === "structured") return <StructuredRequest earlierTurns={earlierTurns} onSelectToken={onSelectToken} selection={selection} turn={turn}/>;
   return <div className="tf-pad"><div className="tf-card overflow-hidden"><RawJsonTree selectedBlockId={selection?.turnId === turnId ? selection.blockId : undefined} selectedPath={selectedPath} turnId={turnId} value={record}/></div></div>;
 }
@@ -1404,7 +1766,7 @@ function SelectionChip({ onJump, onSelectToken, selection }: { onJump: (selectio
     onJump(next);
   };
   return <span className="tf-control inline-flex max-w-full items-center gap-1.5 rounded-full border border-line bg-canvas pl-2.5 pr-1 text-xs">
-    <CategorySwatch label={selection.label} layer={selection.layer}/>
+    <CategorySwatch category={selection.category} layer={selection.layer}/>
     <span className="max-w-40 truncate font-medium text-ink">{selection.label}{selection.layer ? " layer" : ""}</span>
     {ids.length > 1 ? <span className="flex items-center font-mono text-xs text-muted">
       <button aria-label="Previous matching block" className="grid size-11 place-items-center rounded-full hover:bg-fill-hover hover:text-ink" onClick={() => move(-1)} type="button"><ChevronLeftIcon className="size-4"/></button>
@@ -1437,7 +1799,7 @@ function SearchResults({ current, hits, onPick, query }: { current: number; hits
 /* The turn level of the workspace: one selected turn's request, beside the flow. */
 export function RequestView({ jumpToBlock, onNavigate, onSelectToken, selection, turn, turns }: { jumpToBlock: (TokenSelection & { nonce: number }) | null; onNavigate: (index: number | null) => void; onSelectToken: (selection: TokenSelection | null) => void; selection: TokenSelection | null; turn: TurnModel; turns: TurnModel[] }) {
   const [scope, setScope] = useState<RequestScope>("turn");
-  const [mode, setMode] = useState<RequestMode>("structured");
+  const [mode, setMode] = useState<RequestMode>("timeline");
   const [query, setQuery] = useState("");
   const [cursor, setCursor] = useState({ index: -1, query: "" });
   const [listOpen, setListOpen] = useState(true);
@@ -1526,8 +1888,8 @@ export function RequestView({ jumpToBlock, onNavigate, onSelectToken, selection,
     // On narrow screens the result list would cover the match, so fold it after a jump.
     if (window.matchMedia("(max-width: 1023px)").matches) setListOpen(false);
     const reveal = { nonce: Date.now(), query, turnId: turn.id };
-    if (mode === "structured" && hit.blockId) {
-      const next: TokenSelection = { blockId: hit.blockId, blockIds: [hit.blockId], label: hit.label, turnId: turn.id };
+    if (mode !== "raw" && hit.blockId) {
+      const next: TokenSelection = { blockId: hit.blockId, blockIds: [hit.blockId], category: hit.category, label: hit.label, turnId: turn.id };
       onSelectToken(next);
       setLocalJump({ ...next, ...reveal });
     } else {
@@ -1574,7 +1936,7 @@ export function RequestView({ jumpToBlock, onNavigate, onSelectToken, selection,
         </div>
         {selection?.turnId === turn.id ? <SelectionChip onJump={(next) => setLocalJump({ ...next, nonce: Date.now() })} onSelectToken={onSelectToken} selection={selection}/> : null}
         <div className="ml-auto flex items-center gap-1">
-          <Segmented label="Request view" onChange={setView} options={[["structured", "Structured"], ["raw", "Raw"], ["changes", "Changes"]]} value={view}/>
+          <Segmented label="Request view" onChange={setView} options={[["timeline", "Timeline"], ["structured", "Tokens"], ["raw", "Raw"], ["changes", "Changes"]]} value={view}/>
           <IconButton active={searchOpen || Boolean(query)} aria-expanded={searchOpen || Boolean(query)} className="-mr-2" label="Search this turn" onClick={() => { if (searchOpen || query) { setSearchOpen(false); setQuery(""); } else openSearch(); }}><SearchIcon/></IconButton>
         </div>
       </div>

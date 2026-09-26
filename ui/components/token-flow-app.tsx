@@ -1,21 +1,29 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { CompareView } from "./views/compare-view";
 import { ConversationsView } from "./views/conversations-view";
 import { WorkspaceView } from "./views/workspace-view";
 
-function routeFromPathname(pathname: string): { kind: "dashboard" } | { kind: "session"; id: string } {
+type Route = { kind: "dashboard" } | { kind: "session"; id: string } | { kind: "compare"; ids: string[] };
+
+function routeFromLocation(pathname: string, search: string): Route {
   const match = pathname.match(/^\/dashboard\/session\/([^/]+)/);
-  return match ? { kind: "session", id: decodeURIComponent(match[1]) } : { kind: "dashboard" };
+  if (match) return { kind: "session", id: decodeURIComponent(match[1]) };
+  if (/^\/dashboard\/compare\/?$/.test(pathname)) {
+    const ids = (new URLSearchParams(search).get("ids") || "").split(",").map((id) => id.trim()).filter(Boolean);
+    if (ids.length) return { kind: "compare", ids };
+  }
+  return { kind: "dashboard" };
 }
 
 export function TokenFlowApp() {
-  const [route, setRoute] = useState<{ kind: "dashboard" } | { kind: "session"; id: string }>({ kind: "dashboard" });
+  const [route, setRoute] = useState<Route>({ kind: "dashboard" });
 
   useEffect(() => {
     const savedTheme = localStorage.getItem("token-flow-theme") ?? localStorage.getItem("packlite-theme");
     if (savedTheme === "light" || savedTheme === "dark") document.documentElement.dataset.theme = savedTheme;
-    const syncRoute = () => setRoute(routeFromPathname(window.location.pathname));
+    const syncRoute = () => setRoute(routeFromLocation(window.location.pathname, window.location.search));
     syncRoute();
     window.addEventListener("popstate", syncRoute);
     return () => window.removeEventListener("popstate", syncRoute);
@@ -23,12 +31,16 @@ export function TokenFlowApp() {
 
   function navigate(path: string) {
     window.history.pushState({}, "", path);
-    setRoute(routeFromPathname(path));
+    setRoute(routeFromLocation(window.location.pathname, window.location.search));
     window.scrollTo({ top: 0, behavior: "instant" });
   }
 
   if (route.kind === "session") {
     return <WorkspaceView key={route.id} sessionId={route.id} onBack={() => navigate("/dashboard")} />;
   }
-  return <ConversationsView onOpen={(id) => navigate(`/dashboard/session/${encodeURIComponent(id)}`)} />;
+  const open = (id: string) => navigate(`/dashboard/session/${encodeURIComponent(id)}`);
+  if (route.kind === "compare") {
+    return <CompareView ids={route.ids} key={route.ids.join(",")} onBack={() => navigate("/dashboard")} onOpen={open} />;
+  }
+  return <ConversationsView onCompare={(ids) => navigate(`/dashboard/compare?ids=${ids.map(encodeURIComponent).join(",")}`)} onOpen={open} />;
 }

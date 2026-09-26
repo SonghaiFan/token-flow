@@ -63,7 +63,14 @@ Supported clients are plugins; never branch on a client id outside its plugin.
   agent sent it: which records are turns, the token/cache schema, where system
   text and items live, typed content blocks, and server-side chaining. One agent
   can speak several protocols (Pi uses Anthropic Messages or Chat Completions).
-- Token categories come from provider counts first: per-item attribution
+- Every input block has one of seven fixed categories and a free detail label
+  (`.agents/docs/standards/token-model.md`). Plugins build classes with
+  `inputClass(category, detail)` and never add a category.
+- Plugins also say which requests are not the conversation: `metadataRequest`
+  for auxiliary ones, `thread()` with `background: true` for work the harness
+  runs on its own, and `compactionPrompts` for summarize-and-continue requests.
+  Views compare conversations by the conversation scope only.
+- Token counts per category come from provider counts first: per-item attribution
   (`blockTokens`), then prompt-cache counts (`cachePrefix`). A cache read counts
   as carried from an earlier turn only when it equals that turn's tokens up to its
   last breakpoint and the system text, tools, and items up to that breakpoint are
