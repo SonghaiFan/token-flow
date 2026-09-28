@@ -8,7 +8,16 @@ from pathlib import Path
 import pytest
 
 from token_tap.storage.history import cleanup_trace_sessions, delete_trace_history, migrate_legacy_traces
-from token_tap.storage.trace_store import TraceStore, get_trace_store, reset_trace_store, resolve_db_path
+from token_tap.storage.trace_store import (
+    TraceStore,
+    database_settings_path,
+    get_trace_store,
+    read_configured_working_directory,
+    reset_trace_store,
+    resolve_db_path,
+    save_configured_db_path,
+    save_configured_working_directory,
+)
 
 
 def test_token_flow_db_override_takes_precedence(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
@@ -62,6 +71,37 @@ def test_default_db_prefers_each_newer_product_generation(
     token_flow.touch()
 
     assert resolve_db_path() == token_flow.resolve()
+
+
+def test_dashboard_database_setting_is_persistent(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    monkeypatch.delenv("TOKEN_FLOW_DB", raising=False)
+    monkeypatch.delenv("PACKLITE_DB", raising=False)
+    monkeypatch.delenv("CLOUDTAP_DB", raising=False)
+    monkeypatch.setenv("TOKEN_FLOW_SETTINGS", str(tmp_path / "settings.json"))
+    selected = tmp_path / "elsewhere" / "selected.sqlite3"
+
+    save_configured_db_path(selected)
+
+    assert resolve_db_path() == selected.resolve()
+    assert json.loads(database_settings_path().read_text())["database_path"] == str(selected.resolve())
+
+
+def test_dashboard_working_directory_is_persistent_without_replacing_database_setting(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setenv("TOKEN_FLOW_SETTINGS", str(tmp_path / "settings.json"))
+    database = tmp_path / "traces.sqlite3"
+    project = tmp_path / "project"
+    project.mkdir()
+
+    save_configured_db_path(database)
+    save_configured_working_directory(project)
+
+    assert read_configured_working_directory() == project.resolve()
+    assert json.loads(database_settings_path().read_text()) == {
+        "database_path": str(database.resolve()),
+        "working_directory": str(project.resolve()),
+    }
 
 
 def _write_legacy_session(base: Path, stem: str, *, date: str = "2026-05-01") -> Path:

@@ -16,6 +16,7 @@ from pathlib import Path
 
 from token_tap.agents import AGENTS
 from token_tap.agents.base import AgentPlugin
+from token_tap.storage.trace_store import read_configured_working_directory, save_configured_working_directory
 
 CaptureChanged = Callable[[], Awaitable[None]]
 
@@ -82,6 +83,7 @@ class CaptureManager:
         self._started_at: str | None = None
         self._exit_code: int | None = None
         self._error: str | None = None
+        self._working_directory = read_configured_working_directory()
         self._lock = asyncio.Lock()
 
     @property
@@ -105,7 +107,7 @@ class CaptureManager:
             "available": enabled and self.available,
             "client": self._client,
             "clients": [self._client_status(plugin, enabled) for plugin in capture_clients().values()],
-            "cwd": str(Path.cwd()),
+            "cwd": str(self._working_directory) if self._working_directory is not None else None,
             "state": self._state,
             "pid": process.pid if process is not None and process.returncode is None else None,
             "started_at": self._started_at,
@@ -125,9 +127,23 @@ class CaptureManager:
             "install_url": plugin.config.install_url,
         }
 
-    async def start(self, client: str = DEFAULT_CAPTURE_CLIENT) -> bool:
+    async def start(self, client: str = DEFAULT_CAPTURE_CLIENT, working_directory: str | Path | None = None) -> bool:
         """Start capture; return False if a capture process is already active."""
         plugin = capture_clients()[client]
+        project: Path | None = None
+        if plugin.dashboard_capture.terminal:
+            raw_project = working_directory or self._working_directory
+            if raw_project is None:
+                raise ValueError("Choose a project folder before starting a terminal agent")
+            candidate = Path(raw_project).expanduser()
+            if not candidate.is_absolute():
+                raise ValueError("Project folder must be an absolute path")
+            try:
+                project = candidate.resolve(strict=True)
+            except OSError as exc:
+                raise ValueError("Project folder does not exist") from exc
+            if not project.is_dir():
+                raise ValueError("Project folder must be a directory")
         async with self._lock:
             if self._process is not None and self._process.returncode is None:
                 return False
@@ -148,7 +164,8 @@ class CaptureManager:
             ]
             try:
                 if plugin.dashboard_capture.terminal:
-                    process = await self._start_in_terminal(command)
+                    assert project is not None
+                    process = await self._start_in_terminal(command, project)
                 else:
                     process = await asyncio.create_subprocess_exec(
                         *command,
@@ -162,21 +179,24 @@ class CaptureManager:
                 raise
 
             self._process = process
+            if project is not None:
+                self._working_directory = project
+                save_configured_working_directory(project)
             self._state = "capturing"
             self._watch_task = asyncio.create_task(self._watch(process))
 
         await self._notify_changed()
         return True
 
-    async def _start_in_terminal(self, command: list[str]) -> _TerminalProcess:
-        """Open a Terminal window running ``command`` in the dashboard's directory."""
+    async def _start_in_terminal(self, command: list[str], working_directory: Path) -> _TerminalProcess:
+        """Open a Terminal window running ``command`` in the chosen project."""
         run_dir = Path(tempfile.mkdtemp(prefix="token-flow-capture-"))
         pid_file = run_dir / "pid"
         script = run_dir / "capture.command"
         script.write_text(
             "#!/bin/sh\n"
             f"echo $$ > {shlex.quote(str(pid_file))}\n"
-            f"cd {shlex.quote(str(Path.cwd()))}\n"
+            f"cd {shlex.quote(str(working_directory))}\n"
             f"exec {shlex.join(command)}\n"
         )
         script.chmod(0o700)

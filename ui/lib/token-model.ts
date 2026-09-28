@@ -611,12 +611,16 @@ function laneFor(record: TraceRecord): string {
   const body = asObject(record.request?.body);
   const metadata = asObject(body.client_metadata);
   const headers = asObject(record.request?.headers);
-  return String(metadata.thread_id || body.prompt_cache_key || headers["thread-id"] || headers["session-id"] || "");
+  return String(metadata.thread_id || headers["thread-id"] || headers["session-id"] || "");
 }
 
 function threadOf(record: TraceRecord, agent: AgentPlugin, records: TraceRecord[], index: number): TurnModel["thread"] {
   const declared = agent.thread?.(record, { index, records }) || {};
-  return { id: declared.id || laneFor(record), label: declared.label, name: declared.name, parentId: declared.parentId, ...(declared.background ? { background: true } : {}) };
+  const metadata = asObject(asObject(record.request?.body).client_metadata);
+  const headers = asObject(record.request?.headers);
+  const id = declared.id || String(headers["thread-id"] || headers["session-id"] || "");
+  const parentId = typeof metadata["x-codex-parent-thread-id"] === "string" ? metadata["x-codex-parent-thread-id"] : undefined;
+  return { ...declared, id: id || `unknown-request:${index}`, label: declared.label || (id ? undefined : "Unknown thread"), parentId: declared.parentId || parentId };
 }
 
 /* A thread is background, and has a label, when any of its requests says so: later
@@ -624,11 +628,12 @@ function threadOf(record: TraceRecord, agent: AgentPlugin, records: TraceRecord[
 function sameThreadFacts(threads: Array<TurnModel["thread"]>): Array<TurnModel["thread"]> {
   const facts = new Map<string, { background?: boolean; label?: string }>();
   for (const thread of threads) {
-    const current = facts.get(thread.id) || {};
-    facts.set(thread.id, { background: current.background || thread.background, label: current.label || thread.label });
+    const key = thread.scopeId || thread.id;
+    const current = facts.get(key) || {};
+    facts.set(key, { background: current.background || thread.background, label: current.label || thread.label });
   }
   return threads.map((thread) => {
-    const shared = facts.get(thread.id) || {};
+    const shared = facts.get(thread.scopeId || thread.id) || {};
     return { ...thread, label: thread.label || shared.label, ...(shared.background ? { background: true } : {}) };
   });
 }
@@ -666,7 +671,7 @@ export function buildTurns(records: TraceRecord[], estimates?: TokenEstimates): 
     // A background thread's requests answer the harness, not a typed prompt.
     return threads[index].background && identity.kind !== "metadata" && identity.kind !== "compaction" ? { title: threads[index].label || "Background task", kind: "unknown" as const } : identity;
   });
-  const { states, changes } = itemStatesByTurn(contexts, threads.map((thread) => thread.id), identities.map((identity) => identity.kind === "metadata"));
+  const { states, changes } = itemStatesByTurn(contexts, threads.map((thread) => thread.scopeId || thread.id), identities.map((identity) => identity.kind === "metadata"));
   changes.forEach((change, index) => {
     // A request that continues from a summary names no prompt of its own.
     if (change?.rewritten && identities[index].kind === "unknown") identities[index] = { title: "Continue from summary", kind: "unknown" };

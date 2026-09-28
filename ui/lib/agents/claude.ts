@@ -107,6 +107,13 @@ export const claude: AgentPlugin = {
     [/^# (?:auto )?Memory\s*(?:\n|$)/i, inputClass("project", "Memory")],
     [/^# (?:MCP Server Instructions|Claude in Chrome browser automation)\s*(?:\n|$)/i, inputClass("harness", "Tool guide")],
     [/^Available agent types for the Agent tool:\s*(?:\n|$)/, inputClass("tools", "Sub-agents")],
+    // Observed Claude reminder envelopes. Match complete known prefixes without
+    // unwrapping or splitting the captured text; unfamiliar reminders stay Unknown.
+    [/^<system-reminder>\s*# Environment[^\S\r\n]*\r?\n/i, inputClass("runtime", "Environment")],
+    [/^<system-reminder>\s*Available agent types for the Agent tool:[^\S\r\n]*\r?\n/, inputClass("tools", "Sub-agents")],
+    [/^<system-reminder>\s*# MCP Server Instructions[^\S\r\n]*\r?\n/i, inputClass("harness", "Tool guide")],
+    [/^<system-reminder>\s*You are powered by the model named [^\r\n]+\. The exact model ID is /, inputClass("runtime", "Model information")],
+    [/^<system-reminder>\s*Today's date is \d{4}-\d{2}-\d{2}\.\s*<\/system-reminder>\s*$/, inputClass("runtime", "Date")],
     [/^<system-reminder>\s*(?:Codebase and user instructions|[\s\S]*?\n# claudeMd\n)/, inputClass("project", "CLAUDE.md")],
     [/^<system-reminder>\s*As you answer the user's questions, you can use the following context/, inputClass("runtime", "Environment")],
     [/^<system-reminder>\s*The following skills are available/, inputClass("tools", "Skills")],

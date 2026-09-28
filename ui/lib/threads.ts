@@ -43,7 +43,7 @@ export function threadTree(turns: TurnModel[]): ThreadTree {
       auxiliary.push(index);
       return;
     }
-    const id = turn.thread.id;
+    const id = turn.thread.scopeId || turn.thread.id;
     const node = nodes.get(id) || { background: turn.thread.background, branches: [], id, indices: [], label: turn.thread.label, name: turn.thread.name, parentId: turn.thread.parentId };
     node.indices.push(index);
     node.label ||= turn.thread.label;

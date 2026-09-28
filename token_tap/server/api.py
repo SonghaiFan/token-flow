@@ -5,7 +5,10 @@ from __future__ import annotations
 import asyncio
 import ipaddress
 import json
+import os
 import re
+import sqlite3
+import sys
 import tempfile
 from pathlib import Path
 from urllib.parse import quote, urlsplit
@@ -26,6 +29,7 @@ from token_tap.analysis.records import (
 )
 from token_tap.analysis.sessions import (
     build_session_query,
+    dashboard_trace_snapshot,
     ensure_trace_store,
     list_trace_agents,
     list_trace_sessions,
@@ -46,7 +50,15 @@ from token_tap.server.viewer import (
     _read_viewer_template,
 )
 from token_tap.storage.history import delete_trace_history
-from token_tap.storage.trace_store import get_trace_store, resolve_db_path
+from token_tap.storage.trace_store import (
+    TraceStore,
+    get_trace_store,
+    read_configured_working_directory,
+    reset_trace_store,
+    resolve_db_path,
+    save_configured_db_path,
+    token_flow_data_dir,
+)
 
 _DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 DEFAULT_SESSION_PAGE_LIMIT = 100
@@ -54,6 +66,30 @@ MAX_SESSION_PAGE_LIMIT = 500
 STATIC_UI_DIR = Path(__file__).parents[1] / "static_ui"
 STATIC_UI_INDEX_PATH = STATIC_UI_DIR / "index.html"
 _DASHBOARD_QUIT_TOKEN_HEADER = "X-Claude-Tap-Dashboard-Token"
+_OPEN_DATABASE_PICKER_SCRIPT = """
+use scripting additions
+on run argv
+    set startFolder to POSIX file (item 1 of argv) as alias
+    set chosenFile to choose file with prompt "Open a Token Flow database" default location startFolder
+    return POSIX path of chosenFile
+end run
+"""
+_NEW_DATABASE_PICKER_SCRIPT = """
+use scripting additions
+on run argv
+    set startFolder to POSIX file (item 1 of argv) as alias
+    set chosenFile to choose file name with prompt "Create a Token Flow database" default location startFolder default name (item 2 of argv)
+    return POSIX path of chosenFile
+end run
+"""
+_PROJECT_PICKER_SCRIPT = """
+use scripting additions
+on run argv
+    set startFolder to POSIX file (item 1 of argv) as alias
+    set chosenFolder to choose folder with prompt "Choose a project for your AI" default location startFolder
+    return POSIX path of chosenFolder
+end run
+"""
 
 
 class ServerAPI:
@@ -116,6 +152,125 @@ class ServerAPI:
         if self.dashboard_mode and _is_trusted_dashboard_token_request(request):
             payload["quit_token"] = self._dashboard_quit_token
         return web.json_response(payload)
+
+    async def _handle_database_settings(self, request: web.Request) -> web.Response:
+        """Return the database currently backing this dashboard."""
+        return web.json_response({"db_path": str(resolve_db_path()), "can_choose_path": sys.platform == "darwin"})
+
+    async def _handle_choose_database(self, request: web.Request) -> web.Response:
+        """Open the native macOS file chooser and return its selected path."""
+        if error := self._capture_mutation_error(request):
+            return error
+        if sys.platform != "darwin":
+            return web.json_response({"error": "The native database picker is only available on macOS"}, status=501)
+        try:
+            payload = await request.json()
+        except ValueError:
+            payload = {}
+        mode = payload.get("mode", "new") if isinstance(payload, dict) else "new"
+        current = resolve_db_path()
+        if mode == "existing":
+            start_folder = current.parent if current.parent.is_dir() else Path.home()
+            script = _OPEN_DATABASE_PICKER_SCRIPT
+            arguments = (str(start_folder),)
+        elif mode == "new":
+            start_folder = token_flow_data_dir()
+            try:
+                start_folder.mkdir(parents=True, exist_ok=True)
+            except OSError as exc:
+                return web.json_response({"error": f"Unable to create the Token Flow data folder: {exc}"}, status=500)
+            script = _NEW_DATABASE_PICKER_SCRIPT
+            arguments = (str(start_folder), "traces.sqlite3")
+        else:
+            return web.json_response({"error": "Database picker mode must be existing or new"}, status=400)
+        try:
+            process = await asyncio.create_subprocess_exec(
+                "osascript",
+                "-e",
+                script,
+                *arguments,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            stdout, stderr = await process.communicate()
+        except OSError as exc:
+            return web.json_response({"error": f"Unable to open Finder: {exc}"}, status=500)
+        if process.returncode:
+            message = stderr.decode("utf-8", errors="replace").strip()
+            if "User canceled" in message or "(-128)" in message:
+                return web.json_response({"path": None})
+            return web.json_response({"error": message or "Finder could not choose a database"}, status=500)
+        selected = stdout.decode("utf-8", errors="replace").strip()
+        return web.json_response({"path": selected or None})
+
+    async def _handle_set_database(self, request: web.Request) -> web.Response:
+        """Persist and immediately switch to a database selected in the dashboard."""
+        if error := self._capture_mutation_error(request):
+            return error
+        capture_state = self.capture_manager.status(enabled=self.dashboard_mode).get("state")
+        if capture_state in {"starting", "capturing", "stopping"}:
+            return web.json_response({"error": "Stop the active capture before changing databases"}, status=409)
+        override_name = next(
+            (name for name in ("TOKEN_FLOW_DB", "PACKLITE_DB", "CLOUDTAP_DB") if os.environ.get(name, "").strip()),
+            None,
+        )
+        if override_name:
+            return web.json_response(
+                {"error": f"The database path is controlled by the {override_name} environment variable"},
+                status=409,
+            )
+        try:
+            payload = await request.json()
+        except ValueError:
+            return web.json_response({"error": "Body must be JSON"}, status=400)
+        raw_path = payload.get("path") if isinstance(payload, dict) else None
+        if not isinstance(raw_path, str) or not raw_path.strip():
+            return web.json_response({"error": "Database path is required"}, status=400)
+        candidate = Path(raw_path.strip()).expanduser()
+        if not candidate.is_absolute():
+            return web.json_response({"error": "Database path must be absolute"}, status=400)
+        candidate = candidate.resolve()
+        if candidate.exists() and not candidate.is_file():
+            return web.json_response({"error": "Database path must point to a file"}, status=400)
+        try:
+            probe = TraceStore(candidate)
+            probe.close()
+            save_configured_db_path(candidate)
+            reset_trace_store()
+            get_trace_store()
+        except (OSError, sqlite3.Error, ValueError) as exc:
+            return web.json_response({"error": f"Unable to use that database: {exc}"}, status=400)
+        self._dashboard_snapshot = dashboard_trace_snapshot()
+        await self._broadcast_dashboard_event({"type": "refresh"})
+        return web.json_response({"db_path": str(resolve_db_path()), "can_choose_path": sys.platform == "darwin"})
+
+    async def _handle_choose_project(self, request: web.Request) -> web.Response:
+        """Open the native macOS folder chooser for a dashboard-launched CLI."""
+        if error := self._capture_mutation_error(request):
+            return error
+        if sys.platform != "darwin":
+            return web.json_response({"error": "The native project picker is only available on macOS"}, status=501)
+        current = read_configured_working_directory()
+        start_folder = current if current is not None else Path.home()
+        try:
+            process = await asyncio.create_subprocess_exec(
+                "osascript",
+                "-e",
+                _PROJECT_PICKER_SCRIPT,
+                str(start_folder),
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            stdout, stderr = await process.communicate()
+        except OSError as exc:
+            return web.json_response({"error": f"Unable to open Finder: {exc}"}, status=500)
+        if process.returncode:
+            message = stderr.decode("utf-8", errors="replace").strip()
+            if "User canceled" in message or "(-128)" in message:
+                return web.json_response({"path": None})
+            return web.json_response({"error": message or "Finder could not choose a project"}, status=500)
+        selected = stdout.decode("utf-8", errors="replace").strip()
+        return web.json_response({"path": selected.rstrip("/") or None})
 
     async def _handle_dashboard_quit(self, request: web.Request) -> web.Response:
         if not self.dashboard_mode:
@@ -181,6 +336,7 @@ class ServerAPI:
         if error := self._capture_mutation_error(request):
             return error
         client = DEFAULT_CAPTURE_CLIENT
+        working_directory = None
         if raw := await request.read():
             try:
                 payload = json.loads(raw)
@@ -188,6 +344,8 @@ class ServerAPI:
                 return web.json_response({"error": "Capture request body must be JSON"}, status=400)
             if isinstance(payload, dict) and payload.get("client") is not None:
                 client = payload["client"]
+            if isinstance(payload, dict) and payload.get("working_directory") is not None:
+                working_directory = payload["working_directory"]
         plugin = capture_clients().get(client)
         if plugin is None:
             return web.json_response({"error": f"Unsupported capture client: {client}"}, status=400)
@@ -199,7 +357,9 @@ class ServerAPI:
                 status=501,
             )
         try:
-            started = await self.capture_manager.start(client)
+            started = await self.capture_manager.start(client, working_directory)
+        except ValueError as exc:
+            return web.json_response({"error": str(exc)}, status=400)
         except OSError:
             return web.json_response(self.capture_manager.status(enabled=self.dashboard_mode), status=500)
         if not started:

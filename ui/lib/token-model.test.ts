@@ -2,13 +2,32 @@ import assert from "node:assert/strict";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { RequestView } from "../components/workspace/request-view";
+import { RawJsonTree } from "../components/workspace/raw-json-tree";
 import { nodesFor } from "../components/workspace/turn-flow";
 import { searchRecord } from "../components/workspace/request-search";
 import { buildTurns, classifyInput, estimateTexts } from "./token-model";
 import { claude } from "./agents/claude";
 import type { TraceRecord } from "./types";
+import { turnScopes } from "./conversation-scope";
+import { fullyCachedBlockIds, selectedBlocks } from "./cross-link";
 
 // Synthetic evidence only: no local conversation data belongs in fixtures.
+const capturedRequest = (text: string, turn: number): TraceRecord => ({
+  turn, ...{ capture: { client: "codex" } },
+  request: { path: "/v1/responses", body: {
+    client_metadata: { thread_id: "shared-thread", turn_id: `turn-${turn}` },
+    input: [{ type: "message", role: "user", content: [{ type: "input_text", text }] }],
+  } },
+  response: { body: { usage: { input_tokens: 100, output_tokens: 10 } } },
+});
+const rolloutText = 'Analyze this rollout and produce JSON\n\n- rollout_path: /synthetic/history.jsonl\nrendered conversation (pre-rendered from rollout `.jsonl`; filtered response items):\n[{"type":"message","role":"user","content":[]}]';
+const scopedTurns = buildTurns([capturedRequest("Hello", 1), capturedRequest(rolloutText, 2), capturedRequest(rolloutText, 3), capturedRequest("Hello", 4)]);
+assert.deepEqual(turnScopes(scopedTurns), ["conversation", "background", "background", "conversation"]);
+assert(scopedTurns.every((turn) => turn.thread.id === "shared-thread"), "Preserve captured thread identity");
+assert.notEqual(scopedTurns[1].thread.scopeId, scopedTurns[2].thread.scopeId, "Do not invent continuity between summary requests");
+assert.equal(Boolean(scopedTurns[3].change?.rewritten), false);
+assert.deepEqual(turnScopes(buildTurns([capturedRequest("Analyze this rollout and produce JSON", 1)])), ["conversation"], "A phrase alone is not rollout evidence");
+
 const fixtures: TraceRecord[] = [
   { request: { path: "/v1/messages", body: { system: "Instructions", messages: [
     { role: "user", content: [{ type: "text", text: "Hello" }] },
@@ -98,6 +117,49 @@ assert(markup.includes("Hello fixture"));
 assert(!markup.includes("Show in Tokens"));
 console.log("Claude UI: dominant tools preserve all categories; Timeline exposes and links request context.");
 
+const focusFixture: TraceRecord = {
+  ...{ capture: { client: "codex" } },
+  request: { path: "/v1/responses", body: { input: [
+    { type: "message", role: "developer", content: [{ type: "input_text", text: "Cached instruction fixture" }] },
+    { type: "message", role: "developer", content: [{ type: "input_text", text: "Fresh instruction fixture" }] },
+    { type: "message", role: "user", content: [{ type: "input_text", text: "Unrelated user fixture" }] },
+  ] } }, response: { body: { usage: { input_tokens: 300, output_tokens: 10 } } },
+};
+const [focusTurn] = buildTurns([focusFixture]);
+const conversationMarkup = renderToStaticMarkup(createElement(RequestView, { jumpToBlock: null, onNavigate: () => {}, onSelectToken: () => {}, onViewChange: () => {}, selection: null, turn: focusTurn, turns: [focusTurn], view: "timeline" }));
+assert(conversationMarkup.includes("Request context"), "Timeline has one context disclosure");
+assert(!conversationMarkup.includes("Cached instruction fixture"), "Request context starts collapsed");
+assert(conversationMarkup.includes("Unrelated user fixture"), "User message body is immediately readable");
+assert(conversationMarkup.includes("tf-dialog-user"), "Dialog uses a right-aligned user bubble");
+assert(conversationMarkup.includes('aria-label="User message"'), "Dialog preserves accessible speaker identity");
+assert(!conversationMarkup.includes(">Earlier<") && !conversationMarkup.includes(">So far<"), "Conversation history is not hidden behind carried groups");
+focusTurn.categories = focusTurn.blocks.map((block, index) => ({ id: block.id, memberIds: [block.id], label: block.inputClass.label, category: block.inputClass.category, layer: block.inputClass.layer, tokens: 100, cached: index === 0 ? 100 : 0, fresh: index === 0 ? 0 : 100, color: "gray" }));
+const layerSelection = { turnId: focusTurn.id, blockId: focusTurn.blocks[0].id, label: "Instructions", layer: "instructions" as const };
+assert.equal(selectedBlocks(focusTurn, layerSelection).length, 2);
+assert.deepEqual([...fullyCachedBlockIds(focusTurn)], [focusTurn.blocks[0].id]);
+for (const view of ["timeline", "structured", "raw"] as const) {
+  const html = renderToStaticMarkup(createElement(RequestView, { jumpToBlock: null, onNavigate: () => {}, onSelectToken: () => {}, onViewChange: () => {}, selection: layerSelection, turn: focusTurn, turns: [focusTurn], view }));
+  assert(html.includes("Cached instruction fixture"), `${view} opens cached match`);
+  assert(html.includes("Fresh instruction fixture"), `${view} opens all matches`);
+  assert(html.includes('data-cache-state="cached"'), `${view} marks cached content`);
+  assert(html.includes('aria-label="Next matching block"'), `${view} allows navigating layer matches`);
+  assert(html.includes('aria-label="Previous matching block"'), `${view} allows returning to the previous match`);
+  assert(html.includes('aria-expanded="false"'), `${view} folds unrelated content`);
+}
+const mixedTurn = { ...focusTurn, categories: [{ ...focusTurn.categories[0], memberIds: focusTurn.blocks.map((block) => block.id), tokens: 300, cached: 150, fresh: 150 }] };
+assert.equal(fullyCachedBlockIds(mixedTurn).size, 0, "Mixed aggregate cannot identify cached members");
+console.log("Cross-link: all views open matching blocks, fold unrelated content and preserve cache evidence.");
+const rangeMarkup = renderToStaticMarkup(createElement(RawJsonTree, {
+  active: true, turnId: "fixture", value: { text: "firstsecond" },
+  selectedPath: ["trace", "text"], selectedRange: { start: 5, end: 11 },
+  targets: [
+    { path: ["trace", "text"], range: { start: 0, end: 5 }, cached: false },
+    { path: ["trace", "text"], range: { start: 5, end: 11 }, cached: false },
+  ],
+}));
+assert.equal((rangeMarkup.match(/data-source-range=/g) || []).length, 1);
+assert(rangeMarkup.includes('data-source-range="">second'), "Raw navigation targets the current range, not the first matching range");
+
 const splitText = "# Environment\nshared needle\nAvailable agent types for the Agent tool:\nFleetView default agent. shared needle\n# MCP Server Instructions\nshared needle";
 const searchFixture: TraceRecord = {
   ...{ capture: { client: "claude" } },
@@ -138,4 +200,25 @@ assert.deepEqual(claude.splitSystemText!("# Environment\nactual context\n# Other
 assert.equal(classifyInput(searchFixture, { role: "user", content: "# My heading\nMy request" }).category, "user");
 assert.equal(classifyInput(searchFixture, { role: "user", content: "<system-reminder>Unrecognized injected content</system-reminder>" }).category, "unknown");
 assert.equal(classifyInput(searchFixture, { role: "system", content: "# Environment setup instructions\nExplain setup." }).category, "harness");
+const reminderCases = [
+  ["# Environment\nYou have been invoked in the following environment:", "runtime", "Environment"],
+  ["Available agent types for the Agent tool:\n- example: Example agent", "tools", "Sub-agents"],
+  ["# MCP Server Instructions\nTool usage instructions", "harness", "Tool guide"],
+  ["You are powered by the model named Example. The exact model ID is example-model.", "runtime", "Model information"],
+  ["Today's date is 2026-09-26.", "runtime", "Date"],
+] as const;
+for (const [body, category, label] of reminderCases) {
+  const text = `<system-reminder>\n${body}\n</system-reminder>`;
+  const classification = classifyInput(searchFixture, { role: "user", content: text });
+  assert.equal(classification.category, category);
+  assert.equal(classification.label, label);
+  const fixture: TraceRecord = { ...searchFixture, request: { ...searchFixture.request, body: { messages: [{ role: "user", content: [{ type: "text", text }] }] } } };
+  const [turn] = buildTurns([fixture]);
+  const block = turn.blocks.find((entry) => entry.text === text);
+  assert(block, "Reminder stays intact as one source block");
+  assert.deepEqual(block.rawPath, ["trace", "request", "body", "messages", 0, "content", 0, "text"]);
+}
+for (const body of ["# Environment setup instructions\nExplain setup.", "# MCP Server Instructions example\nQuoted text", "Today's date is unknown.", "Unrecognized injected content"]) {
+  assert.equal(classifyInput(searchFixture, { role: "user", content: `<system-reminder>\n${body}\n</system-reminder>` }).category, "unknown");
+}
 console.log("Claude conservative parsing: ordinary headings stay whole; fences, role evidence and unknown reminders respected.");

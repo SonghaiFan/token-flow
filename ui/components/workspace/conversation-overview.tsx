@@ -65,7 +65,7 @@ export function ConversationOverview({ focus, onFocus, onSelectNode, onSelectTur
 
   return <div className="tf-pad space-y-7">
     <header>
-      <h2 className="tf-title">{turns.find((turn) => turn.kind === "user" && turn.queryText)?.queryText || session.first_user || "Conversation"}</h2>
+      <h2 className="tf-title">{session.title || turns.find((turn) => turn.kind === "user" && turn.queryText)?.queryText || session.first_user || "Conversation"}</h2>
       <p className="mt-1 text-xs text-muted">{[session.agent || "Unknown agent", models.join(", "), started ? formatDate(started) : "", duration ? `${formatDuration(duration)} model time` : ""].filter(Boolean).join(" · ")}</p>
       <div className="mt-5"><StatList>
         <Stat label={turns.length === 1 ? "turn" : "turns"} value={formatNumber(turns.length)}/>

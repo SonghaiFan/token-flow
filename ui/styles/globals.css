@@ -78,6 +78,31 @@ button, a { -webkit-tap-highlight-color: transparent; }
   background: var(--canvas);
 }
 
+/* Dialog uses alignment and one quiet user bubble, not inspector cards. */
+@utility tf-dialog-message {
+  min-width: 0;
+  max-width: 100%;
+}
+@utility tf-dialog-user {
+  width: fit-content;
+  max-width: 88%;
+  margin-left: auto;
+}
+@utility tf-dialog-assistant {
+  margin-right: auto;
+  width: 100%;
+}
+@utility tf-dialog-bubble {
+  border-radius: var(--tf-radius-control);
+  background: var(--canvas);
+  padding: calc(var(--spacing) * 3) calc(var(--spacing) * 4);
+  overflow-wrap: anywhere;
+}
+@utility tf-dialog-reply {
+  padding-block: calc(var(--spacing) * 2);
+  overflow-wrap: anywhere;
+}
+
 /* ── Spacing ── */
 /* Page gutter: the toolbar and page content share it so their edges align. */
 @utility tf-gutter {
@@ -109,6 +134,10 @@ button, a { -webkit-tap-highlight-color: transparent; }
 @utility tf-dimmed {
   opacity: var(--tf-opacity-dimmed);
   &:hover { opacity: 1; }
+}
+
+@utility tf-cached-content {
+  opacity: var(--tf-opacity-cached);
 }
 
 .scrollbar-none { scrollbar-width: none; }

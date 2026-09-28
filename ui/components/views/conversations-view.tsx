@@ -33,7 +33,7 @@ function StatusMark({ session }: { session: SessionSummary }) {
 
 function ConversationRow({ onDelete, onOpen, onToggle, selected, session }: { onDelete: () => void; onOpen: () => void; onToggle: () => void; selected: boolean; session: SessionSummary }) {
   const active = isActive(session);
-  const title = session.first_user || "Untitled conversation";
+  const title = session.title || session.first_user || "Untitled conversation";
   const turns = session.turn_count ?? session.record_count ?? 0;
   const tokens = session.total_tokens || 0;
   const started = session.started_at || session.updated_at;
@@ -225,7 +225,7 @@ export function ConversationsView({ onCompare, onOpen }: { onCompare: (ids: stri
           </div> : null}
         </section>
       </main>
-      <ConfirmDialog busy={deleting} busyLabel="Deleting…" confirmLabel="Delete" description={deleteTarget === "all" ? "This permanently deletes every stored conversation that is not currently active. Active conversations are kept." : `This permanently deletes “${deleteTarget?.first_user || "Untitled conversation"}” and its captured records.`} error={deleteError} onCancel={closeDeleteDialog} onConfirm={() => void confirmDelete()} open={deleteTarget !== null} title={deleteTarget === "all" ? "Clear all conversations?" : "Delete this conversation?"}/>
+      <ConfirmDialog busy={deleting} busyLabel="Deleting…" confirmLabel="Delete" description={deleteTarget === "all" ? "This permanently deletes every stored conversation that is not currently active. Active conversations are kept." : `This permanently deletes “${deleteTarget?.title || deleteTarget?.first_user || "Untitled conversation"}” and its captured records.`} error={deleteError} onCancel={closeDeleteDialog} onConfirm={() => void confirmDelete()} open={deleteTarget !== null} title={deleteTarget === "all" ? "Clear all conversations?" : "Delete this conversation?"}/>
     </AppShell>
   );
 }

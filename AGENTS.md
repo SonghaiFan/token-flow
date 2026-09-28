@@ -94,6 +94,10 @@ Supported clients are plugins; never branch on a client id outside its plugin.
   Split only recognized semantic sections; ordinary instruction headings remain
   together. Unrecognized system reminders are Unknown, not assumed runtime state.
 - Timeline includes capabilities and instructions as request context before the
+  conversation steps. Its UI name is now **Dialog**: message bodies read directly,
+  while request context and tool/reasoning detail start collapsed. Internal
+  `timeline` view keys remain stable for compatibility. The following grouping
+  and provenance rules continue to apply to request context before the
   conversation steps. Adjacent instruction blocks with the same category and
   detail fold into one section group; selecting a member opens the group without
   changing block identity or raw provenance. Categories retain small categories
@@ -114,6 +118,15 @@ Supported clients are plugins; never branch on a client id outside its plugin.
 - Product name: **Token Flow**. Distribution and CLI: `token-flow`.
 - Prefer `TOKEN_FLOW_DB`, `TOKEN_FLOW_DASHBOARD_PORT`, and `~/.token-flow`
   for new configuration and state.
+- Dashboard-launched terminal agents use an explicitly selected project folder,
+  remember only the last choice, and never fall back to the dashboard process's
+  working directory. Desktop agents remain app-managed unless their plugin can
+  guarantee project-folder launch behavior.
+- The dashboard's **Database…** action stores its selected SQLite file in
+  `~/.token-flow/settings.json`. Explicit database environment variables still
+  take precedence, and the database cannot switch while a capture is active.
+  On macOS it offers separate Finder actions to open an existing database or
+  create one in the canonical Token Flow data directory.
 - Keep read compatibility for existing `PACKLITE_*`, `.packlite`, and
   `claude-tap` data. The resolver must prefer Token Flow state when it exists,
   then PackLite, then Claude Tap, so historical conversations never disappear.
@@ -170,6 +183,16 @@ request evidence → back to dashboard. Check both wide and narrow viewports.
 
 
 ## Before ending a session
+
+- Cross-link selection opens all related blocks and folds unrelated sections in
+  Timeline, Tokens, and Raw. Fully attributed cache hits use 50% opacity; neither
+  unchanged text nor mixed aggregate counts establish per-block cache hits.
+
+- Captured thread identity and local display/comparison scope are distinct.
+  Codex rollout-analysis requests with a source path and parsed transcript are
+  isolated background scopes even when their thread id matches the main chat.
+  Preserve that id; do not infer parentage from the quoted rollout or use cache
+  keys as thread identity. Test main → summary → main without false rewrites.
 
 - Summarize the changed product behavior and validation results clearly.
 - Leave the worktree in a known state; do not silently discard unrelated work.

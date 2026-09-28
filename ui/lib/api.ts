@@ -34,6 +34,45 @@ async function captureMutation(method: "POST" | "DELETE", body?: unknown): Promi
   return payload;
 }
 
+export interface DatabaseSettings {
+  can_choose_path: boolean;
+  db_path: string;
+}
+
+export function fetchDatabaseSettings(signal?: AbortSignal): Promise<DatabaseSettings> {
+  return readJson<DatabaseSettings>("/dashboard/database", signal);
+}
+
+export async function chooseDatabasePath(mode: "existing" | "new"): Promise<string | null> {
+  const health = await readJson<{ quit_token?: string }>("/dashboard/health");
+  if (!health.quit_token) throw new Error("Database settings are unavailable for this dashboard");
+  const response = await fetch("/dashboard/database/choose", {
+    method: "POST",
+    headers: { Accept: "application/json", "Content-Type": "application/json", "X-Claude-Tap-Dashboard-Token": health.quit_token },
+    body: JSON.stringify({ mode }),
+  });
+  const payload = await response.json().catch(() => ({})) as { path?: string | null; error?: string };
+  if (!response.ok) throw new Error(payload.error || `Request failed (${response.status})`);
+  return payload.path || null;
+}
+
+export async function setDatabasePath(path: string): Promise<DatabaseSettings> {
+  const health = await readJson<{ quit_token?: string }>("/dashboard/health");
+  if (!health.quit_token) throw new Error("Database settings are unavailable for this dashboard");
+  const response = await fetch("/dashboard/database", {
+    method: "POST",
+    headers: {
+      Accept: "application/json",
+      "Content-Type": "application/json",
+      "X-Claude-Tap-Dashboard-Token": health.quit_token,
+    },
+    body: JSON.stringify({ path }),
+  });
+  const payload = await response.json().catch(() => ({})) as DatabaseSettings & { error?: string };
+  if (!response.ok) throw new Error(payload.error || `Request failed (${response.status})`);
+  return payload;
+}
+
 export async function fetchSessions(
   filters: { agent?: string; date?: string; status?: string; search?: string } = {},
   signal?: AbortSignal,
@@ -66,8 +105,20 @@ export function fetchCaptureStatus(signal?: AbortSignal): Promise<CaptureStatus>
   return readJson<CaptureStatus>("/dashboard/captures", signal);
 }
 
-export function startCapture(client: string): Promise<CaptureStatus> {
-  return captureMutation("POST", { client });
+export async function chooseProjectDirectory(): Promise<string | null> {
+  const health = await readJson<{ quit_token?: string }>("/dashboard/health");
+  if (!health.quit_token) throw new Error("Project selection is unavailable for this dashboard");
+  const response = await fetch("/dashboard/captures/choose-project", {
+    method: "POST",
+    headers: { Accept: "application/json", "X-Claude-Tap-Dashboard-Token": health.quit_token },
+  });
+  const payload = await response.json().catch(() => ({})) as { path?: string | null; error?: string };
+  if (!response.ok) throw new Error(payload.error || `Request failed (${response.status})`);
+  return payload.path || null;
+}
+
+export function startCapture(client: string, workingDirectory?: string): Promise<CaptureStatus> {
+  return captureMutation("POST", { client, ...(workingDirectory ? { working_directory: workingDirectory } : {}) });
 }
 
 export function stopCapture(): Promise<CaptureStatus> {

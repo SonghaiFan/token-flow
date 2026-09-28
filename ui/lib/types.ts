@@ -15,6 +15,7 @@ export interface SessionSummary {
   live?: boolean;
   started_at?: string;
   updated_at?: string;
+  title?: string;
   first_user?: string;
   record_count?: number;
   turn_count?: number;
@@ -64,7 +65,7 @@ export interface CaptureStatus {
   available: boolean;
   client: string;
   clients?: CaptureClient[];
-  /* Directory terminal clients start in. */
+  /* Last project folder selected for terminal clients. */
   cwd?: string;
   state: CaptureState;
   pid?: number | null;
@@ -167,6 +168,8 @@ export interface TurnBlock {
 
 export interface TurnThread {
   id: string;
+  /* Local display/comparison scope, never a provider thread identity. */
+  scopeId?: string;
   parentId?: string;
   /* What kind of thread it is, such as "Sub-agent" or "Guardian review". */
   label?: string;

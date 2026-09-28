@@ -14,7 +14,6 @@ import { IconButton } from "../ui/button";
 import { EmptyState } from "../ui/feedback";
 import { SearchField } from "../ui/field";
 import { ChevronRightIcon, SearchIcon } from "../ui/icons";
-import { Segmented } from "../ui/segmented";
 import type { CategoryFocus } from "./input-units";
 
 /* Fixed geometry keeps every Sankey node and ribbon aligned with its HTML row. */
@@ -118,10 +117,63 @@ function selectedIds(selection: TokenSelection | null, turn: TurnModel): string[
   return selection?.turnId === turn.id ? selection.blockIds || [selection.blockId] : [];
 }
 
-export function TurnFlow({ focus = null, onSelectNode, onSelectTurn, selected, selection, turns }: { focus?: CategoryFocus | null; onSelectNode: (index: number, selection: TokenSelection) => void; onSelectTurn: (index: number | null) => void; selected: number | null; selection: TokenSelection | null; turns: TurnModel[] }) {
+type TurnFlowProps = { focus?: CategoryFocus | null; onSelectNode: (index: number, selection: TokenSelection) => void; onSelectTurn: (index: number | null) => void; selected: number | null; selection: TokenSelection | null; turns: TurnModel[] };
+
+export function TurnFlow(props: TurnFlowProps) {
+  const lanes = useMemo(() => {
+    const groups = new Map<string, { id: string; label: string; indices: number[] }>();
+    props.turns.forEach((turn, index) => {
+      // Task scopes isolate quoted histories without inventing provider threads.
+      const id = turn.thread.scopeId || turn.thread.id;
+      const group = groups.get(id) || { id, label: id.startsWith("unknown-request:") ? "Unknown thread" : turn.thread.name || turn.thread.label || `Thread ${groups.size + 1}`, indices: [] };
+      group.indices.push(index);
+      groups.set(id, group);
+    });
+    return [...groups.values()];
+  }, [props.turns]);
+  const [choice, setChoice] = useState<{ id: string; selected: number | null } | null>(null);
+  const setChosen = (id: string) => setChoice({ id, selected: props.selected });
+  const chosen = choice?.selected === props.selected ? choice.id : null;
+  const selectedLane = lanes.find((lane) => props.selected !== null && lane.indices.includes(props.selected));
+  const active = lanes.find((lane) => lane.id === chosen) || selectedLane || lanes[0];
+  if (!active) return <FlowLane {...props}/>;
+  return <div className="min-w-0 overflow-x-auto rounded-panel border border-line bg-panel lg:sticky lg:top-[calc(var(--tf-toolbar-height)+0.75rem)] lg:h-[calc(100dvh-var(--tf-toolbar-height)-1.5rem)]">
+    <div className="flex min-w-full items-start">
+      {lanes.map((lane) => lane.id === active.id
+        ? <div className="min-w-0 flex-1" key={lane.id} style={{ minWidth: 280 }}><FlowLane {...props} lane={lane}/></div>
+        : <div className="w-7 shrink-0 border-l border-line" key={lane.id}>
+          <button className="tf-focus-inset flex h-32 w-full items-center justify-center overflow-hidden text-xs text-muted hover:bg-fill-hover" onClick={() => setChosen(lane.id)} title={`Expand ${lane.label}`} type="button"><span className="max-h-28 truncate [writing-mode:vertical-rl]">{lane.label}</span></button>
+          <div className="relative" style={{ height: props.turns.length * ROW }}>
+            <svg aria-hidden="true" className="pointer-events-none absolute left-0 top-0" height={props.turns.length * ROW} width="28">
+              <defs><pattern height="8" id={`strip-hatch-${lanes.indexOf(lane)}`} patternUnits="userSpaceOnUse" width="8"><path d="M-2 2L2-2M0 8L8 0M6 10L10 6" fill="none" stroke="var(--ink)" strokeOpacity="0.34" strokeWidth="1"/></pattern></defs>
+              {[...lane.indices].sort((a, b) => a - b).map((index, position, indices) => {
+                const turn = props.turns[index];
+                const previous = indices.slice(0, position).reverse().find((candidate) => props.turns[candidate].thread.id === turn.thread.id);
+                const nodes = nodesFor(turn, "layers");
+                const total = nodes.reduce((sum, node) => sum + node.tokens, 0);
+                let x = 7;
+                return <g key={turn.id}>
+                  {previous !== undefined && turn.kind !== "metadata" ? <path d={ribbon([7, 7 + NODE], [7, 7 + NODE], previous * ROW + NODE_TOP + NODE, index * ROW + NODE_TOP)} fill="var(--muted)" fillOpacity="0.12"/> : null}
+                  {total ? nodes.map((node) => {
+                    const start = x;
+                    const size = NODE * node.tokens / total;
+                    x += size;
+                    return <g key={node.key}><rect fill={node.color} fillOpacity="0.82" height={NODE} width={size} x={start} y={index * ROW + NODE_TOP}/>{node.cached > 0 ? <rect fill={`url(#strip-hatch-${lanes.indexOf(lane)})`} height={NODE} width={size * node.cached / node.tokens} x={start} y={index * ROW + NODE_TOP}/> : null}</g>;
+                  }) : <rect fill="var(--muted)" height={NODE} rx="3" width={NODE} x="7" y={index * ROW + NODE_TOP}/>}
+                </g>;
+              })}
+            </svg>
+            {lane.indices.map((index) => <button aria-label={`Expand ${lane.label}, turn ${props.turns[index].label}`} className="tf-focus-inset absolute h-14 w-full hover:bg-fill-hover" key={props.turns[index].id} onClick={() => setChosen(lane.id)} style={{ top: index * ROW }} title={`Turn ${props.turns[index].label} · ${props.turns[index].step} · ${formatNumber(props.turns[index].input)} input tokens`} type="button"/>)}
+          </div>
+        </div>)}
+    </div>
+  </div>;
+}
+
+function FlowLane({ focus = null, onSelectNode, onSelectTurn, selected, selection, turns, lane }: TurnFlowProps & { lane?: { label: string; indices: number[] } }) {
   const [query, setQuery] = useState("");
   const [searchOpen, setSearchOpen] = useState(false);
-  const [granularity, setGranularity] = useState<Granularity>("layers");
+  const granularity: Granularity = "layers";
   const [width, setWidth] = useState(0);
   const searchRef = useRef<HTMLInputElement | null>(null);
   const canvasRef = useRef<HTMLDivElement | null>(null);
@@ -144,7 +196,7 @@ export function TurnFlow({ focus = null, onSelectNode, onSelectTurn, selected, s
     else next.add(id);
     return next;
   });
-  const totalInput = useMemo(() => turns.reduce((sum, turn) => sum + turn.input, 0), [turns]);
+  const totalInput = useMemo(() => (lane ? lane.indices.map((index) => turns[index]) : turns).reduce((sum, turn) => sum + turn.input, 0), [lane, turns]);
 
   // The diagram is drawn in real pixels so hatching, labels, and strokes stay undistorted.
   useEffect(() => {
@@ -160,6 +212,12 @@ export function TurnFlow({ focus = null, onSelectNode, onSelectTurn, selected, s
      the end. A search lists matching turns flat, in capture order. */
   const layout = useMemo(() => {
     const items: FlowItem[] = [];
+    if (lane) {
+      lane.indices.forEach((index) => {
+        if (matchesTurn(turns[index], normalized)) items.push({ depth: 0, index, key: turns[index].id, kind: "turn", top: index * ROW });
+      });
+      return { height: turns.length * ROW, items };
+    }
     let top = 0;
     const pushTurn = (index: number, depth: number) => {
       items.push({ depth, index, key: turns[index].id, kind: "turn", top });
@@ -224,7 +282,7 @@ export function TurnFlow({ focus = null, onSelectNode, onSelectTurn, selected, s
       for (const index of tree.auxiliary) pushTurn(index, 1);
     }
     return { height: top, items };
-  }, [normalized, openIds, tree, turns]);
+  }, [lane, normalized, openIds, tree, turns]);
   const visible = useMemo(() => layout.items.flatMap((item) => (item.kind === "turn" ? [item.index] : [])), [layout.items]);
 
   const graph = useMemo(() => {
@@ -252,11 +310,11 @@ export function TurnFlow({ focus = null, onSelectNode, onSelectTurn, selected, s
     const links: Array<{ key: string; source: PlacedNode; sourceRow: FlowRow; target: PlacedNode; targetRow: FlowRow }> = [];
     if (!normalized) {
       rows.forEach((row, position) => {
-        const threadId = turns[row.index].thread.id;
+        const threadId = turns[row.index].thread.scopeId || turns[row.index].thread.id;
         for (const target of row.nodes) {
           for (let earlier = position - 1; earlier >= 0; earlier -= 1) {
             const candidate = rows[earlier];
-            if (turns[candidate.index].thread.id !== threadId) continue;
+            if ((turns[candidate.index].thread.scopeId || turns[candidate.index].thread.id) !== threadId) continue;
             const source = candidate.nodes.find((node) => node.key === target.key);
             if (source) {
               links.push({ key: `${candidate.index}-${row.index}-${target.key}`, source, sourceRow: candidate, target, targetRow: row });
@@ -322,16 +380,16 @@ export function TurnFlow({ focus = null, onSelectNode, onSelectTurn, selected, s
     onSelectNode(row.index, { blockId: node.blockIds[0] || "", blockIds: node.blockIds, category: node.category, label: node.label, layer: layerNode ? node.layer : undefined, turnId: turn.id });
   };
 
-  return <aside aria-label="Token flow" className="min-w-0 border-b border-line bg-panel [--text-w:8.5rem] sm:[--text-w:10rem] lg:tf-panel lg:sticky lg:top-[calc(var(--tf-toolbar-height)+0.75rem)] lg:flex lg:h-[calc(100dvh-var(--tf-toolbar-height)-1.5rem)] lg:flex-col">
-    <div className="tf-inset space-y-2 border-b border-line py-2">
+  return <aside aria-label="Token flow" className="min-w-0 bg-panel [--text-w:7rem]">
+    <div className="tf-inset h-32 overflow-auto space-y-2 border-b border-line py-2">
+      {lane ? <div className="tf-eyebrow">{lane.label}</div> : null}
       <div className="flex items-center gap-2">
         {/* The overview is the flow's resting state; this line returns to it. */}
         <button aria-current={selected === null ? "page" : undefined} className={`tf-control -ml-2 flex min-w-0 flex-1 items-center gap-2 rounded-control px-2 text-left transition-colors hover:bg-fill-hover ${selected === null ? "text-ink" : "text-muted hover:text-ink"}`} onClick={() => onSelectTurn(null)} title="Conversation overview (Esc)" type="button">
-          <span className="whitespace-nowrap text-sm font-semibold">{turns.length} {turns.length === 1 ? "turn" : "turns"}</span>
+          <span className="whitespace-nowrap text-sm font-semibold">{lane?.indices.length ?? turns.length} turns</span>
           <span className="hidden truncate font-mono text-xs text-muted sm:inline">{formatCompact(totalInput)} input</span>
         </button>
         {turns.length >= SEARCH_THRESHOLD ? <IconButton active={searchOpen || Boolean(query)} aria-expanded={searchOpen} label="Search turns" onClick={() => { const next = !searchOpen; setSearchOpen(next); if (!next) setQuery(""); else window.requestAnimationFrame(() => searchRef.current?.focus()); }} title="Search turns (/)"><SearchIcon/></IconButton> : null}
-        <Segmented label="Flow nodes" onChange={setGranularity} options={[["layers", "Layers"], ["categories", "Categories"]]} value={granularity}/>
       </div>
       {searchOpen || query ? <div className="flex"><SearchField autoFocus={!query} inputRef={searchRef} label="Search turns" onChange={setQuery} onKeyDown={(event) => { if (event.key === "Escape") { event.stopPropagation(); setQuery(""); setSearchOpen(false); } }} placeholder="Search turns" value={query}/></div> : null}
       <div aria-label="Legend" className="flex flex-wrap gap-x-3 gap-y-1 pb-0.5 text-xs text-muted" role="list">

@@ -29,6 +29,7 @@ from token_tap.core.compact_trace import (
 )
 
 DB_FILENAME = "traces.sqlite3"
+SETTINGS_FILENAME = "settings.json"
 SCHEMA_VERSION = 4
 SQLITE_BUSY_TIMEOUT_MS = 1000
 WRITE_LOCK_TIMEOUT_SECONDS = 1.0
@@ -66,8 +67,10 @@ def resolve_db_path() -> Path:
     )
     if override:
         return Path(override).expanduser().resolve()
-    xdg_data = os.environ.get("XDG_DATA_HOME", "").strip()
-    data_home = Path(xdg_data).expanduser() if xdg_data else Path.home() / ".local" / "share"
+    configured = read_configured_db_path()
+    if configured is not None:
+        return configured
+    data_home = _data_home()
     token_flow_db = data_home / "token-flow" / DB_FILENAME
     packlite_db = data_home / "packlite" / DB_FILENAME
     inherited_db = data_home / "claude-tap" / DB_FILENAME
@@ -80,6 +83,88 @@ def resolve_db_path() -> Path:
     if inherited_db.exists():
         return inherited_db.resolve()
     return token_flow_db.resolve()
+
+
+def _data_home() -> Path:
+    xdg_data = os.environ.get("XDG_DATA_HOME", "").strip()
+    return Path(xdg_data).expanduser() if xdg_data else Path.home() / ".local" / "share"
+
+
+def token_flow_data_dir() -> Path:
+    """Return Token Flow's canonical local data directory."""
+    return _data_home() / "token-flow"
+
+
+def database_settings_path() -> Path:
+    """Return the local settings file for dashboard choices."""
+    override = os.environ.get("TOKEN_FLOW_SETTINGS", "").strip()
+    if override:
+        return Path(override).expanduser().resolve()
+    return Path.home() / ".token-flow" / SETTINGS_FILENAME
+
+
+def _read_local_settings() -> dict[str, Any]:
+    try:
+        payload = json.loads(database_settings_path().read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    return payload if isinstance(payload, dict) else {}
+
+
+def _write_local_settings(payload: dict[str, Any]) -> None:
+    settings_path = database_settings_path()
+    settings_path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = settings_path.with_name(f".{settings_path.name}.{uuid.uuid4().hex}.tmp")
+    try:
+        temporary.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+        temporary.chmod(0o600)
+        temporary.replace(settings_path)
+    finally:
+        temporary.unlink(missing_ok=True)
+
+
+def read_configured_db_path() -> Path | None:
+    """Read a database path selected in the dashboard, if one is configured."""
+    value = _read_local_settings().get("database_path")
+    if not isinstance(value, str) or not value.strip():
+        return None
+    path = Path(value).expanduser()
+    return path.resolve() if path.is_absolute() else None
+
+
+def save_configured_db_path(path: Path) -> None:
+    """Persist an absolute database path selected in the dashboard."""
+    expanded = path.expanduser()
+    if not expanded.is_absolute():
+        raise ValueError("Database path must be absolute")
+    resolved = expanded.resolve()
+    payload = _read_local_settings()
+    payload["database_path"] = str(resolved)
+    _write_local_settings(payload)
+
+
+def read_configured_working_directory() -> Path | None:
+    """Return the last project folder selected for a dashboard-launched CLI."""
+    value = _read_local_settings().get("working_directory")
+    if not isinstance(value, str) or not value.strip():
+        return None
+    path = Path(value).expanduser()
+    if not path.is_absolute() or not path.is_dir():
+        return None
+    return path.resolve()
+
+
+def save_configured_working_directory(path: Path) -> None:
+    """Remember the project folder used for the latest dashboard CLI launch."""
+    expanded = path.expanduser()
+    if not expanded.is_absolute():
+        raise ValueError("Working directory must be absolute")
+    resolved = expanded.resolve()
+    if not resolved.is_dir():
+        raise ValueError("Working directory must be an existing folder")
+    payload = _read_local_settings()
+    payload["working_directory"] = str(resolved)
+    _write_local_settings(payload)
 
 
 def get_trace_store() -> TraceStore:

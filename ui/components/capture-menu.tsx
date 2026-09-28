@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { chooseProjectDirectory } from "@/lib/api";
 import { useCapture } from "@/lib/capture-store";
 import type { CaptureClient } from "@/lib/types";
 import { AgentMark } from "./agent-mark";
@@ -23,18 +24,43 @@ function missingNote(client: CaptureClient): string {
   return client.command ? `${client.command} not found` : "App not found";
 }
 
+function folderName(path: string): string {
+  const parts = path.split("/").filter(Boolean);
+  return parts.at(-1) || path;
+}
+
 /* The dashboard's one entry for starting a capture. Installed agents are listed
    in its menu; supported agents that are not installed stay behind More agents. */
 export function CaptureButton() {
   const capture = useCapture();
   const [showMore, setShowMore] = useState(false);
+  const [project, setProject] = useState("");
+  const [choosingProject, setChoosingProject] = useState(false);
+  const [projectError, setProjectError] = useState("");
   const { status } = capture;
   const clients = status.clients || [];
-  if (!status.enabled && !clients.length) return null;
-
   const ready = clients.filter((client) => client.available);
   const missing = clients.filter((client) => !client.available);
-  const where = capture.client?.terminal ? "Running in a Terminal window" : "Running in the desktop app";
+  const hasTerminalAgent = ready.some((client) => client.terminal);
+  const selectedProject = project || status.cwd || "";
+  const where = capture.client?.terminal
+    ? ["Terminal", status.cwd ? folderName(status.cwd) : ""].filter(Boolean).join(" · ")
+    : "Desktop app";
+
+  if (!status.enabled && !clients.length) return null;
+
+  async function chooseProject() {
+    setChoosingProject(true);
+    setProjectError("");
+    try {
+      const selected = await chooseProjectDirectory();
+      if (selected) setProject(selected);
+    } catch (reason) {
+      setProjectError((reason as Error).message || "Unable to choose a project");
+    } finally {
+      setChoosingProject(false);
+    }
+  }
 
   return <div className="relative shrink-0">
     <Menu label="Capture with" trigger={(props) => <Button {...props} variant={capture.active ? "live" : "primary"}>
@@ -53,8 +79,19 @@ export function CaptureButton() {
           <MenuItem danger disabled={capture.busy || status.state !== "capturing"} onSelect={() => { close(); void capture.stop(); }}>Stop capture</MenuItem>
           <MenuSeparator/>
         </> : null}
+        {!capture.active && hasTerminalAgent ? <>
+          <MenuLabel>Project</MenuLabel>
+          <MenuItem disabled={capture.busy || choosingProject} onSelect={() => void chooseProject()}>
+            <span className="min-w-0 flex-1">
+              <span className={`block truncate ${selectedProject ? "text-ink" : "text-muted"}`}>{selectedProject ? folderName(selectedProject) : "Choose a folder…"}</span>
+              <span className="block truncate font-mono text-xs text-muted">{selectedProject || "Required for terminal agents"}</span>
+            </span>
+            <span className="text-xs text-muted">{choosingProject ? "Opening…" : selectedProject ? "Change" : "Choose"}</span>
+          </MenuItem>
+          <MenuSeparator/>
+        </> : null}
         <MenuLabel>Capture with</MenuLabel>
-        {ready.map((client) => <MenuItem disabled={capture.busy || capture.active} key={client.id} onSelect={() => { close(); void capture.start(client.id); }}>
+        {ready.map((client) => <MenuItem disabled={capture.busy || capture.active || (client.terminal && !selectedProject)} key={client.id} onSelect={() => { close(); void capture.start(client.id, client.terminal ? selectedProject : undefined); }}>
           <AgentMark label={client.label}/>
           <span className="min-w-0 flex-1 truncate">{client.label}</span>
           <span className="text-xs text-muted">{client.terminal ? "Terminal" : "App"}</span>
@@ -72,7 +109,7 @@ export function CaptureButton() {
             {client.install_url && client.reason !== "platform" ? <a className="shrink-0 rounded-tag px-1 text-xs text-muted underline decoration-line underline-offset-4 hover:text-ink" href={client.install_url} rel="noreferrer" target="_blank">Install ↗</a> : null}
           </li>)}</ul> : null}
         </> : null}
-        {status.cwd && ready.some((client) => client.terminal) ? <p className="-mx-1 border-t border-line px-3.5 pb-1 pt-2 text-xs text-muted">Terminal agents start in <code className="break-all font-mono">{status.cwd}</code></p> : null}
+        {projectError ? <p className="px-2.5 py-2 text-xs text-danger-ink" role="alert">{projectError}</p> : null}
       </>}
     </Menu>
     {capture.error ? <p className="absolute right-0 top-[calc(100%+0.5rem)] z-(--z-popover) w-72 rounded-control border border-danger-line bg-panel p-3 text-xs text-danger-ink shadow-overlay" role="alert">{capture.error}</p> : null}

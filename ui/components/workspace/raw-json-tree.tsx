@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState, type ReactNode } from "react";
+import { createContext, useContext, useRef, useState, type ReactNode } from "react";
 import { Button } from "../ui/button";
 import { ChevronRightIcon } from "../ui/icons";
 
@@ -19,6 +19,24 @@ function pathStartsWith(path: JsonPathPart[], prefix: JsonPathPart[]): boolean {
 }
 
 type SourceRange = { start: number; end: number };
+export type RawTarget = { path: JsonPathPart[]; range?: SourceRange; cached: boolean };
+const TargetsContext = createContext<{ targets: RawTarget[]; active: boolean }>({ targets: [], active: false });
+
+function TargetValue({ targets, value, range }: { targets: RawTarget[]; value: unknown; range?: SourceRange }) {
+  if (typeof value !== "string" || !targets.some((target) => target.range)) {
+    const cached = targets.length > 0 && targets.every((target) => target.cached);
+    return <span className={cached ? "tf-cached-content" : undefined} data-cache-state={cached ? "cached" : undefined}><Primitive range={range} value={value}/></span>;
+  }
+  const boundaries = [...new Set([0, value.length, ...targets.flatMap((target) => target.range ? [target.range.start, target.range.end] : [])])].filter((offset) => offset >= 0 && offset <= value.length).sort((a, b) => a - b);
+  return <span className="text-syntax-string">&quot;{boundaries.slice(0, -1).map((start, index) => {
+    const end = boundaries[index + 1];
+    const covering = targets.filter((target) => !target.range || (target.range.start <= start && target.range.end >= end));
+    const cached = covering.length > 0 && covering.every((target) => target.cached);
+    if (!covering.length) return <details className="inline" key={start}><summary className="inline cursor-pointer text-muted" title="Unrelated text; expand to inspect">…</summary>{JSON.stringify(value.slice(start, end)).slice(1, -1)}</details>;
+    const current = range && start >= range.start && end <= range.end;
+    return <span className={cached ? "tf-cached-content" : undefined} data-cache-state={cached ? "cached" : undefined} data-source-range={current ? "" : undefined} key={start}>{JSON.stringify(value.slice(start, end)).slice(1, -1)}</span>;
+  })}&quot;</span>;
+}
 
 function Primitive({ value, range }: { value: unknown; range?: SourceRange }) {
   if (value === null) return <span className="text-muted">null</span>;
@@ -39,10 +57,13 @@ function JsonKey({ children }: { children: ReactNode }) {
 }
 
 function RawJsonNode({ blockId, isLast = true, keyName, path, selectedPath, selectedRange, turnId, value }: { blockId?: string; isLast?: boolean; keyName?: JsonPathPart; path: JsonPathPart[]; selectedPath?: JsonPathPart[] | null; selectedRange?: SourceRange; turnId: string; value: unknown }) {
-  const [collapsed, setCollapsed] = useState(false);
+  const { targets, active: focused } = useContext(TargetsContext);
+  const related = targets.some((target) => pathStartsWith(target.path, path) || pathStartsWith(path, target.path));
+  const ownTargets = targets.filter((target) => pathStartsWith(path, target.path));
+  const [collapsed, setCollapsed] = useState(focused && !related && path.length > 1);
   const selected = Boolean(selectedPath && path.length === selectedPath.length && pathStartsWith(selectedPath, path));
   const containsSelection = Boolean(selectedPath && pathStartsWith(selectedPath, path));
-  const open = containsSelection || !collapsed;
+  const open = !collapsed || (!focused && containsSelection);
   const pathString = jsonPath(path);
   const itemProps = selected ? { "data-block-id": blockId, "data-json-selected": "true", "data-turn-id": turnId, tabIndex: -1 } : {};
   const key = keyName === undefined ? null : <><JsonKey>{typeof keyName === "number" ? keyName : JSON.stringify(keyName)}</JsonKey><span className="text-muted">: </span></>;
@@ -50,7 +71,8 @@ function RawJsonNode({ blockId, isLast = true, keyName, path, selectedPath, sele
   const objectLike = value !== null && typeof value === "object";
 
   if (!objectLike) {
-    return <div className={`raw-json-line rounded-tag px-1 ${selected ? "raw-json-selected" : ""}`} data-json-path={pathString} {...itemProps}>{key}<Primitive range={selected ? selectedRange : undefined} value={value}/>{comma}</div>;
+    if (focused && !related) return <details className="raw-json-line rounded-tag px-1" data-json-path={pathString}><summary className="cursor-pointer">{key}<span className="text-muted">…</span>{comma}</summary><Primitive value={value}/></details>;
+    return <div className={`raw-json-line rounded-tag px-1 ${selected ? "raw-json-selected" : ""}`} data-json-path={pathString} {...itemProps}>{key}<TargetValue targets={ownTargets} range={selected ? selectedRange : undefined} value={value}/>{comma}</div>;
   }
 
   const isArray = Array.isArray(value);
@@ -73,7 +95,7 @@ function RawJsonNode({ blockId, isLast = true, keyName, path, selectedPath, sele
   </div>;
 }
 
-export function RawJsonTree({ selectedBlockId, selectedPath, selectedRange, turnId, value }: { selectedBlockId?: string; selectedPath?: JsonPathPart[] | null; selectedRange?: SourceRange; turnId: string; value: object }) {
+export function RawJsonTree({ active = false, targets = [], selectedBlockId, selectedPath, selectedRange, turnId, value }: { active?: boolean; targets?: RawTarget[]; selectedBlockId?: string; selectedPath?: JsonPathPart[] | null; selectedRange?: SourceRange; turnId: string; value: object }) {
   const [copied, setCopied] = useState(false);
   const resetTimer = useRef<number | undefined>(undefined);
 
@@ -90,11 +112,11 @@ export function RawJsonTree({ selectedBlockId, selectedPath, selectedRange, turn
 
   return <div>
     <div className="tf-inset flex flex-wrap items-center justify-between gap-2 border-b border-line bg-panel py-2">
-      <p className="text-xs text-muted">Exact captured JSON · expanded by default · fold nodes in place</p>
+      <p className="text-xs text-muted">{active || targets.length ? "Exact captured JSON · matching paths expanded" : "Exact captured JSON · expanded by default · fold nodes in place"}</p>
       <Button compact onClick={() => void copyRaw()}>{copied ? "Copied" : "Copy raw JSON"}</Button>
     </div>
     <div aria-label="Raw captured JSON tree" className="token-flow-raw-json tf-code tf-pad max-h-[68dvh] overflow-auto bg-canvas text-ink" role="region">
-      <RawJsonNode blockId={selectedBlockId} path={["trace"]} selectedPath={selectedPath} selectedRange={selectedRange} turnId={turnId} value={value}/>
+      <TargetsContext.Provider value={{ targets, active: active || targets.length > 0 }}><RawJsonNode blockId={selectedBlockId} key={JSON.stringify([active, targets, selectedPath])} path={["trace"]} selectedPath={selectedPath} selectedRange={selectedRange} turnId={turnId} value={value}/></TargetsContext.Provider>
     </div>
   </div>;
 }

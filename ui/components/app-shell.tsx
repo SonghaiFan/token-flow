@@ -1,11 +1,12 @@
 "use client";
 
-import type { ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 import { CaptureIndicator } from "./capture-menu";
+import { DatabaseSettingsDialog } from "./database-settings";
 import { Badge, StatusDot } from "./ui/badge";
 import { IconButton } from "./ui/button";
 import { ArrowLeftIcon, MoonIcon, MoreIcon } from "./ui/icons";
-import { Menu } from "./ui/menu";
+import { Menu, MenuItem, MenuSeparator } from "./ui/menu";
 
 export type LiveState = "connecting" | "watching" | "reconnecting" | "stale";
 
@@ -33,6 +34,7 @@ interface AppShellProps {
 }
 
 export function AppShell({ captureIndicator = true, children, onBack, title, meta, menu }: AppShellProps) {
+  const [databaseOpen, setDatabaseOpen] = useState(false);
   function toggleTheme() {
     const root = document.documentElement;
     const dark = root.dataset.theme ? root.dataset.theme === "dark" : window.matchMedia("(prefers-color-scheme: dark)").matches;
@@ -63,11 +65,17 @@ export function AppShell({ captureIndicator = true, children, onBack, title, met
             {meta ? <div className="mr-2 hidden min-w-0 items-center gap-4 text-xs text-muted lg:flex">{meta}</div> : null}
             {captureIndicator ? <CaptureIndicator /> : null}
             <IconButton label="Toggle appearance" onClick={toggleTheme}><MoonIcon/></IconButton>
-            {menu ? <Menu label="More actions" trigger={(props) => <IconButton {...props} label="More actions"><MoreIcon/></IconButton>} width={240}>{menu}</Menu> : null}
+            <Menu label="More actions" trigger={(props) => <IconButton {...props} label="More actions"><MoreIcon/></IconButton>} width={240}>
+              {(close) => <>
+                {menu ? <>{menu(close)}<MenuSeparator/></> : null}
+                <MenuItem onSelect={() => { close(); setDatabaseOpen(true); }}>Database…</MenuItem>
+              </>}
+            </Menu>
           </div>
         </div>
       </header>
       {children}
+      {databaseOpen ? <DatabaseSettingsDialog onClose={() => setDatabaseOpen(false)}/> : null}
     </div>
   );
 }

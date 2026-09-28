@@ -46,7 +46,7 @@ from token_tap.server.dashboard import (
 from token_tap.storage.history import migrate_legacy_traces
 from token_tap.storage.trace import TraceWriter
 from token_tap.storage.trace_log_handler import SQLiteLogHandler
-from token_tap.storage.trace_store import get_trace_store
+from token_tap.storage.trace_store import get_trace_store, reset_trace_store, resolve_db_path
 
 # The browser tests below launch chromium, which installs separately from the
 # playwright package, so importorskip alone would let them fail instead of skip.
@@ -740,6 +740,106 @@ def test_dashboard_first_message_prefers_real_prompt_over_title_generation(trace
     _seed_legacy(tmp_path)
 
     assert list_trace_sessions()[0]["first_user"] == "Explain the cache layout"
+
+
+def test_dashboard_uses_captured_auxiliary_title_then_falls_back_to_first_user(trace_db, tmp_path: Path) -> None:
+    trace_path = tmp_path / "2026-05-20" / "trace_100800.jsonl"
+    title_request = {
+        "timestamp": "2026-05-20T10:08:00+00:00",
+        "turn": 1,
+        "request": {
+            "method": "POST",
+            "path": "/v1/messages",
+            "body": {
+                "model": "claude-sonnet-4-6",
+                "system": [
+                    {"type": "text", "text": "x-anthropic-billing-header: cc_version=2.1.283.3fb;"},
+                    {
+                        "type": "text",
+                        "text": (
+                            "You are naming a coding session so the user can pick it out of a long list of sessions. "
+                            'Return JSON with a single "title" field.'
+                        ),
+                    },
+                ],
+                "messages": [{"role": "user", "content": "<session>\nExplain the cache layout\n</session>"}],
+            },
+        },
+        "response": {
+            "status": 200,
+            "body": {
+                "content": [{"type": "text", "text": '{"title":"Understand cache layout"}'}],
+                "usage": {"input_tokens": 5, "output_tokens": 3},
+            },
+        },
+    }
+    real_request = {
+        "timestamp": "2026-05-20T10:08:01+00:00",
+        "turn": 2,
+        "request": {
+            "method": "POST",
+            "path": "/v1/messages",
+            "body": {
+                "model": "claude-sonnet-4-6",
+                "messages": [{"role": "user", "content": "Explain the cache layout"}],
+            },
+        },
+        "response": {
+            "status": 200,
+            "body": {
+                "content": [{"type": "text", "text": "The cache has three layers."}],
+                "usage": {"input_tokens": 20, "output_tokens": 8},
+            },
+        },
+    }
+    _write_jsonl(trace_path, [title_request, real_request])
+
+    _seed_legacy(tmp_path)
+    summary = list_trace_sessions()[0]
+
+    assert summary["title"] == "Understand cache layout"
+    assert summary["first_user"] == "Explain the cache layout"
+    assert summary["last_response"] == "The cache has three layers."
+    assert summary["turn_count"] == 1
+
+
+def test_active_dashboard_summary_adds_title_without_replacing_conversation_preview(trace_db) -> None:
+    store = get_trace_store()
+    session_id = store.create_session(client="claude", proxy_mode="reverse")
+    store.append_record(
+        session_id,
+        {
+            "timestamp": "2026-05-20T10:08:00+00:00",
+            "request": {
+                "method": "POST",
+                "path": "/v1/messages",
+                "body": {"messages": [{"role": "user", "content": "Explain the cache layout"}]},
+            },
+            "response": {"status": 200, "body": {"content": [{"type": "text", "text": "Three layers."}]}},
+        },
+    )
+    store.append_record(
+        session_id,
+        {
+            "timestamp": "2026-05-20T10:08:01+00:00",
+            "request": {
+                "method": "POST",
+                "path": "/v1/messages",
+                "body": {
+                    "system": "Generate a concise, sentence-case title for the session.",
+                    "messages": [{"role": "user", "content": "<session>Explain the cache layout</session>"}],
+                },
+            },
+            "response": {"status": 200, "body": {"content": [{"type": "text", "text": "Cache layout overview"}]}},
+        },
+    )
+
+    summary = list_trace_sessions(current_session_id=session_id)[0]
+
+    assert summary["title"] == "Cache layout overview"
+    assert summary["first_user"] == "Explain the cache layout"
+    assert summary["last_response"] == "Three layers."
+    assert summary["turn_count"] == 1
 
 
 def test_dashboard_first_message_skips_injected_user_content_blocks(trace_db, tmp_path: Path) -> None:
@@ -1984,6 +2084,150 @@ async def test_dashboard_server_quit_route_stops_dashboard(trace_db) -> None:
 
 
 @pytest.mark.asyncio
+async def test_dashboard_can_switch_and_persist_database_path(trace_db, monkeypatch, tmp_path) -> None:
+    monkeypatch.delenv("TOKEN_FLOW_DB", raising=False)
+    monkeypatch.delenv("PACKLITE_DB", raising=False)
+    monkeypatch.delenv("CLOUDTAP_DB", raising=False)
+    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "data"))
+    reset_trace_store()
+    selected = tmp_path / "selected" / "conversations.sqlite3"
+    server = LiveViewerServer(port=0, dashboard_mode=True)
+    port = await server.start()
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.get(f"http://127.0.0.1:{port}/dashboard/health") as resp:
+                token = (await resp.json())["quit_token"]
+            async with session.post(
+                f"http://127.0.0.1:{port}/dashboard/database",
+                headers={"X-Claude-Tap-Dashboard-Token": token},
+                json={"path": str(selected)},
+            ) as resp:
+                assert resp.status == 200
+                assert (await resp.json())["db_path"] == str(selected.resolve())
+            async with session.get(f"http://127.0.0.1:{port}/dashboard/database") as resp:
+                payload = await resp.json()
+                assert payload["db_path"] == str(selected.resolve())
+                assert payload["can_choose_path"] is True
+
+        assert selected.is_file()
+        assert resolve_db_path() == selected.resolve()
+    finally:
+        await server.stop()
+
+
+@pytest.mark.asyncio
+async def test_dashboard_can_create_database_path_with_finder(trace_db, monkeypatch, tmp_path) -> None:
+    selected = tmp_path / "chosen.sqlite3"
+    calls = []
+
+    class FakePickerProcess:
+        returncode = 0
+
+        async def communicate(self):
+            return f"{selected}\n".encode(), b""
+
+    async def fake_create_subprocess_exec(*command, **kwargs):
+        calls.append(command)
+        assert command[0] == "osascript"
+        assert kwargs["stdout"] == asyncio.subprocess.PIPE
+        return FakePickerProcess()
+
+    monkeypatch.setattr("token_tap.server.api.sys.platform", "darwin")
+    monkeypatch.setattr("token_tap.server.api.asyncio.create_subprocess_exec", fake_create_subprocess_exec)
+    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "data"))
+    server = LiveViewerServer(port=0, dashboard_mode=True)
+    port = await server.start()
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.get(f"http://127.0.0.1:{port}/dashboard/health") as resp:
+                token = (await resp.json())["quit_token"]
+            async with session.post(
+                f"http://127.0.0.1:{port}/dashboard/database/choose",
+                headers={"X-Claude-Tap-Dashboard-Token": token},
+                json={"mode": "new"},
+            ) as resp:
+                assert resp.status == 200
+                assert await resp.json() == {"path": str(selected)}
+        assert (tmp_path / "data" / "token-flow").is_dir()
+        assert "Create a Token Flow database" in calls[0][2]
+        assert calls[0][-2:] == (str(tmp_path / "data" / "token-flow"), "traces.sqlite3")
+    finally:
+        await server.stop()
+
+
+@pytest.mark.asyncio
+async def test_dashboard_can_open_existing_database_with_finder(trace_db, monkeypatch, tmp_path) -> None:
+    selected = tmp_path / "existing.sqlite3"
+    selected.touch()
+    calls = []
+
+    class FakePickerProcess:
+        returncode = 0
+
+        async def communicate(self):
+            return f"{selected}\n".encode(), b""
+
+    async def fake_create_subprocess_exec(*command, **kwargs):
+        calls.append(command)
+        return FakePickerProcess()
+
+    monkeypatch.setattr("token_tap.server.api.sys.platform", "darwin")
+    monkeypatch.setattr("token_tap.server.api.asyncio.create_subprocess_exec", fake_create_subprocess_exec)
+    server = LiveViewerServer(port=0, dashboard_mode=True)
+    port = await server.start()
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.get(f"http://127.0.0.1:{port}/dashboard/health") as resp:
+                token = (await resp.json())["quit_token"]
+            async with session.post(
+                f"http://127.0.0.1:{port}/dashboard/database/choose",
+                headers={"X-Claude-Tap-Dashboard-Token": token},
+                json={"mode": "existing"},
+            ) as resp:
+                assert resp.status == 200
+                assert await resp.json() == {"path": str(selected)}
+        assert "Open a Token Flow database" in calls[0][2]
+        assert calls[0][-1] == str(trace_db.parent)
+    finally:
+        await server.stop()
+
+
+@pytest.mark.asyncio
+async def test_dashboard_can_choose_project_folder_with_finder(trace_db, monkeypatch, tmp_path) -> None:
+    selected = tmp_path / "another-project"
+    selected.mkdir()
+    calls = []
+
+    class FakePickerProcess:
+        returncode = 0
+
+        async def communicate(self):
+            return f"{selected}/\n".encode(), b""
+
+    async def fake_create_subprocess_exec(*command, **kwargs):
+        calls.append(command)
+        return FakePickerProcess()
+
+    monkeypatch.setattr("token_tap.server.api.sys.platform", "darwin")
+    monkeypatch.setattr("token_tap.server.api.asyncio.create_subprocess_exec", fake_create_subprocess_exec)
+    server = LiveViewerServer(port=0, dashboard_mode=True)
+    port = await server.start()
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.get(f"http://127.0.0.1:{port}/dashboard/health") as resp:
+                token = (await resp.json())["quit_token"]
+            async with session.post(
+                f"http://127.0.0.1:{port}/dashboard/captures/choose-project",
+                headers={"X-Claude-Tap-Dashboard-Token": token},
+            ) as resp:
+                assert resp.status == 200
+                assert await resp.json() == {"path": str(selected)}
+        assert "Choose a project for your AI" in calls[0][2]
+    finally:
+        await server.stop()
+
+
+@pytest.mark.asyncio
 async def test_dashboard_can_start_and_stop_codex_app_capture(trace_db, monkeypatch) -> None:
     import token_tap.capture.manager as capture_manager_module
 
@@ -2063,7 +2307,7 @@ async def test_dashboard_can_start_and_stop_codex_app_capture(trace_db, monkeypa
 
 
 @pytest.mark.asyncio
-async def test_dashboard_can_start_and_stop_pi_capture_in_terminal(trace_db, monkeypatch) -> None:
+async def test_dashboard_can_start_and_stop_pi_capture_in_terminal(trace_db, monkeypatch, tmp_path) -> None:
     import token_tap.capture.manager as capture_manager_module
 
     # Detach the stand-in capture like a Terminal window would, so it is not our child.
@@ -2097,6 +2341,8 @@ async def test_dashboard_can_start_and_stop_pi_capture_in_terminal(trace_db, mon
     monkeypatch.setattr(capture_manager_module.sys, "platform", "darwin")
     monkeypatch.setattr(shutil, "which", lambda name, *args, **kwargs: f"/usr/local/bin/{name}")
     monkeypatch.setattr(capture_manager_module.asyncio, "create_subprocess_exec", fake_create_subprocess_exec)
+    project = tmp_path / "project"
+    project.mkdir()
 
     server = LiveViewerServer(port=0, dashboard_mode=True)
     port = await server.start()
@@ -2112,15 +2358,19 @@ async def test_dashboard_can_start_and_stop_pi_capture_in_terminal(trace_db, mon
                 assert clients["pi"]["terminal"] is True
 
             async with session.post(
-                f"http://127.0.0.1:{port}/dashboard/captures", headers=headers, json={"client": "pi"}
+                f"http://127.0.0.1:{port}/dashboard/captures",
+                headers=headers,
+                json={"client": "pi", "working_directory": str(project)},
             ) as resp:
                 assert resp.status == 202
                 payload = await resp.json()
                 assert payload["state"] == "capturing"
                 assert payload["client"] == "pi"
                 assert payload["pid"] == sleeper_pid
+                assert payload["cwd"] == str(project)
 
             assert opened["command"][:3] == ("open", "-a", "Terminal")
+            assert f"cd {project}" in opened["script"]
             assert "--tap-client pi --tap-no-open --tap-no-live" in opened["script"]
 
             async with session.delete(f"http://127.0.0.1:{port}/dashboard/captures", headers=headers) as resp:

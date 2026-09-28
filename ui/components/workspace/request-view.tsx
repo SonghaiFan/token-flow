@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { createContext, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { fullyCachedBlockIds, selectedBlocks } from "@/lib/cross-link";
 import { formatDuration, formatNumber } from "@/lib/format";
 import type { SectionView } from "@/lib/agents";
 import { callReadSource, cleanWebText, inferOutputFormat, type OutputFormat, type OutputKind } from "@/lib/output-format";
@@ -23,6 +24,7 @@ import { clearCurrentMatch, clearHighlights, focusMatch, highlightMatches, MIN_Q
 
 type UnknownRecord = Record<string, unknown>;
 type RequestMode = "timeline" | "structured" | "raw";
+const CrossLinkContext = createContext<{ key: string; cached: Set<string> }>({ key: "", cached: new Set() });
 export type RequestViewMode = RequestMode | "changes";
 
 function asRecord(value: unknown): UnknownRecord {
@@ -565,7 +567,7 @@ function splitBlockId(blockId: string): { itemId: string; partIndex: number | nu
 function selectedJsonPath(turn: TurnModel, selection: TokenSelection | null, turnId: string): Array<number | string> | null {
   if (!selection || selection.turnId !== turnId) return null;
   const source = turn.blocks.find((block) => block.id === selection.blockId);
-  return source?.rawPath ?? null;
+  return source?.rawPath ?? selectedBlocks(turn, selection).find((block) => block.rawPath)?.rawPath ?? null;
 }
 
 function toolGroups(value: unknown): Array<{ name: string; tools: UnknownRecord[] }> {
@@ -933,7 +935,7 @@ function rowMarks(entries: Array<InputEntry | undefined>, category: InputCategor
   return {
     accent: matched ? categoryColor(category) : undefined,
     dimmed: (ids.length > 0 || Boolean(selection?.turnId === turnId && selection.layer)) && !matched,
-    open: Boolean(selection?.turnId === turnId && selection.layer && matched) || entries.some((entry) => entryHit(entry, selectionIds(selection, turnId, true))),
+    open: matched,
   };
 }
 
@@ -983,7 +985,9 @@ function LinkSwatch({ blockIds, category, icon, label, onSelectToken, selection,
 
 /* Invisible scroll targets for one or more captured blocks; the row carries the highlight. */
 function BlockAnchor({ blockIds, children, turnId }: { blockIds: string[]; children: ReactNode; turnId: string }) {
-  return <div className="relative scroll-m-32" data-block-anchor="">
+  const focus = useContext(CrossLinkContext);
+  const cached = Boolean(focus.key && blockIds.length && blockIds.every((id) => focus.cached.has(id)));
+  return <div className={`relative scroll-m-32 ${cached ? "tf-cached-content" : ""}`} data-cache-state={cached ? "cached" : undefined} data-block-anchor="">
     {blockIds.map((id) => <span className="absolute left-0 top-0 size-px opacity-0" data-block-id={id} data-turn-id={turnId} key={id} tabIndex={-1}/>)}
     {children}
   </div>;
@@ -998,10 +1002,11 @@ function isFresh(...entries: Array<InputEntry | undefined>): boolean {
 /* Flat accordion row: chevron on the left, summary in one line, body aligned with
    the summary. A row without a body keeps the chevron's space so summaries align. */
 function Row({ accent, children, defaultOpen = false, dimmed = false, hint, summary }: { accent?: string; children?: ReactNode; defaultOpen?: boolean; dimmed?: boolean; hint?: string; summary: ReactNode }) {
-  const { mounted, open, toggle } = useAccordion(defaultOpen);
+  const focus = useContext(CrossLinkContext);
+  const { mounted, open, toggle } = useAccordion(focus.key ? Boolean(accent) : defaultOpen, focus.key);
   // A selected row carries its category color as a left bar and a light tint.
   const mark = accent ? { backgroundColor: `color-mix(in srgb, ${accent} 9%, transparent)`, boxShadow: `inset 3px 0 0 ${accent}` } : undefined;
-  const fade = dimmed ? "tf-dimmed" : "";
+  const fade = !focus.key && dimmed ? "tf-dimmed" : "";
   if (children === undefined) return <div className={`t-row t-fade tf-inset flex min-h-11 items-center gap-2.5 py-2 text-sm ${fade}`} style={mark} title={hint}><span aria-hidden="true" className="w-4 shrink-0"/>{summary}</div>;
   return <div className="t-row t-acc" data-open={open ? "true" : "false"}>
     <div aria-expanded={open} className={`t-acc-head t-fade tf-inset tf-focus-inset flex min-h-11 cursor-pointer items-center gap-2.5 py-2 text-sm hover:bg-fill-hover ${fade}`} onClick={toggle} onKeyDown={(event) => activateOnKey(event, toggle)} role="button" style={mark} tabIndex={0} title={hint}>
@@ -1032,17 +1037,19 @@ function StateSummary({ entries }: { entries: InputEntry[] }) {
 
 function LayerSection({ badge, children, entries, layer, selection, turnId }: { badge?: ReactNode; children: ReactNode; entries: InputEntry[]; layer: InputLayer; selection: TokenSelection | null; turnId: string }) {
   const meta = LAYER_META[layer];
-  const picked = selection?.turnId === turnId && selection.layer === layer;
-  const dimmed = selection?.turnId === turnId && Boolean(selection.layer) && !picked;
+  const picked = selectionHits(entries, selection, turnId);
+  const focus = useContext(CrossLinkContext);
+  const { open, toggle } = useAccordion(!focus.key || picked, focus.key);
   // A selected layer takes its own color; the other layers step back while it is selected.
   const ring = picked ? { borderColor: meta.color, boxShadow: `0 0 0 3px color-mix(in srgb, ${meta.color} 18%, transparent)` } : undefined;
-  return <section aria-label={meta.title} className={`tf-card scroll-m-24 overflow-hidden transition ${dimmed ? "tf-dimmed" : ""}`} data-layer={layer} data-turn-id={turnId} style={ring} tabIndex={-1}>
-    <header className="tf-inset flex min-h-11 items-center gap-2.5 py-1.5">
+  return <section aria-label={meta.title} className="tf-card scroll-m-24 overflow-hidden transition" data-layer={layer} data-turn-id={turnId} style={ring} tabIndex={-1}>
+    <button aria-expanded={open} className="tf-inset tf-focus-inset flex min-h-11 w-full items-center gap-2.5 py-1.5 text-left" onClick={toggle} type="button">
+      <Chevron open={open}/>
       <RowIcon color={meta.color} icon={LAYER_ICONS[layer]}/>
       <h3 className="tf-heading shrink-0">{meta.title}</h3>
       <RowEnd badge={badge ?? <StateSummary entries={entries}/>} tokens={sumTokens(entries)}/>
-    </header>
-    <div className="divide-y divide-line border-t border-line">{children}</div>
+    </button>
+    {open ? <div className="divide-y divide-line border-t border-line">{children}</div> : null}
   </section>;
 }
 
@@ -1331,7 +1338,7 @@ function ConversationRows({ entries, lastPromptKey, ...props }: RowProps & { ent
   const rest = current.filter((entry) => entry.key !== lastPromptKey);
   return <>
     {prompt.map((entry) => <EntryRow entry={entry} key={entry.key} {...props}/>)}
-    {carried.length ? <Row defaultOpen={selectionHits(carried, props.selection, props.turnId)} dimmed={selectionIds(props.selection, props.turnId).length > 0 && !selectionHits(carried, props.selection, props.turnId)} summary={<>
+    {carried.length ? <Row accent={selectionHits(carried, props.selection, props.turnId) ? categoryColor(carried[0].inputClass.category) : undefined} defaultOpen={selectionHits(carried, props.selection, props.turnId)} dimmed={selectionIds(props.selection, props.turnId).length > 0 && !selectionHits(carried, props.selection, props.turnId)} summary={<>
       <span className="grid size-5 shrink-0 place-items-center"><RowIcon icon={HistoryIcon}/></span>
       <span className="shrink-0 text-ink">Carried over</span>
       <Meta>{carriedItems} {carriedItems === 1 ? "item" : "items"} · {carriedSummary(carriedRows)}</Meta>
@@ -1576,7 +1583,7 @@ function timelineItems(turn: TurnModel, items: unknown[]): unknown[] {
 }
 
 function previousInThread(turn: TurnModel, earlierTurns: TurnModel[]): TurnModel | undefined {
-  return [...earlierTurns].reverse().find((candidate) => candidate.thread.id === turn.thread.id && candidate.protocol === turn.protocol);
+  return [...earlierTurns].reverse().find((candidate) => (candidate.thread.scopeId || candidate.thread.id) === (turn.thread.scopeId || turn.thread.id) && candidate.protocol === turn.protocol);
 }
 
 /* Item ids the previous turn in this thread returned. The model's own steps first
@@ -1657,27 +1664,32 @@ function InstructionGroupRow({ entries, previous, ...props }: RowProps & { entri
 
 function TimelineStepView({ open, outputTokens, rowProps, step, tone }: { open: boolean; outputTokens?: number; rowProps: RowProps; step: TimelineStep; tone?: "carried" | "response" }) {
   const meta = STEP_META[step.role];
+  const focus = useContext(CrossLinkContext);
+  const matched = tone !== "response" && selectionHits(step.entries.flatMap((entry) => [entry, entry.result]), rowProps.selection, rowProps.turnId);
+  const disclosure = useAccordion(!focus.key || matched, focus.key);
   // Output has no per-item counts; the response shows the turn's measured output tokens.
   const tokens = tone === "response" ? (outputTokens ? { cached: 0, tokens: outputTokens } : undefined) : sumTokens(step.entries.flatMap((entry) => entry.result ? [entry, entry.result] : [entry]));
   const summary = stepSummary(step);
-  return <li className={`t-row relative pl-8 ${tone === "carried" ? "opacity-70" : ""}`} data-layer={step.role === "capabilities" || step.role === "instructions" ? step.role : undefined} data-turn-id={rowProps.turnId}>
+  return <li className="t-row relative pl-8" data-layer={step.role === "capabilities" || step.role === "instructions" ? step.role : undefined} data-turn-id={rowProps.turnId}>
     <span aria-hidden="true" className={`absolute left-0 top-0.5 grid size-6 place-items-center rounded-full border bg-panel ${tone === "response" ? "border-ink text-ink" : "border-line text-muted"}`}><meta.icon className="size-3.5"/></span>
-    <div className="mb-1.5 flex min-h-6 items-center gap-2 text-xs">
+    <button aria-expanded={disclosure.open} className="tf-focus-inset mb-1.5 flex min-h-6 w-full items-center gap-2 text-left text-xs" onClick={disclosure.toggle} type="button">
+      <Chevron open={disclosure.open}/>
       <span className="font-semibold text-ink">{tone === "response" ? "Response" : meta.label}</span>
       {summary ? <span className="truncate text-muted">{summary}</span> : null}
       {step.fresh && tone !== "response" ? <Badge tone="success">new</Badge> : null}
       {tokens ? <span className="ml-auto font-mono tabular-nums text-muted">{tokens.tokens.toLocaleString()}</span> : null}
-    </div>
-    <div className="divide-y divide-line overflow-hidden rounded-inset border border-line">
+    </button>
+    {disclosure.open ? <div className="divide-y divide-line overflow-hidden rounded-inset border border-line">
       {step.role === "instructions" ? <InstructionRows entries={step.entries} {...rowProps}/> : step.entries.map((entry) => <EntryRow entry={entry} key={entry.key} {...rowProps} defaultOpen={open && step.role !== "context"} inResponse={tone === "response"}/>)}
-    </div>
+    </div> : null}
   </li>;
 }
 
 /* A run of steps this request carries from before, folded to one line. */
 function CarriedSteps({ label, note, rowProps, steps }: { label: string; note: string; rowProps: RowProps; steps: TimelineStep[] }) {
   const selected = steps.some((step) => step.entries.some((entry) => selectionHits([entry, entry.result], rowProps.selection, rowProps.turnId)));
-  const { open, toggle } = useAccordion(selected);
+  const focus = useContext(CrossLinkContext);
+  const { open, toggle } = useAccordion(selected, focus.key);
   if (!steps.length) return null;
   return <li className="relative pl-8">
     <span aria-hidden="true" className="absolute left-0 top-0 grid size-6 place-items-center rounded-full border border-line bg-panel text-muted"><HistoryIcon className="size-3.5"/></span>
@@ -1690,51 +1702,70 @@ function CarriedSteps({ label, note, rowProps, steps }: { label: string; note: s
   </li>;
 }
 
+/* A conversation projection, not a second parser: retain the canonical block
+   anchors and only give ordinary messages a quieter, directly readable body. */
+function TimelineEntry({ entry, inResponse = false, ...props }: RowProps & { entry: InputEntry }) {
+  const focus = useContext(CrossLinkContext);
+  const matched = !inResponse && selectionHits([entry, entry.result], props.selection, props.turnId);
+  const disclosure = useAccordion(!focus.key || matched, focus.key);
+  const message = entry.part !== undefined && (entry.inputClass.label === "User prompt" || entry.inputClass.label === "Assistant messages");
+  if (!message) {
+    // Timeline starts secondary detail closed; Tokens keeps its change-driven
+    // disclosure. Selection still opens the original block through Row.
+    const quietEntry = { ...entry, rowState: undefined, result: entry.result ? { ...entry.result, rowState: undefined } : undefined };
+    return <li className="min-w-0 overflow-hidden rounded-inset border border-line"><EntryRow entry={quietEntry} {...props} inResponse={inResponse}/></li>;
+  }
+  const user = entry.inputClass.label === "User prompt";
+  const label = user ? "User" : "Assistant";
+  const text = typeof entry.part === "string" ? entry.part : textValue(asRecord(entry.part).text);
+  return <li aria-label={`${label} message`} className={`tf-dialog-message ${user ? "tf-dialog-user" : "tf-dialog-assistant"}`}>
+    {focus.key || !disclosure.open ? <button aria-expanded={disclosure.open} className="tf-focus-inset flex min-h-11 items-center gap-2 text-left text-xs text-muted" onClick={disclosure.toggle} type="button">
+      <Chevron open={disclosure.open}/><span>{label}</span>
+      {!disclosure.open ? <span className="truncate">{previewText(text)}</span> : null}
+    </button> : <span className="sr-only">{label}</span>}
+    {disclosure.open ? <div className={user ? "tf-dialog-bubble" : "tf-dialog-reply"}><BlockAnchor blockIds={entryBlockIds([entry])} turnId={props.turnId}>{text ? <RichText>{text}</RichText> : <ContentPart value={entry.part}/>}</BlockAnchor></div> : null}
+  </li>;
+}
+
 function TimelineRequest({ earlierTurns, onSelectToken, selection, turn }: { earlierTurns: TurnModel[]; onSelectToken: (selection: TokenSelection | null) => void; selection: TokenSelection | null; turn: TurnModel }) {
   const entries = useMemo(() => inputEntries(turn), [turn]);
   const carried = useMemo(() => carriedBlockIds(turn, earlierTurns), [earlierTurns, turn]);
   const returned = useMemo(() => previousOutputIds(turn, earlierTurns), [earlierTurns, turn]);
   const isFreshEntry = (entry: InputEntry) => entry.state !== "carried" && !carried.has(entry.key) && !returned.has(entry.itemId);
-  const requestContext = (entry: InputEntry) => entry.inputClass.layer === "capabilities" || entry.inputClass.layer === "instructions";
+  const requestContext = (entry: InputEntry) => entry.inputClass.layer === "capabilities" || entry.inputClass.layer === "instructions" || entry.inputClass.layer === "context";
   const contextSteps = groupSteps(entries.filter(requestContext), () => false, "context:");
   const steps = groupSteps(entries.filter((entry) => !requestContext(entry)), isFreshEntry, "in:");
   const output = useMemo(() => timelineItems(turn, turnPlugins(turn).protocol?.output?.(turn.record) || []), [turn]);
   const response = useMemo(() => groupSteps(inputEntries(turn, output), () => true, "out:"), [output, turn]);
   const rowProps: RowProps = { onSelectToken, selection, turnId: turn.id };
 
-  // Steps stay in order. Carried steps fold in two runs around the prompt that
-  // started this query, which stays visible so the new steps have their context.
-  const firstFresh = steps.findIndex((step) => step.fresh);
-  const splitAt = firstFresh < 0 ? steps.length : firstFresh;
-  const promptIndex = steps.slice(0, splitAt).map((step) => step.role).lastIndexOf("user");
-  const beforePrompt = promptIndex >= 0 ? steps.slice(0, promptIndex) : steps.slice(0, splitAt);
-  const prompt = promptIndex >= 0 ? steps[promptIndex] : undefined;
-  const sincePrompt = promptIndex >= 0 ? steps.slice(promptIndex + 1, splitAt) : [];
-  const current = steps.slice(splitAt);
-
   return <div className="space-y-4 tf-pad">
     <ChainNote turn={turn}/>
-    <ol className="relative space-y-5 before:absolute before:bottom-3 before:left-3 before:top-3 before:w-px before:bg-line">
-      {contextSteps.map((step) => <TimelineStepView key={step.key} open={false} rowProps={rowProps} step={step}/>)}
-      <CarriedSteps label="Earlier" note="before this query" rowProps={rowProps} steps={beforePrompt}/>
-      {prompt ? <TimelineStepView key={prompt.key} open rowProps={rowProps} step={prompt}/> : null}
-      <CarriedSteps label="So far" note="in this query, before this turn" rowProps={rowProps} steps={sincePrompt}/>
-      {current.map((step) => <TimelineStepView key={step.key} open rowProps={rowProps} step={step}/>)}
-      {response.map((step, index) => <TimelineStepView key={step.key} open outputTokens={index === 0 ? turn.output : undefined} rowProps={{ ...rowProps, selection: null }} step={step} tone="response"/>)}
+    <ol className="space-y-5">
+      <CarriedSteps label="Request context" note="" rowProps={rowProps} steps={contextSteps}/>
+      {steps.flatMap((step) => step.entries.map((entry) => <TimelineEntry entry={entry} key={entry.key} {...rowProps}/>))}
+      {response.flatMap((step) => step.entries.map((entry) => <TimelineEntry entry={entry} inResponse key={`response:${entry.key}`} {...rowProps} selection={null}/>))}
     </ol>
     {!entries.length && !response.length ? <EmptyState framed>No conversation items were captured for this turn.</EmptyState> : null}
   </div>;
 }
 
 function RequestBody({ earlierTurns, focusPath, mode, onSelectToken, selection, turn }: { earlierTurns: TurnModel[]; focusPath?: JsonPathPart[] | null; mode: RequestMode; onSelectToken: (selection: TokenSelection | null) => void; selection: TokenSelection | null; turn: TurnModel }) {
+  const focus = useMemo(() => ({ key: selection?.turnId === turn.id ? JSON.stringify(selection) : "", cached: fullyCachedBlockIds(turn) }), [selection, turn]);
+  return <CrossLinkContext.Provider value={focus}><FocusedRequestBody earlierTurns={earlierTurns} focusPath={focusPath} mode={mode} onSelectToken={onSelectToken} selection={selection} turn={turn}/></CrossLinkContext.Provider>;
+}
+
+function FocusedRequestBody({ earlierTurns, focusPath, mode, onSelectToken, selection, turn }: { earlierTurns: TurnModel[]; focusPath?: JsonPathPart[] | null; mode: RequestMode; onSelectToken: (selection: TokenSelection | null) => void; selection: TokenSelection | null; turn: TurnModel }) {
   const record = turn.record;
+  const focus = useContext(CrossLinkContext);
+  const targets = useMemo(() => selectedBlocks(turn, selection).flatMap((block) => block.rawPath ? [{ path: block.rawPath, range: block.rawRange, cached: focus.cached.has(block.id) }] : []), [turn, selection, focus.cached]);
   const turnId = turn.id;
   const selectedPath = useMemo(() => focusPath || selectedJsonPath(turn, selection, turnId), [focusPath, turn, selection, turnId]);
   const source = selection?.turnId === turnId ? turn.blocks.find((block) => block.id === selection.blockId) : undefined;
   const selectedRange = source?.rawPath && selectedPath && source.rawPath.length === selectedPath.length && source.rawPath.every((part, index) => part === selectedPath[index]) ? source.rawRange : undefined;
   if (mode === "timeline") return <TimelineRequest earlierTurns={earlierTurns} onSelectToken={onSelectToken} selection={selection} turn={turn}/>;
   if (mode === "structured") return <StructuredRequest earlierTurns={earlierTurns} onSelectToken={onSelectToken} selection={selection} turn={turn}/>;
-  return <div className="tf-pad">{selection?.turnId === turnId && !selectedPath ? <p className="mb-3 text-xs text-muted">No exact raw location is available for this selection in the current request.</p> : null}<div className="tf-card overflow-hidden"><RawJsonTree selectedBlockId={selection?.turnId === turnId ? selection.blockId : undefined} selectedPath={selectedPath} selectedRange={selectedRange} turnId={turnId} value={record}/></div></div>;
+  return <div className="tf-pad">{selection?.turnId === turnId && !selectedPath ? <p className="mb-3 text-xs text-muted">No exact raw location is available for this selection in the current request.</p> : null}<div className="tf-card overflow-hidden"><RawJsonTree active={Boolean(!focusPath && focus.key)} targets={focusPath ? undefined : targets} selectedBlockId={selection?.turnId === turnId ? selection.blockId : undefined} selectedPath={selectedPath} selectedRange={selectedRange} turnId={turnId} value={record}/></div></div>;
 }
 
 
@@ -1742,10 +1773,9 @@ type InspectorJump = TokenSelection & { nonce: number; path?: JsonPathPart[]; qu
 
 /* The shared selection, named in its category color. A category that spans several
    blocks can be stepped through here; each step opens and scrolls to that block. */
-function SelectionChip({ onJump, onSelectToken, selection }: { onJump: (selection: TokenSelection) => void; onSelectToken: (selection: TokenSelection | null) => void; selection: TokenSelection }) {
+function SelectionChip({ ids, onJump, onSelectToken, selection }: { ids: string[]; onJump: (selection: TokenSelection) => void; onSelectToken: (selection: TokenSelection | null) => void; selection: TokenSelection }) {
   // Canonical blocks, not their carrier: one system field can contain many
   // independently classified instructions, and every one must be reachable.
-  const ids = [...new Set(selection.layer ? [] : selection.blockIds || [selection.blockId])];
   const position = Math.max(0, ids.indexOf(selection.blockId));
   const move = (delta: number) => {
     const next = { ...selection, blockId: ids[(position + delta + ids.length) % ids.length] };
@@ -1815,6 +1845,9 @@ export function RequestView({ jumpToBlock, onNavigate, onSelectToken, onViewChan
   const searching = scope === "turn" && query.trim().length >= MIN_QUERY;
   const hits = useMemo(() => (searching ? searchRecord(turn.record, query, turn.blocks) : []), [query, searching, turn]);
   const current = cursor.query === query ? cursor.index : -1;
+  const matchIds = useMemo(() => selectedBlocks(turn, selection)
+    .filter((block) => mode !== "raw" || block.rawPath)
+    .map((block) => block.id), [turn, selection, mode]);
   // The newest request to reveal something wins, whether it came from the flow or from here.
   const jump = [jumpToBlock as InspectorJump | null, localJump]
     .filter((item): item is InspectorJump => Boolean(item && item.turnId === turn.id && (item.blockId ? selection?.blockId === item.blockId : !selection)))
@@ -1850,18 +1883,20 @@ export function RequestView({ jumpToBlock, onNavigate, onSelectToken, onViewChan
     const frame = window.requestAnimationFrame(() => {
       const body = bodyRef.current;
       if (!body) return;
-      const target = jump.path && mode === "raw"
+      const blockId = matchIds.includes(jump.blockId) ? jump.blockId : matchIds[0];
+      const anchor = [...body.querySelectorAll<HTMLElement>("[data-block-id]")].find((element) => element.dataset.turnId === jump.turnId && element.dataset.blockId === blockId);
+      const target = mode === "raw"
         ? body.querySelector<HTMLElement>('[data-json-selected="true"] [data-source-range]') ?? body.querySelector<HTMLElement>('[data-json-selected="true"]')
-        : [...body.querySelectorAll<HTMLElement>(jump.layer ? "[data-layer]" : "[data-block-id]")].find((element) => element.dataset.turnId === jump.turnId && (jump.layer ? element.dataset.layer === jump.layer : element.dataset.blockId === jump.blockId));
+        : anchor?.closest<HTMLElement>("[data-block-anchor]") ?? anchor;
       if (!target) return;
       if (jump.query) {
         rangesRef.current = highlightMatches(body, jump.query);
         focusMatch(jump.path && mode === "raw" ? target : target.closest("[data-block-anchor]") ?? target, rangesRef.current);
-      } else target.scrollIntoView({ behavior: "smooth", block: jump.layer ? "start" : "center" });
+      } else target.scrollIntoView({ behavior: "smooth", block: "start" });
       target.focus({ preventScroll: true });
     });
     return () => window.cancelAnimationFrame(frame);
-  }, [jump, mode, scope]);
+  }, [jump, matchIds, mode, scope]);
 
   const step = (delta: number) => {
     const next = selectedIndex + delta;
@@ -1912,9 +1947,9 @@ export function RequestView({ jumpToBlock, onNavigate, onSelectToken, onViewChan
           <span className="whitespace-nowrap px-1 text-sm"><span className="font-medium">Turn {turn.label}</span><span className="text-muted"> of {turns.length}</span></span>
           <IconButton disabled={selectedIndex >= turns.length - 1} label="Next turn" onClick={() => step(1)} title="Next turn (↓)"><ChevronRightIcon/></IconButton>
         </div>
-        {selection?.turnId === turn.id ? <SelectionChip onJump={(next) => setLocalJump({ ...next, nonce: Date.now() })} onSelectToken={onSelectToken} selection={selection}/> : null}
+        {selection?.turnId === turn.id ? <SelectionChip ids={matchIds} onJump={(next) => setLocalJump({ ...next, nonce: Date.now() })} onSelectToken={onSelectToken} selection={selection}/> : null}
         <div className="ml-auto flex items-center gap-1">
-          <Segmented label="Request view" onChange={onViewChange} options={[["timeline", "Timeline"], ["structured", "Tokens"], ["raw", "Raw"], ["changes", "Changes"]]} value={view}/>
+          <Segmented label="Request view" onChange={onViewChange} options={[["timeline", "Dialog"], ["structured", "Tokens"], ["raw", "Raw"], ["changes", "Changes"]]} value={view}/>
           <IconButton active={searchOpen || Boolean(query)} aria-expanded={searchOpen || Boolean(query)} className="-mr-2" label="Search this turn" onClick={() => { if (searchOpen || query) { setSearchOpen(false); setQuery(""); } else openSearch(); }}><SearchIcon/></IconButton>
         </div>
       </div>

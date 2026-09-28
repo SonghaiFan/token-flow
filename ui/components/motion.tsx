@@ -17,10 +17,17 @@ export function motionMs(name: string, fallback: number): number {
    grid-rows tween runs; after collapsing it unmounts, so long content does not linger.
    A programmatic open (defaultOpen turning true, e.g. from a selection) opens at once,
    so anything scrolling to the content lands on its final position. */
-export function useAccordion(defaultOpen: boolean) {
+export function useAccordion(defaultOpen: boolean, resetKey?: string) {
   const [open, setOpen] = useState(defaultOpen);
   const [mounted, setMounted] = useState(defaultOpen);
   const [requested, setRequested] = useState(defaultOpen);
+  const [previousKey, setPreviousKey] = useState(resetKey);
+  if (previousKey !== resetKey) {
+    setPreviousKey(resetKey);
+    setRequested(defaultOpen);
+    setOpen(defaultOpen);
+    setMounted(defaultOpen);
+  }
   if (defaultOpen !== requested) {
     setRequested(defaultOpen);
     if (defaultOpen) {

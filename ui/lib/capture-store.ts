@@ -69,7 +69,7 @@ export function useCapture() {
     active,
     client,
     clientLabel: client?.label || "Agent",
-    start: (id: string) => run(() => startCapture(id)),
+    start: (id: string, workingDirectory?: string) => run(() => startCapture(id, workingDirectory)),
     stop: () => run(stopCapture),
   };
 }

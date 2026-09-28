@@ -1,5 +1,6 @@
 import { environmentChanges, environmentPreview, EnvironmentView, previewText, ReadableText, type EnvironmentFacts } from "@/components/workspace/section-views";
 import { asObject } from "../json";
+import { EmbeddedConversationView, type EmbeddedConversation } from "@/components/workspace/embedded-conversation";
 import { codexResultParts } from "./codex-results";
 import type { InputClass } from "../types";
 
@@ -15,20 +16,27 @@ const SUBAGENT_LABELS: Record<string, string> = {
    conversation's own thread id) and consolidates them (phase 2, a sub-agent);
    Skysight writes memories from recorded activity. Their prompts are written by
    the harness even where they arrive as user messages. */
-const BACKGROUND_TASKS: Array<[RegExp, string]> = [
-  [/^## Memory Writing Agent: Phase 1\b/, "Rollout summary"],
-  [/^## Memory Writing Agent: Phase 2\b/, "Memory consolidation"],
-  [/^You are a memory writer for Codex Skysight\b/, "Skysight memory"],
-];
 const BACKGROUND_PROMPT = /^(?:## Memory Writing Agent\b|You are a memory writer for Codex\b|Analyze this rollout and produce JSON\b)/;
 
-function leadingTexts(body: Record<string, unknown>): string[] {
-  const input = Array.isArray(body.input) ? body.input : [];
-  return input.slice(0, 12).flatMap((raw) => {
-    const content = asObject(raw).content;
-    return Array.isArray(content) ? content.map((part) => String(asObject(part).text || "").trim()) : [];
-  });
+function parseRolloutHistory(text: string): EmbeddedConversation | undefined {
+  if (!text.startsWith("Analyze this rollout and produce JSON")) return;
+  const marker = "rendered conversation (pre-rendered from rollout `.jsonl`; filtered response items):";
+  const offset = text.indexOf(marker);
+  if (offset < 0) return;
+  try {
+    const payload = text.slice(offset + marker.length).trim();
+    const end = payload.lastIndexOf("]") + 1;
+    const items: unknown = JSON.parse(payload.slice(0, end));
+    if (!Array.isArray(items) || !items.every((item) => item && typeof item === "object" && !Array.isArray(item))) return;
+    return {
+      items,
+      project: /^- rollout_cwd: (.+)$/m.exec(text.slice(0, offset))?.[1] || "",
+      source: /^- rollout_path: (.+)$/m.exec(text.slice(0, offset))?.[1] || "",
+      instruction: [text.slice(0, text.indexOf("\n\n")).trim(), payload.slice(end).trim()].filter(Boolean).join("\n\n"),
+    };
+  } catch { return; }
 }
+
 import type { AgentPlugin } from "./types";
 import { inputClass } from "../input-categories";
 
@@ -97,11 +105,24 @@ export const codex: AgentPlugin = {
   declaredKind: codexContentKind,
   // Every request names its thread; a sub-agent's requests also name the thread
   // that spawned it and the kind of sub-agent.
-  thread(record) {
+  thread(record, { index }) {
     const body = asObject(record.request?.body);
     const metadata = asObject(body.client_metadata);
     const text = (key: string) => (typeof metadata[key] === "string" && metadata[key] ? (metadata[key] as string) : undefined);
     const role = text("x-openai-subagent");
+    // Only inspect top-level request messages, never quoted messages inside a
+    // rollout. A source path plus a parsed transcript identifies the task input,
+    // not a parent thread. Keep the provider identity unchanged.
+    const rollout = (Array.isArray(body.input) ? body.input : []).some((item) => {
+      const message = asObject(item);
+      if (message.role !== "user" || !Array.isArray(message.content)) return false;
+      return message.content.some((part) => {
+        const value = asObject(part).text;
+        if (typeof value !== "string") return false;
+        const history = parseRolloutHistory(value);
+        return Boolean(history?.source);
+      });
+    });
     // A spawned agent carries its task path (`/root/release_docs`) as agent_name in
     // the turn metadata; the root agent and guardian reviews are just `/root`.
     let name: string | undefined;
@@ -111,16 +132,13 @@ export const codex: AgentPlugin = {
     } catch {
       name = undefined;
     }
-    const texts = leadingTexts(body);
-    const task = BACKGROUND_TASKS.find(([pattern]) => texts.some((value) => pattern.test(value)))?.[1];
-    // Each rollout summary is its own request, though it names the conversation's thread.
-    if (task === "Rollout summary") return { id: `rollout:${text("turn_id") || text("thread_id") || ""}`, label: task, background: true };
-    if (task || role === "memory_consolidation") return { id: text("thread_id"), label: task || SUBAGENT_LABELS.memory_consolidation, background: true };
     return {
       id: text("thread_id"),
+      scopeId: rollout ? `rollout-request:${index}` : undefined,
       parentId: text("x-codex-parent-thread-id"),
-      label: role ? SUBAGENT_LABELS[role] || role.replaceAll("_", " ") : undefined,
+      label: rollout ? "Rollout summary" : role ? SUBAGENT_LABELS[role] || role.replaceAll("_", " ") : undefined,
       name,
+      background: rollout || role === "memory_consolidation",
     };
   },
   resultParts: codexResultParts,
@@ -172,6 +190,16 @@ export const codex: AgentPlugin = {
     return text;
   },
   sections: {
+    "Background task": {
+      preview: (text) => {
+        const history = parseRolloutHistory(text);
+        return history ? `Historical conversation · ${history.project.split("/").filter(Boolean).at(-1) || "Unknown project"} · ${history.items.length} entries` : undefined;
+      },
+      render: (text) => {
+        const history = parseRolloutHistory(text);
+        return history ? <EmbeddedConversationView conversation={history}/> : undefined;
+      },
+    },
     Environment: {
       preview: (text) => {
         const facts = parseEnvironment(text);

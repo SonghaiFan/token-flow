@@ -25,7 +25,7 @@ from token_tap.storage.trace_store import SessionQuery, TraceStore, get_trace_st
 _DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 
 CLIENT_LABELS = dashboard_labels()
-DASHBOARD_SUMMARY_VERSION = 10
+DASHBOARD_SUMMARY_VERSION = 12
 VALID_SESSION_STATUSES = {"active", "complete", "error", "empty"}
 _REDACTED_VALUE = "REDACTED"
 _SENSITIVE_KEY_NAMES = {
@@ -284,7 +284,8 @@ def merge_record_into_summary(
         summary["updated_at"] = timestamp
         if not summary.get("started_at"):
             summary["started_at"] = timestamp
-    summary["last_response"] = _last_response_preview([record])
+    if not _is_auxiliary_record(record):
+        summary["last_response"] = _last_response_preview([record])
     preview_user = _first_user_preview([record])
     if preview_user:
         existing_first = str(summary.get("first_user") or "")
@@ -296,6 +297,10 @@ def merge_record_into_summary(
             or (_is_metadata_prompt(existing_first) and not _is_metadata_prompt(preview_user))
         ):
             summary["first_user"] = preview_user
+    if not summary.get("title"):
+        generated_title = _generated_conversation_title([record])
+        if generated_title:
+            summary["title"] = generated_title
     if not summary.get("agent"):
         summary["agent"] = _infer_agent([record], manifest_entry)
         summary["agent_key"] = _agent_key(summary["agent"])
@@ -664,6 +669,7 @@ def _summarize_session(
             - cache_read_in_input_tokens
             + cache_create_tokens,
             "model": _top_key(models) or _record_model(last_record) or "unknown",
+            "title": _generated_conversation_title(records),
             "first_user": _first_user_preview(preview_records),
             "last_response": _last_response_preview(preview_records),
             "error": _first_error(error_display_records),
@@ -911,7 +917,7 @@ def _preview_records(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
     transcripts = [record for record in records if _is_cursor_transcript_record(record)]
     if transcripts:
         return transcripts
-    primary = [record for record in records if _is_primary_model_record(record)]
+    primary = [record for record in records if _is_primary_model_record(record) and not _is_auxiliary_record(record)]
     if primary:
         return primary
     return [record for record in records if not _is_auxiliary_record(record) and not _is_protobuf_noise_record(record)]
@@ -1098,7 +1104,7 @@ def _is_protobuf_noise_record(record: dict[str, Any]) -> bool:
 
 
 def _is_auxiliary_record(record: dict[str, Any]) -> bool:
-    if _is_protobuf_noise_record(record) or is_non_model_request(record):
+    if _is_protobuf_noise_record(record) or is_non_model_request(record) or _is_metadata_request_record(record):
         return True
     path = _record_path(record).lower()
     if is_model_probe_path(path) or _is_one_token_probe(record):
@@ -1152,15 +1158,107 @@ def _is_successful_primary_record(record: dict[str, Any]) -> bool:
 
 _METADATA_PROMPT_PREFIXES = (
     "generate a concise, single-line task title",
+    "generate a concise, sentence-case title for the session",
     "write a brief catch-up for a user returning",
     "the user stepped away and is coming back",
     "you are a helpful assistant. you will be presented with a user prompt, and your job is to provide a short title",
 )
 
+_TITLE_PROMPT_PREFIXES = (
+    "generate a concise, single-line task title",
+    "generate a concise, sentence-case title for the session",
+    "you are a helpful assistant. you will be presented with a user prompt, and your job is to provide a short title",
+)
+
+_TITLE_PROMPT_MARKERS = (
+    "you are naming a coding session so the user can pick it out of a long list of sessions",
+)
+
 
 def _is_metadata_prompt(text: str) -> bool:
     """Return whether a user-role prompt was written by the agent for itself."""
-    return text.strip().lower().startswith(_METADATA_PROMPT_PREFIXES)
+    normalized = text.strip().lower()
+    return normalized.startswith(_METADATA_PROMPT_PREFIXES) or any(
+        marker in normalized for marker in _TITLE_PROMPT_MARKERS
+    )
+
+
+def _metadata_instruction_texts(record: dict[str, Any]) -> list[str]:
+    """Return only request text locations that can declare auxiliary work."""
+    request = record.get("request")
+    body = request.get("body") if isinstance(request, dict) else None
+    headers = request.get("headers") if isinstance(request, dict) else None
+    if not isinstance(body, dict):
+        return []
+
+    texts = []
+    for key in ("system", "instructions"):
+        text = _content_text(body.get(key))
+        if text:
+            texts.append(text)
+
+    for key in ("messages", "input"):
+        items = body.get(key)
+        if not isinstance(items, list):
+            continue
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            role = str(item.get("role") or "").lower()
+            if role not in {"developer", "system"}:
+                continue
+            text = _content_text(item.get("content") or item.get("text"))
+            if text:
+                texts.append(text)
+
+    user_text = _request_user_text(body, headers=headers)
+    if user_text:
+        texts.append(user_text)
+    return texts
+
+
+def _is_metadata_request_record(record: dict[str, Any]) -> bool:
+    return any(_is_metadata_prompt(text) for text in _metadata_instruction_texts(record))
+
+
+def _is_title_generation_record(record: dict[str, Any]) -> bool:
+    return any(
+        (normalized := text.strip().lower()).startswith(_TITLE_PROMPT_PREFIXES)
+        or any(marker in normalized for marker in _TITLE_PROMPT_MARKERS)
+        for text in _metadata_instruction_texts(record)
+    )
+
+
+def _generated_title_from_record(record: dict[str, Any]) -> str:
+    if not _is_title_generation_record(record) or not 200 <= _response_status(record) < 400:
+        return ""
+    text = _record_response_text(record).strip()
+    if not text:
+        return ""
+    fenced = re.fullmatch(r"```(?:json)?\s*([\s\S]*?)\s*```", text, flags=re.IGNORECASE)
+    if fenced:
+        text = fenced.group(1).strip()
+    if text.startswith("{"):
+        try:
+            payload = json.loads(text)
+        except json.JSONDecodeError:
+            return ""
+        title = payload.get("title") if isinstance(payload, dict) else None
+        if not isinstance(title, str):
+            return ""
+        text = title.strip()
+    elif len(text) >= 2 and text[0] == text[-1] and text[0] in {'"', "'"}:
+        text = text[1:-1].strip()
+    text = re.sub(r"^title\s*:\s*", "", text, flags=re.IGNORECASE)
+    return _preview(text, 220) if text and not _is_metadata_prompt(text) else ""
+
+
+def _generated_conversation_title(records: list[dict[str, Any]]) -> str:
+    for record in records:
+        title = _generated_title_from_record(record)
+        if title:
+            return title
+    return ""
 
 
 def _first_user_preview(records: list[dict[str, Any]]) -> str:

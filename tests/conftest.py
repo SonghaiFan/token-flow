@@ -69,8 +69,9 @@ def read_proxy_log(trace_dir: str | Path, *, session_index: int = -1) -> str:
 
 
 @pytest.fixture(autouse=True)
-def isolate_trace_store():
+def isolate_trace_store(monkeypatch, tmp_path):
     """Reset trace storage and both current and compatibility overrides."""
+    monkeypatch.setenv("TOKEN_FLOW_SETTINGS", str(tmp_path / "token-flow-settings.json"))
     saved_db = os.environ.get("TOKEN_FLOW_DB")
     saved_legacy_db = os.environ.get("CLOUDTAP_DB")
     os.environ.pop("TOKEN_FLOW_DB", None)

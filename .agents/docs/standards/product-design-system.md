@@ -81,14 +81,18 @@ everything the system supports.
   and Status; the conversation list. Nothing else is permanently visible.
 - **Capture** opens a menu: *Capture with* lists the agents installed on this
   computer; *More agents…* reveals supported agents that are not installed,
-  with install links. While a capture runs the button shows it, and the menu
-  offers Stop.
+  with install links. When a terminal agent is available, one Project row above
+  the list shows the folder it will use and opens the native folder picker; do
+  not add a parallel project manager. While a capture runs the button shows it,
+  and the menu offers Stop.
 - Issues appear only when there are some (`⚠ N issues`, which filters to
   them); zero counts are not shown.
 - Rows show conversation, agent, started, turns, and tokens. Mark only
   exceptions: a green dot for Active, `Empty` and `Error` badges. Complete is
   the default and stays unmarked. A row opens as one object; per-row actions,
   such as delete, live in its `•••` menu.
+- A conversation uses the captured result of its auxiliary title-generation
+  request when one exists; otherwise its title is the first real user query.
 - Each row has a checkbox that chooses it for comparison without opening it.
   While any row is chosen, one bar above the list names the count and offers
   Clear and **Compare** (enabled from two). Choices persist across search and
@@ -102,6 +106,30 @@ everything the system supports.
   tokens. Do not squeeze desktop columns into a horizontally overflowing page.
 
 ## Conversation workspace
+
+### Parallel activity lanes (2026-09-28)
+
+Provider thread identity follows captured identifiers; cache keys and prompt
+phrases alone are not identities. Keep unidentified requests separate as
+Unknown thread. Parent relationships require an explicit captured parent id.
+A Codex rollout-analysis request containing a source path and parsed transcript
+gets an isolated local display/comparison scope, preserving its original thread
+id. This observed payload convention is not a provider relationship schema.
+Do not connect it to the main flow or other summaries, propagate its background
+status to its source thread, or include it in main-conversation statistics.
+
+The turn flow now presents main conversations, background threads, and auxiliary
+requests as adjacent lanes. One lane expands into turn labels and the layer
+Sankey; the others remain narrow single-column flows: fixed-size squares at the
+same height as expanded nodes, connected only within a captured thread. Squares
+retain layer composition and cache hatching; token counts appear on hover.
+All lanes share capture-order
+row positions and scroll together. Expanding a lane changes width only; selecting
+a turn opens its inspector. The main conversation is the initial expanded lane.
+The Layers/Categories switch is removed from this rail; it always shows layers.
+Each expanded lane uses its own token scale. This supersedes the folded
+background-at-the-bottom and granularity-switch descriptions below, preserving
+simultaneous visibility without implying a parent relationship for background work.
 
 The workspace answers a second question: **What happened in this conversation?**
 
@@ -161,6 +189,18 @@ The workspace answers a second question: **What happened in this conversation?**
   reads continuously past folded branches. A search lists matching turns flat.
   Agent plugins name threads through `thread()`; turn numbers stay in capture
   order.
+- **Timeline conversation reading (2026-09-28)** supersedes the Earlier/So far
+  grouping below. The UI label is **Dialog**. User messages use a quiet,
+  right-aligned bubble; assistant replies are left-aligned prose without cards.
+  Routine role headings are visually hidden, but remain accessible. Focused or
+  folded messages retain a disclosure control. This supersedes the historical
+  grouping below. Show the selected request's captured conversation in order:
+  user and assistant message bodies directly, tools paired with their captured
+  results by call id, and reasoning as expandable secondary detail. Capabilities,
+  instructions, and injected context share one collapsed Request context entry.
+  Selection opens matching context and conversation blocks using the same source
+  anchors as Tokens and Raw. Missing history remains explicit; this is not a
+  reconstruction of unavailable IDE events or encrypted reasoning.
 - **Timeline** is the inspector's default view: the trajectory up to the turn,
   in order, as steps by role. *User* is the typed prompt; *Model* is reasoning,
   messages, and tool calls, each call with its result beneath it; *Tool* is a
@@ -232,7 +272,7 @@ portion of a node is hatched from its leading edge, using captured per-block
 cache counts.
 
 Each node links to the nearest earlier node with the same layer or category in
-the same captured thread (`thread_id`, otherwise the prompt cache key). A quiet,
+the same display scope (captured thread, with isolated rollout tasks). A quiet,
 low-opacity base ribbon spans both nodes and communicates continuity only; a
 darker fresh-use ribbon overlays it at each node's trailing edge and tapers to
 zero when the destination is fully cached. Do not add balancing nodes such as
@@ -309,21 +349,25 @@ The flow and the inspector share one selection identified by `turnId` plus
 either one or more real block ids or one input layer. Every highlight uses the
 selection's own category or layer color, never a generic outline.
 
-- A layer node selects a layer. The inspector scrolls to that layer's section,
-  outlines it in the layer color, and lets other sections step back, without
-  expanding every row in it.
-- A category node selects its member blocks. Matching rows show a left bar and
-  a light tint in the category color; non-matching rows step back; only the
-  focused block opens. The selection chip names the category and steps through
-  its blocks one captured item at a time.
+- A layer or category node opens every related input block and folds unrelated
+  sections in Timeline, Tokens, and Raw, then scrolls to the selected evidence.
+  Fully cached blocks remain expanded at 50% opacity. Fresh or cache-unknown
+  blocks remain full opacity. Mixed groups dim only identifiable cached members;
+  aggregate cache proportions must never invent character-level boundaries.
+  Unchanged history is not by itself evidence of a cache hit. Manual disclosure
+  remains available; a new selection reapplies the focus state.
 - In the flow, the selected node is outlined and the same layer or category
   stays bright in every turn, with its ribbons, so its path through the
   conversation reads at once. Everything else fades.
 - A row's category swatch in the inspector selects that row's blocks.
 - `Unattributed input` must never link to a guessed request section.
-- The same selection persists across Structured and Raw. Raw expands only the
-  selected block's ancestor path, then scrolls to and highlights the exact
-  captured node.
+- The same selection persists across Timeline, Tokens, and Raw. Raw opens all
+  selected captured paths; split strings retain their exact source ranges.
+  Inherited blocks without a current raw location are not fabricated in Raw.
+- Multi-block selections, including whole layers, expose previous/next match
+  navigation with a position count. Start at the first matching block and align
+  its top; navigation targets individual block anchors rather than the layer
+  container. Raw navigates only captured paths and the current source range.
 
 ### Local control bar
 
@@ -342,6 +386,11 @@ Hide secondary technical detail behind predictable disclosure. Keep the label,
 summary, and state visible so disclosure never becomes information loss.
 
 ### Structured machine output
+
+Captured historical conversations embedded in background prompts read as a flat
+list of messages and tool events within their original input block. Show the
+source project and purpose first; keep internal metadata in entry details.
+These quoted entries do not create turns or independent token attribution.
 
 In the turn inspector, parse valid JSON embedded in captured text into readable
 objects and lists. Render structured values by size, not by shape: a

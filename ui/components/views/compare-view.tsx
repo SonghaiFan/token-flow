@@ -50,7 +50,7 @@ function compare(id: string, payload: SessionRecordsPayload, turns: TurnModel[])
     models: [...new Set(own.map((turn) => turn.model).filter((model) => model && model !== "Unknown"))],
     own,
     queries: conversationQueries(turns),
-    title: own.find((turn) => turn.kind === "user" && turn.queryText)?.queryText || payload.session.first_user || "Conversation",
+    title: payload.session.title || own.find((turn) => turn.kind === "user" && turn.queryText)?.queryText || payload.session.first_user || "Conversation",
     totals: scopeTotals(own),
     turns,
   };

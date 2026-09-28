@@ -93,7 +93,7 @@ export function WorkspaceView({ sessionId, onBack }: { sessionId: string; onBack
     return index >= 0 ? index : null;
   }, [selectedId, turns]);
   const turn = selected === null ? undefined : turns[selected];
-  const title = turns.find((item) => item.kind === "user" && item.queryText)?.queryText || data?.session.first_user || "Conversation";
+  const title = data?.session.title || turns.find((item) => item.kind === "user" && item.queryText)?.queryText || data?.session.first_user || "Conversation";
   const selectTurn = useCallback((index: number | null) => {
     const nextId = index === null ? "" : turns[index]?.id || "";
     setSelectedId(nextId);
