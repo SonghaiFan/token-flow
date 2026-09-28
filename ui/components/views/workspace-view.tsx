@@ -137,7 +137,7 @@ export function WorkspaceView({ sessionId, onBack }: { sessionId: string; onBack
 
   return <AppShell menu={menu} meta={<LiveStatus state={liveState}/>} onBack={onBack} title={title}>
     <main className="mx-auto grid w-full min-w-0 max-w-page gap-3 py-3 lg:grid-cols-[minmax(var(--tf-rail-min),var(--tf-rail-max))_minmax(0,1fr)] lg:px-3">
-      <TurnFlow focus={turn ? null : focusCategory} onSelectNode={selectNode} onSelectTurn={selectTurn} selected={selected} selection={tokenSelection} turns={turns}/>
+      <TurnFlow focus={turn ? null : focusCategory} onClearSelection={() => { setTokenSelection(null); setFocusCategory(null); }} onSelectNode={selectNode} onSelectTurn={selectTurn} selected={selected} selection={tokenSelection} turns={turns}/>
       {/* On narrow screens the selected turn opens over the flow; closing it returns to the same place. */}
       {/* Opening a turn slides forward from the overview and closing it slides back
           (page side-by-side); on narrow screens the turn rises over the flow instead. */}

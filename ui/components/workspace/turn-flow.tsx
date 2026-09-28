@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { categoryColor, FADED_MARK_OPACITY } from "@/lib/category-palette";
 import { formatCompact, formatDuration, formatNumber, formatTime } from "@/lib/format";
 import { CATEGORY_META, CATEGORY_ORDER } from "@/lib/input-categories";
@@ -118,7 +118,7 @@ function selectedIds(selection: TokenSelection | null, turn: TurnModel): string[
   return selection?.turnId === turn.id ? selection.blockIds || [selection.blockId] : [];
 }
 
-type TurnFlowProps = { focus?: CategoryFocus | null; onSelectNode: (index: number, selection: TokenSelection) => void; onSelectTurn: (index: number | null) => void; selected: number | null; selection: TokenSelection | null; turns: TurnModel[] };
+type TurnFlowProps = { focus?: CategoryFocus | null; onClearSelection?: () => void; onSelectNode: (index: number, selection: TokenSelection) => void; onSelectTurn: (index: number | null) => void; selected: number | null; selection: TokenSelection | null; turns: TurnModel[] };
 
 export function TurnFlow(props: TurnFlowProps) {
   const lanes = useMemo(() => {
@@ -137,35 +137,27 @@ export function TurnFlow(props: TurnFlowProps) {
   const chosen = choice?.selected === props.selected ? choice.id : null;
   const selectedLane = lanes.find((lane) => props.selected !== null && lane.indices.includes(props.selected));
   const active = lanes.find((lane) => lane.id === chosen) || selectedLane || lanes[0];
-  if (!active) return <FlowLane {...props}/>;
-  return <div className="min-w-0 overflow-x-auto rounded-panel border border-line bg-panel lg:sticky lg:top-[calc(var(--tf-toolbar-height)+0.75rem)] lg:h-[calc(100dvh-var(--tf-toolbar-height)-1.5rem)]">
+  // Selection is easy to leave, one level per miss: a click that lands on no node
+  // ends the node selection; one that also lands on no turn row or other control
+  // closes the turn and returns to the overview. A row click opens its turn as usual.
+  const clearOffNode = (event: React.MouseEvent) => {
+    const target = event.target as Element;
+    if (target.closest("[data-token-target]")) return;
+    if (props.selection || props.focus) props.onClearSelection?.();
+    if (props.selected !== null && !target.closest("button, a, input, select, [role='button']")) props.onSelectTurn(null);
+  };
+  if (!active) return <div onClick={clearOffNode}><FlowLane {...props}/></div>;
+  return <div className="min-w-0 overflow-x-auto rounded-panel border border-line bg-panel lg:sticky lg:top-[calc(var(--tf-toolbar-height)+0.75rem)] lg:h-[calc(100dvh-var(--tf-toolbar-height)-1.5rem)]" onClick={clearOffNode}>
     <div className="relative flex min-w-full items-start">
-      {lanes.map((lane) => lane.id === active.id
-        ? <div className="min-w-0 flex-1" key={lane.id} style={{ minWidth: 280 }}><FlowLane {...props} lane={lane}/></div>
-        : <div className="w-7 shrink-0 border-l border-line" key={lane.id}>
-          <button className="tf-focus-inset flex h-32 w-full items-center justify-center overflow-hidden text-xs text-muted hover:bg-fill-hover" onClick={() => setChosen(lane.id)} title={`Expand ${lane.label}`} type="button"><span className="max-h-28 truncate [writing-mode:vertical-rl]">{lane.label}</span></button>
-          <div className="relative" style={{ height: props.turns.length * ROW }}>
-            <svg aria-hidden="true" className="pointer-events-none absolute left-0 top-0" height={props.turns.length * ROW} width="28">
-              <defs><pattern height="8" id={`strip-hatch-${lanes.indexOf(lane)}`} patternUnits="userSpaceOnUse" width="8"><path d="M-2 2L2-2M0 8L8 0M6 10L10 6" fill="none" stroke="var(--ink)" strokeOpacity="0.34" strokeWidth="1"/></pattern></defs>
-              {[...lane.indices].sort((a, b) => a - b).map((index, position, indices) => {
-                const turn = props.turns[index];
-                const previous = indices.slice(0, position).reverse().find((candidate) => props.turns[candidate].thread.id === turn.thread.id);
-                const nodes = nodesFor(turn, "layers");
-                const total = nodes.reduce((sum, node) => sum + node.tokens, 0);
-                let x = 7;
-                return <g key={turn.id}>
-                  {previous !== undefined && turn.kind !== "metadata" ? <path d={ribbon([7, 7 + NODE], [7, 7 + NODE], previous * ROW + NODE_TOP + NODE, index * ROW + NODE_TOP)} fill="var(--muted)" fillOpacity="0.12"/> : null}
-                  {total ? nodes.map((node) => {
-                    const start = x;
-                    const size = NODE * node.tokens / total;
-                    x += size;
-                    return <g key={node.key}><rect fill={node.color} fillOpacity="0.82" height={NODE} width={size} x={start} y={index * ROW + NODE_TOP}/>{node.cached > 0 ? <rect fill={`url(#strip-hatch-${lanes.indexOf(lane)})`} height={NODE} width={size * node.cached / node.tokens} x={start} y={index * ROW + NODE_TOP}/> : null}</g>;
-                  }) : <rect fill="var(--muted)" height={NODE} rx="3" width={NODE} x="7" y={index * ROW + NODE_TOP}/>}
-                </g>;
-              })}
-            </svg>
-          </div>
-        </div>)}
+      {/* Lane push: the chosen lane grows while the previous one narrows, so the
+          switch reads as one motion. Every lane is the same FlowLane; folding only
+          changes its scale, never what it draws. */}
+      {lanes.map((lane, position) => {
+        const open = lane.id === active.id;
+        return <div className={`t-lane shrink-0 basis-7 overflow-hidden ${position ? "border-l border-line" : ""}`} data-open={open ? "true" : "false"} key={lane.id}>
+          <FlowLane {...props} collapsed={!open} lane={lane} onExpand={() => setChosen(lane.id)}/>
+        </div>;
+      })}
       {/* Capture-order gaps belong to the folded lane's turn. Make the entire
           shared row one target, including its narrow strip node. */}
       {lanes.filter((lane) => lane.id !== active.id).flatMap((lane) => lane.indices.map((index) => <button
@@ -181,7 +173,11 @@ export function TurnFlow(props: TurnFlowProps) {
   </div>;
 }
 
-function FlowLane({ focus = null, onSelectNode, onSelectTurn, selected, selection, turns, lane }: TurnFlowProps & { lane?: { label: string; indices: number[] } }) {
+/* One lane of the flow. Expanded, it is the turn list and its Sankey. Collapsed, it
+   is the same Sankey at strip scale: each turn one fixed square split by layer,
+   with the same hatching, ribbons, and selection fading, and no text column. */
+function FlowLane({ collapsed = false, focus = null, onExpand, onSelectNode, onSelectTurn, selected, selection, turns, lane }: TurnFlowProps & { collapsed?: boolean; lane?: { label: string; indices: number[] }; onExpand?: () => void }) {
+  const hatchId = `turn-flow-hatch-${useId().replace(/:/g, "")}`;
   const [query, setQuery] = useState("");
   const [searchOpen, setSearchOpen] = useState(false);
   const granularity: Granularity = "layers";
@@ -225,7 +221,7 @@ function FlowLane({ focus = null, onSelectNode, onSelectTurn, selected, selectio
     const items: FlowItem[] = [];
     if (lane) {
       lane.indices.forEach((index) => {
-        if (matchesTurn(turns[index], normalized)) items.push({ depth: 0, index, key: turns[index].id, kind: "turn", top: index * ROW });
+        if (collapsed || matchesTurn(turns[index], normalized)) items.push({ depth: 0, index, key: turns[index].id, kind: "turn", top: index * ROW });
       });
       return { height: turns.length * ROW, items };
     }
@@ -293,25 +289,35 @@ function FlowLane({ focus = null, onSelectNode, onSelectTurn, selected, selectio
       for (const index of tree.auxiliary) pushTurn(index, 1);
     }
     return { height: top, items };
-  }, [lane, normalized, openIds, tree, turns]);
+  }, [collapsed, lane, normalized, openIds, tree, turns]);
   const visible = useMemo(() => layout.items.flatMap((item) => (item.kind === "turn" ? [item.index] : [])), [layout.items]);
 
   const graph = useMemo(() => {
-    // Auxiliary requests such as title generation stay in the list but outside the flow.
-    const flowItems = layout.items.flatMap((item) => item.kind === "turn" && turns[item.index].kind !== "metadata" ? [item] : []);
-    const nodeData = flowItems.map((item) => nodesFor(turns[item.index], granularity));
+    // Auxiliary requests such as title generation stay in the list but outside the
+    // flow. A strip has no list, so it marks them with an empty square instead.
+    const flowItems = layout.items.flatMap((item) => item.kind === "turn" && (collapsed || turns[item.index].kind !== "metadata") ? [item] : []);
+    const nodeData = flowItems.map((item) => {
+      const nodes = nodesFor(turns[item.index], granularity);
+      return collapsed && !nodes.length ? [{ blockIds: [], cached: 0, color: "var(--muted)", key: "empty", label: "No input", layer: "unknown" as InputLayer, tokens: 0 }] : nodes;
+    });
     const maxTotal = Math.max(0, ...nodeData.map((nodes) => nodes.reduce((sum, node) => sum + node.tokens, 0)));
     const maxCount = Math.max(1, ...nodeData.map((nodes) => nodes.length));
     const scale = maxTotal && width ? Math.max(0, width - GAP * (maxCount - 1)) / maxTotal : 0;
-    // One scale for every turn, so a growing context reads as a widening row; each row is centered.
+    // Expanded: one scale for every turn, so a growing context reads as a widening
+    // row. Collapsed: each turn fills one square, so only composition reads. Rows are centered.
     const rows: FlowRow[] = flowItems.map((item, position) => {
       const data = nodeData[position];
-      const widths = data.map((node) => Math.max(MIN_NODE, node.tokens * scale));
-      const span = widths.reduce((sum, value) => sum + value, 0) + GAP * Math.max(0, data.length - 1);
+      const total = data.reduce((sum, node) => sum + node.tokens, 0);
+      // A strip's turn is one square: its layers are flush slices inside it.
+      const gap = collapsed ? 0 : GAP;
+      // A strip square stays NODE wide: every node gets its minimum, the rest is shared by tokens.
+      const spare = Math.max(0, NODE - gap * Math.max(0, data.length - 1) - MIN_NODE * data.length);
+      const widths = data.map((node) => collapsed ? (total ? MIN_NODE + spare * node.tokens / total : NODE) : Math.max(MIN_NODE, node.tokens * scale));
+      const span = widths.reduce((sum, value) => sum + value, 0) + gap * Math.max(0, data.length - 1);
       let x = Math.max(0, (width - span) / 2);
       const nodes = data.map((node, nodeIndex) => {
         const placed = { ...node, x0: x, x1: x + widths[nodeIndex] };
-        x += widths[nodeIndex] + GAP;
+        x += widths[nodeIndex] + gap;
         return placed;
       });
       return { index: item.index, nodes, top: item.top };
@@ -323,8 +329,10 @@ function FlowLane({ focus = null, onSelectNode, onSelectTurn, selected, selectio
       rows.forEach((row, position) => {
         const threadId = turns[row.index].thread.scopeId || turns[row.index].thread.id;
         for (const target of row.nodes) {
+          if (turns[row.index].kind === "metadata") continue;
           for (let earlier = position - 1; earlier >= 0; earlier -= 1) {
             const candidate = rows[earlier];
+            if (turns[candidate.index].kind === "metadata") continue;
             if ((turns[candidate.index].thread.scopeId || turns[candidate.index].thread.id) !== threadId) continue;
             const source = candidate.nodes.find((node) => node.key === target.key);
             if (source) {
@@ -336,13 +344,14 @@ function FlowLane({ focus = null, onSelectNode, onSelectTurn, selected, selectio
       });
     }
     return { links, rows };
-  }, [granularity, layout.items, normalized, turns, width]);
+  }, [collapsed, granularity, layout.items, normalized, turns, width]);
 
   useEffect(() => {
     if (selected !== null) rowRefs.current.get(selected)?.scrollIntoView({ block: "nearest" });
   }, [selected]);
 
   useEffect(() => {
+    if (collapsed) return;
     function navigate(event: KeyboardEvent) {
       const target = event.target as HTMLElement | null;
       if (target?.isContentEditable || target?.tagName === "INPUT" || target?.tagName === "TEXTAREA" || target?.tagName === "SELECT") return;
@@ -370,7 +379,7 @@ function FlowLane({ focus = null, onSelectNode, onSelectTurn, selected, selectio
     }
     window.addEventListener("keydown", navigate);
     return () => window.removeEventListener("keydown", navigate);
-  }, [onSelectTurn, selected, turns.length, visible]);
+  }, [collapsed, onSelectTurn, selected, turns.length, visible]);
 
   const isActive = (row: FlowRow, node: PlacedNode) => {
     const ids = selectedIds(selection, turns[row.index]);
@@ -391,8 +400,9 @@ function FlowLane({ focus = null, onSelectNode, onSelectTurn, selected, selectio
     onSelectNode(row.index, { blockId: node.blockIds[0] || "", blockIds: node.blockIds, category: node.category, label: node.label, layer: layerNode ? node.layer : undefined, turnId: turn.id });
   };
 
-  return <aside aria-label="Token flow" className="min-w-0 bg-panel [--text-w:7rem]">
-    <div className="tf-inset h-32 overflow-auto space-y-2 border-b border-line py-2">
+  const strip = collapsed ? <button className="t-lane-swap tf-focus-inset flex h-32 w-full items-center justify-center overflow-hidden border-b border-line text-xs text-muted hover:bg-fill-hover hover:text-ink" key="strip" onClick={onExpand} title={`Expand ${lane?.label ?? "lane"}`} type="button"><span className="max-h-28 truncate [writing-mode:vertical-rl]">{lane?.label}</span></button> : null;
+  return <aside aria-label={collapsed ? `${lane?.label ?? "Lane"}, folded` : "Token flow"} className={`bg-panel [--text-w:7rem] ${collapsed ? "w-7" : "min-w-70"}`}>
+    {strip ?? <div className="t-lane-swap tf-inset h-32 overflow-auto space-y-2 border-b border-line py-2" key="full">
       {lane ? <div className="tf-eyebrow">{lane.label}</div> : null}
       <div className="flex items-center gap-2">
         {/* The overview is the flow's resting state; this line returns to it. */}
@@ -407,16 +417,16 @@ function FlowLane({ focus = null, onSelectNode, onSelectTurn, selected, selectio
         {granularity === "layers" ? LAYER_ORDER.filter((layer) => layer !== "unknown").map((layer) => <span className="inline-flex items-center gap-1.5" key={layer} role="listitem"><Swatch color={LAYER_META[layer].color}/>{LAYER_META[layer].title}</span>) : CATEGORY_ORDER.filter((category) => turns.some((turn) => turn.categories.some((item) => item.category === category && item.tokens > 0))).map((category) => {
           const row = graph.rows.find((candidate) => candidate.index === selected);
           const node = row?.nodes.find((candidate) => candidate.category === category);
-          return <span className="inline-flex items-center" key={category} role="listitem"><button aria-label={`Select ${CATEGORY_META[category].title} in current turn`} aria-pressed={Boolean(row && node && isActive(row, node))} className="tf-focus-inset inline-flex min-h-11 items-center gap-1.5 text-left disabled:cursor-default" disabled={!row || !node} onClick={() => { if (row && node) pick(row, node); }} type="button"><Swatch color={categoryColor(category)}/>{CATEGORY_META[category].title}</button></span>;
+          return <span className="inline-flex items-center" key={category} role="listitem"><button aria-label={`Select ${CATEGORY_META[category].title} in current turn`} aria-pressed={Boolean(row && node && isActive(row, node))} className="tf-focus-inset inline-flex min-h-11 items-center gap-1.5 text-left disabled:cursor-default" data-token-target="" disabled={!row || !node} onClick={() => { if (row && node) pick(row, node); }} type="button"><Swatch color={categoryColor(category)}/>{CATEGORY_META[category].title}</button></span>;
         })}
         <span className="inline-flex items-center gap-1.5" role="listitem" title="Hatched: read from cache. Darker ribbons carry new tokens into the next turn."><Swatch className="border border-line bg-[repeating-linear-gradient(135deg,transparent_0,transparent_2px,var(--ink)_2px,var(--ink)_3px)] opacity-60"/>cached</span>
       </div>
-    </div>
+    </div>}
 
     <div className="lg:min-h-0 lg:flex-1 lg:overflow-y-auto">
       {normalized && !visible.length ? <EmptyState title={`No turns match “${query}”`}>Search matches turn numbers, prompts, tools, models, and status.</EmptyState> : null}
       <div className="relative" style={{ height: layout.height }}>
-        <ol>
+        {collapsed ? null : <ol className="t-lane-swap">
           {layout.items.map((item) => {
             if (item.kind === "thread") return <li className="tf-inset absolute inset-x-0 flex items-end truncate border-t border-line pb-1.5 text-sm font-semibold text-ink" key={item.key} style={{ height: THREAD_HEADER, top: item.top }} title={item.label}>{item.label}</li>;
             if (item.kind === "query") return <li className="tf-inset absolute inset-x-0 flex items-end truncate pb-1 text-xs font-medium text-muted" key={item.key} style={{ height: HEADER, top: item.top }} title={item.label}>{item.label}</li>;
@@ -461,11 +471,19 @@ function FlowLane({ focus = null, onSelectNode, onSelectTurn, selected, selectio
               </button>
             </li>;
           })}
-        </ol>
-        <div className="pointer-events-none absolute inset-y-0 left-[calc(var(--text-w)+1.5rem)] right-3 sm:left-[calc(var(--text-w)+1.75rem)] sm:right-4" ref={canvasRef}>
-          {width ? <svg className="block overflow-visible" height={layout.height} viewBox={`0 0 ${width} ${Math.max(1, layout.height)}`} width={width}>
-            <defs><pattern height="8" id="turn-flow-hatch" patternUnits="userSpaceOnUse" width="8"><path d="M-2 2L2-2M0 8L8 0M6 10L10 6" fill="none" stroke="var(--ink)" strokeOpacity="0.34" strokeWidth="1"/></pattern></defs>
-            {(["base", "fresh"] as const).map((kind) => <g key={kind}>{graph.links.map((link) => {
+        </ol>}
+        {/* A strip's canvas is the whole lane; an expanded lane's starts after the text column. */}
+        <div className={`pointer-events-none absolute inset-y-0 ${collapsed ? "inset-x-0" : "left-[calc(var(--text-w)+1.5rem)] right-3 sm:left-[calc(var(--text-w)+1.75rem)] sm:right-4"}`} ref={canvasRef}>
+          {width ? <svg aria-hidden={collapsed || undefined} className="t-lane-swap block overflow-visible" height={layout.height} key={collapsed ? "strip" : "full"} viewBox={`0 0 ${width} ${Math.max(1, layout.height)}`} width={width}>
+            <defs><pattern height="8" id={hatchId} patternUnits="userSpaceOnUse" width="8"><path d="M-2 2L2-2M0 8L8 0M6 10L10 6" fill="none" stroke="var(--ink)" strokeOpacity="0.34" strokeWidth="1"/></pattern>
+              {/* A strip square has the expanded node's corner (3 of 14), cut once around all its slices. */}
+              <clipPath clipPathUnits="objectBoundingBox" id={`${hatchId}-square`}><rect height="1" rx={3 / NODE} width="1"/></clipPath></defs>
+            {/* A strip only says the turns are one thread: one quiet gray band from square
+                to square. Layer ribbons belong to the expanded lane, where they have room. */}
+            {collapsed ? [...new Map(graph.links.map((link) => [`${link.sourceRow.index}-${link.targetRow.index}`, link])).values()].map(({ sourceRow, targetRow }) => {
+              const span = (row: FlowRow): [number, number] => [row.nodes[0].x0, row.nodes[row.nodes.length - 1].x1];
+              return <path d={ribbon(span(sourceRow), span(targetRow), sourceRow.top + NODE_TOP + NODE, targetRow.top + NODE_TOP)} fill="var(--muted)" fillOpacity={0.12} key={`${sourceRow.index}-${targetRow.index}`}/>;
+            }) : (["base", "fresh"] as const).map((kind) => <g key={kind}>{graph.links.map((link) => {
               const related = relatedKeys.has(link.target.key);
               const source: [number, number] = kind === "base" ? [link.source.x0, link.source.x1] : freshSpan(link.source);
               const target: [number, number] = kind === "base" ? [link.target.x0, link.target.x1] : freshSpan(link.target);
@@ -475,19 +493,24 @@ function FlowLane({ focus = null, onSelectNode, onSelectTurn, selected, selectio
             })}</g>)}
             {graph.rows.map((row) => {
               const turn = turns[row.index];
-              return <g key={row.index}>{row.nodes.map((node) => {
+              const square = collapsed ? row.nodes.length && { x: row.nodes[0].x0, y: row.top + NODE_TOP } : null;
+              return <g key={row.index}><g clipPath={square ? `url(#${hatchId}-square)` : undefined}>{row.nodes.map((node) => {
                 const nodeWidth = node.x1 - node.x0;
                 const cachedWidth = node.tokens ? nodeWidth * Math.min(1, node.cached / node.tokens) : 0;
                 const active = isActive(row, node);
                 const y = row.top + NODE_TOP;
                 const label = nodeWidth >= node.label.length * 5.4 + 6;
-                return <g aria-label={`Turn ${turn.label}: ${node.label}`} aria-pressed={active} className="t-fade cursor-pointer" key={node.key} onClick={(event) => { event.stopPropagation(); pick(row, node); }} onKeyDown={(event) => activateOnKey(event, () => pick(row, node))} role="button" style={{ opacity: hasTokenSelection && !relatedKeys.has(node.key) ? FADED_MARK_OPACITY : 1, pointerEvents: "all" }} tabIndex={0}>
+                // A strip's squares are drawn only; its whole row is the target (see TurnFlow).
+                const interactive = collapsed ? {} : { "data-token-target": "", "aria-label": `Turn ${turn.label}: ${node.label}`, "aria-pressed": active, onClick: (event: React.MouseEvent) => { event.stopPropagation(); pick(row, node); }, onKeyDown: (event: React.KeyboardEvent) => activateOnKey(event, () => pick(row, node)), role: "button", tabIndex: 0 };
+                return <g className={`t-fade ${collapsed ? "" : "cursor-pointer"}`} key={node.key} {...interactive} style={{ opacity: hasTokenSelection && !relatedKeys.has(node.key) ? FADED_MARK_OPACITY : 1, pointerEvents: collapsed ? "none" : "all" }}>
                   <title>{`Turn ${turn.label} · ${node.label}: ${node.estimated ? "≈" : ""}${formatNumber(node.tokens)} tokens${node.estimated ? " (estimated)" : ""}; cache read ${formatNumber(node.cached)}; fresh ${formatNumber(node.tokens - node.cached)}${node.aggregate ? "; categories below 3% combined" : ""}`}</title>
-                  <rect fill={node.color} fillOpacity={0.82} height={NODE} rx={3} stroke={active ? "var(--ink)" : "var(--panel)"} strokeWidth={active ? 2 : 1} width={nodeWidth} x={node.x0} y={y}/>
-                  {cachedWidth > 0 ? <rect fill="url(#turn-flow-hatch)" height={NODE} pointerEvents="none" rx={3} width={cachedWidth} x={node.x0} y={y}/> : null}
-                  {label ? <text fill="var(--muted)" fontSize={9} fontWeight={active ? 700 : 400} pointerEvents="none" x={node.x0 + 1} y={y + NODE + 10}>{node.label}</text> : null}
+                  <rect fill={node.color} fillOpacity={0.82} height={NODE} rx={collapsed ? 0 : 3} stroke={collapsed ? "none" : active ? "var(--ink)" : "var(--panel)"} strokeWidth={active ? 2 : 1} width={nodeWidth} x={node.x0} y={y}/>
+                  {cachedWidth > 0 ? <rect fill={`url(#${hatchId})`} height={NODE} pointerEvents="none" rx={collapsed ? 0 : 3} width={cachedWidth} x={node.x0} y={y}/> : null}
+                  {label && !collapsed ? <text fill="var(--muted)" fontSize={9} fontWeight={active ? 700 : 400} pointerEvents="none" x={node.x0 + 1} y={y + NODE + 10}>{node.label}</text> : null}
                 </g>;
-              })}</g>;
+              })}</g>
+                {square ? <rect fill="none" height={NODE} pointerEvents="none" rx={3} stroke="var(--panel)" width={NODE} x={square.x} y={square.y}/> : null}
+              </g>;
             })}
           </svg> : null}
         </div>

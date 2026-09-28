@@ -50,6 +50,11 @@
   --row-enter-dur: 900ms;
   --row-enter-tint: color-mix(in srgb, var(--success) 12%, transparent);
   --row-ease: cubic-bezier(0.22, 1, 0.36, 1);
+  /* Lane push: switching the expanded lane of the turn flow */
+  --lane-dur: 350ms;
+  --lane-swap-dur: 250ms;
+  --lane-blur: 2px;
+  --lane-ease: cubic-bezier(0.22, 1, 0.36, 1);
   /* Menu dropdown */
   --dropdown-open-dur: 250ms;
   --dropdown-pre-scale: 0.97;
@@ -153,6 +158,30 @@
   }
 }
 
+/* Lane push: every lane has a 28px basis; the expanded one also takes the free
+   width. Growing one lane and narrowing the other on one curve reads as a push,
+   and the lanes beyond them slide over by the same amount. Each lane's content
+   swaps between strip and full with a short fade, while the lane clips it. */
+.t-lane {
+  flex-grow: 0;
+  min-width: 1.75rem;
+  transition:
+    flex-grow var(--lane-dur) var(--lane-ease),
+    min-width var(--lane-dur) var(--lane-ease);
+}
+.t-lane[data-open="true"] {
+  flex-grow: 1;
+  min-width: 17.5rem;
+}
+.t-lane-swap {
+  transition:
+    opacity var(--lane-swap-dur) var(--lane-ease),
+    filter  var(--lane-swap-dur) var(--lane-ease);
+}
+@starting-style {
+  .t-lane-swap { opacity: 0; filter: blur(var(--lane-blur)); }
+}
+
 /* Menu dropdown, opening: search results grow from the search field. */
 .t-dropdown-enter {
   transform-origin: top center;
@@ -227,7 +256,7 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .t-row,
+  .t-row, .t-lane, .t-lane-swap,
   .t-tabs-pill, .t-tab,
   .t-acc > .t-acc-panel, .t-acc > .t-acc-panel > .t-acc-panel-inner, .t-acc-chevron,
   .t-page-enter, .t-dropdown-enter, .t-modal, .t-modal-backdrop, .t-fade {

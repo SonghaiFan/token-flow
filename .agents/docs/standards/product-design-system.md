@@ -127,7 +127,14 @@ All lanes share capture-order
 row positions and scroll together. Expanding a lane changes width only; selecting
 a turn opens its inspector. The main conversation is the initial expanded lane.
 The Layers/Categories switch is removed from this rail; it always shows layers.
-Each expanded lane uses its own token scale. This supersedes the folded
+Each expanded lane uses its own token scale. Every lane, expanded or folded, is the one `FlowLane`
+component: a folded strip is the same Sankey at strip scale (each turn one rounded square with
+the expanded node's corner and outline, its layers flush slices inside it, the same hatching, one quiet gray band joining consecutive turns of a thread instead of layer ribbons, and selection fading;
+auxiliary requests an empty square), never a second drawing. Switching lanes uses
+the *Lane push* motion recipe: the chosen lane grows while the previous one
+narrows on one 350ms curve, so the total width holds and the lanes beyond slide
+over; each lane's content swaps between strip and full with a 250ms fade, clipped
+by the lane. This supersedes the folded
 background-at-the-bottom and granularity-switch descriptions below, preserving
 simultaneous visibility without implying a parent relationship for background work.
 
@@ -359,6 +366,13 @@ selection's own category or layer color, never a generic outline.
 - In the flow, the selected node is outlined and the same layer or category
   stays bright in every turn, with its ribbons, so its path through the
   conversation reads at once. Everything else fades.
+- Leaving a selection takes one click, one level per miss. A click in the turn
+  flow that lands on no node ends the node selection and an overview category
+  focus; on a turn row (including the open one) it leaves that turn open. A click
+  that lands on no turn row or other control either (space outside the rows, a
+  header) also closes the turn and returns to the overview. Clicks inside the
+  inspector never end a selection, so matches can be stepped through and rows
+  opened while it holds.
 - A row's category swatch in the inspector selects that row's blocks.
 - `Unattributed input` must never link to a guessed request section.
 - The same selection persists across Timeline, Tokens, and Raw. Raw opens all
