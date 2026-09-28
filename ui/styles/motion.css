@@ -28,7 +28,7 @@
   /* Tabs sliding */
   --tabs-dur: 250ms;
   --tabs-ease: cubic-bezier(0.22, 1, 0.36, 1);
-  /* Accordion expand */
+  /* Accordion expand: every disclosure (see components/ui/disclosure.tsx) */
   --acc-expand: 250ms;
   --acc-collapse: 250ms;
   --acc-chevron: 250ms;
@@ -111,12 +111,12 @@
     opacity var(--acc-expand) var(--acc-ease),
     filter var(--acc-expand) var(--acc-ease);
 }
-.t-acc > .t-acc-head .t-acc-chevron {
-  display: inline-block;
+.t-acc-chevron {
   transform-origin: center;
   transition: transform var(--acc-chevron) var(--acc-ease), color var(--acc-chevron) var(--acc-ease);
 }
-.t-acc[data-open="true"] > .t-acc-head .t-acc-chevron {
+/* The chevron carries its own state, so it turns wherever it is used. */
+.t-acc-chevron[data-open="true"] {
   transform: rotate(90deg);
 }
 
@@ -229,7 +229,7 @@
 @media (prefers-reduced-motion: reduce) {
   .t-row,
   .t-tabs-pill, .t-tab,
-  .t-acc > .t-acc-panel, .t-acc > .t-acc-panel > .t-acc-panel-inner, .t-acc > .t-acc-head .t-acc-chevron,
+  .t-acc > .t-acc-panel, .t-acc > .t-acc-panel > .t-acc-panel-inner, .t-acc-chevron,
   .t-page-enter, .t-dropdown-enter, .t-modal, .t-modal-backdrop, .t-fade {
     transition: none !important;
   }

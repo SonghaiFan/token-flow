@@ -380,10 +380,66 @@ Use a table when widths allow comparison across conversations. Use a card list
 on narrow screens. Both representations expose the same underlying fields and
 the same row action.
 
-### Disclosure section
+### Disclosure
 
 Hide secondary technical detail behind predictable disclosure. Keep the label,
 summary, and state visible so disclosure never becomes information loss.
+
+Every fold in the product is the one `Disclosure` primitive
+(`ui/components/ui/disclosure.tsx`). Views choose a **tier** and the
+**default-open rule**; they never draw their own chevron, header, or animation,
+and never use native `<details>`.
+
+**Tiers.** Tiers differ in density and framing only.
+
+| Tier | Where | Head | Body |
+| --- | --- | --- | --- |
+| `section` | A titled group inside a pane: an input layer, a Changes layer card | `tf-heading`, layer icon, 44px, inside `tf-card` | Divided rows under a rule |
+| `row` | A block inside a section (Tokens) | `text-sm` ink, swatch, 44px, full-width hover | Indented to the summary text |
+| `inline` | Secondary detail inside reading flow: every Dialog step that is not a message, Request context, nested facts (declarations, schemas, access rules, large values) | `text-xs` muted, icon, 44px (32px `dense` for long catalogs), rounded hover, no frame | Hangs off a 1px rule under the chevron |
+| `tree` | Dense in-place evidence (Raw JSON) | 16px icon button with a 12px glyph | The tree's own indentation |
+
+**Anatomy.** `chevron · lead mark · label · preview · end`. The chevron is
+always first, in a fixed `--tf-fold-glyph` slot, so a line with nothing to open
+(`FoldLine`) keeps its slot and aligns with its neighbours. The lead mark is a
+category swatch or a tinted content icon and carries cross-linking. The preview
+is one truncated line and may disappear when open. The end holds exact tokens
+and state badges, right-aligned. A tool call's preview names what it did, as Codex does:
+a model-written title when the call carries one, otherwise its first meaningful
+argument (command, then path, then pattern, query, or URL) in monospace, first
+line only, with paths shortened to their last two segments and the full value
+in the tooltip.
+
+**Chevron.** One glyph, `ChevronRightIcon`, pointing right when closed and
+turned a quarter clockwise when open. It is 60% muted while closed, muted while
+open, and ink while its head is hovered. Never use a down chevron, a plus/minus,
+or a text glyph for folding. The down chevron is for selects only.
+
+**Motion.** *Accordion expand* (`motion.css`, `--acc-*`): the body grows from
+`0fr` to `1fr` rows with an opacity and 2px blur fade, and the chevron turns
+over the same 250ms `smooth-out` curve. Folding reverses it and unmounts the
+body when it finishes. A programmatic open (selection, search, a jump) is
+instant, so scrolling lands on the final position. Reduced motion removes every
+transition.
+
+**What starts open.** The view owns this rule. The primitive does not.
+
+| Content | Dialog | Tokens |
+| --- | --- | --- |
+| User prompt | Open bubble, no header | `row`, open when new or changed |
+| Assistant message | Open prose, no header | `row`, open when new or changed |
+| Reasoning, tool call and result, injected context in the conversation | `inline`, closed | `row`, open when new or changed |
+| Capabilities, instructions, context | One `inline` *Request context*, closed; opened, it lists `row`s grouped by layer | `section` per layer, open |
+| Tool definitions | Inside Request context: `row`, closed; each tool `inline dense` | Same |
+| Carried history | Not grouped; the conversation reads in order | `row` *Carried over*, closed |
+| Nested fact inside a body | `inline`, closed | Same |
+
+When a selection is active, related blocks open and unrelated ones fold.
+Dialog messages then fold to one `inline` line with the speaker and a preview,
+so they can be reopened. Clearing the selection restores the view's own rule.
+
+Raw JSON's in-text `…` elisions of unrelated evidence are not disclosures. They
+keep their inline expand-in-place form.
 
 ### Structured machine output
 
@@ -499,6 +555,7 @@ primitives. Views compose primitives; they do not restyle them.
 | Radius | `panel` 16, `control` 12, `inset` 8, `tag` 6, `mark` 3 | Panes; controls and cards; wells and menu items; badges; swatches |
 | Elevation | `shadow-raised`, `shadow-overlay` | Panes; menus, popovers, and dialogs |
 | Layer | `--z-sticky`, `--z-toolbar`, `--z-sheet`, `--z-popover`, `--z-modal` | Sticky headers up to dialogs, in that order |
+| Disclosure | `--tf-fold-glyph`, `--tf-fold-glyph-dense`, `--tf-fold-gap`, `--tf-fold-indent`; motion `--acc-*` | Chevron slot, the gap to the summary, and where a body starts |
 | Layout | `--tf-toolbar-height`, `--tf-control-height`, `--tf-rail-min/max`, `max-w-page`, `max-w-content` | Toolbar, controls, turn-rail width, page and dashboard widths |
 | Emphasis | `--tf-opacity-dimmed`, `--tf-opacity-disabled`, `FADED_MARK_OPACITY` | Content that steps back; disabled controls; chart marks outside a selection |
 
@@ -541,6 +598,7 @@ reads in one theme reads in the other.
 | `EmptyState` | What is absent, why, and what to do next; `framed` inside a pane |
 | `Stat`, `StatList` | The quiet line of counts on the dashboard and the overview |
 | `Menu` | The `•••` menus and the Capture menu |
+| `Disclosure`, `SimpleDisclosure`, `FoldLine`, `Chevron`, `TreeToggle` | Every fold, in one of four tiers (see *Disclosure*) |
 | `ConfirmDialog` | Confirming a destructive action |
 | Icons (`ui/icons.tsx`) | Every control glyph: 18px in controls, 16px beside text. Never use text characters (`←`, `›`, `×`) as icons |
 

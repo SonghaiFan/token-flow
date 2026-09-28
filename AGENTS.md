@@ -103,6 +103,10 @@ Supported clients are plugins; never branch on a client id outside its plugin.
   changing block identity or raw provenance. Categories retain small categories
   and expose them through
   the legend; neither projection may hide a category behind a view switch.
+- Every fold uses `ui/components/ui/disclosure.tsx`: one chevron, one motion,
+  four tiers (section, row, inline, tree). Views pick the tier and the
+  default-open rule only. Dialog renders block rows at the inline tier through
+  `RowTierContext`, so Dialog and Tokens share one row implementation.
 - `.agents/docs/standards/product-design-system.md` is the product and
   interaction contract for every user-facing surface.
 - UI styling goes through the design system: tokens in `ui/styles/tokens.css`,
@@ -183,6 +187,9 @@ request evidence → back to dashboard. Check both wide and narrow viewports.
 
 
 ## Before ending a session
+
+- Folded flow lanes retain full-width chronological row targets: hovering a gap
+  highlights that turn's row; clicking expands its lane and selects the turn.
 
 - Cross-link selection opens all related blocks and folds unrelated sections in
   Timeline, Tokens, and Raw. Fully attributed cache hits use 50% opacity; neither

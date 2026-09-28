@@ -197,6 +197,40 @@ def _antigravity_record() -> dict:
     }
 
 
+def test_nested_gemini_title_ignores_thought():
+    from token_tap.analysis.sessions import _generated_title_from_record
+
+    record = {
+        "request": {
+            "body": {
+                "request": {
+                    "systemInstruction": {
+                        "parts": [{"text": "You are a conversation title generator. Respond with ONLY a short title."}]
+                    }
+                }
+            }
+        },
+        "response": {
+            "status": 200,
+            "body": {
+                "candidates": [
+                    {
+                        "content": {
+                            "parts": [
+                                {"thought": True, "text": "Private analysis"},
+                                {"text": "Starting A New Conversation"},
+                            ]
+                        }
+                    }
+                ]
+            },
+        },
+    }
+    assert _generated_title_from_record(record) == "Starting A New Conversation"
+    record["response"]["body"]["candidates"][0]["content"]["parts"].pop()
+    assert _generated_title_from_record(record) == ""
+
+
 def _bedrock_frame(payload: dict) -> str:
     encoded = base64.b64encode(json.dumps(payload, separators=(",", ":")).encode()).decode()
     return "\x00\x00binary-prefix" + json.dumps({"bytes": encoded, "p": "abcdefghijk"}) + "\ufffd"

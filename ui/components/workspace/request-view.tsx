@@ -11,9 +11,10 @@ import { classifyInput, itemStateOf, LAYER_META, LAYER_ORDER, messageParts, turn
 import type { InputCategory, InputClass, InputLayer, ItemState, TokenSelection, TraceRecord, TurnModel } from "@/lib/types";
 import { categoryColor } from "@/lib/category-palette";
 import { CategorySwatch } from "../charts/category-legend";
-import { activateOnKey, motionMs, useAccordion } from "../motion";
+import { motionMs, useAccordion } from "../motion";
 import { Badge, Swatch, type Tone } from "../ui/badge";
 import { Button, IconButton } from "../ui/button";
+import { Disclosure, FoldLine, SimpleDisclosure, type DisclosureTier } from "../ui/disclosure";
 import { EmptyState, Notice } from "../ui/feedback";
 import { SearchField } from "../ui/field";
 import { ArrowLeftIcon, BookIcon, ChatIcon, ChevronLeftIcon, ChevronRightIcon, CloseIcon, HistoryIcon, PinIcon, QuestionIcon, SearchIcon, SlidersIcon, SparkleIcon, TerminalIcon, ToolIcon, UserIcon } from "../ui/icons";
@@ -25,6 +26,8 @@ import { clearCurrentMatch, clearHighlights, focusMatch, highlightMatches, MIN_Q
 type UnknownRecord = Record<string, unknown>;
 type RequestMode = "timeline" | "structured" | "raw";
 const CrossLinkContext = createContext<{ key: string; cached: Set<string> }>({ key: "", cached: new Set() });
+/* Which disclosure tier block rows use: rows in Tokens, inline in the Dialog's reading flow. */
+const RowTierContext = createContext<Exclude<DisclosureTier, "section" | "tree">>("row");
 export type RequestViewMode = RequestMode | "changes";
 
 function asRecord(value: unknown): UnknownRecord {
@@ -256,6 +259,31 @@ function formatToolField(key: string, value: unknown): string {
   return textValue(value);
 }
 
+/* Fields that say what a call does, in the order a reader looks for them: what it
+   runs, what it touches, what it looks for. Protocol-neutral argument names only. */
+const CALL_PREVIEW_KEYS = ["cmd", "command", "code", "script", "file_path", "path", "notebook_path", "filename", "file", "pattern", "query", "url", "prompt", "description", "title", "name"];
+
+/* One line naming what a call did, like Codex's "Ran `git status`": the first
+   meaningful argument, its first line only. Paths keep their last two segments. */
+function callPreview(input: unknown): string {
+  if (typeof input === "string") return previewText(input);
+  const record = asRecord(input);
+  const key = CALL_PREVIEW_KEYS.find((candidate) => typeof record[candidate] === "string" && (record[candidate] as string).trim())
+    ?? Object.keys(record).find((candidate) => typeof record[candidate] === "string" && (record[candidate] as string).trim());
+  if (key === undefined) {
+    const array = asArray(record.cmd ?? record.command);
+    return array.every((part) => typeof part === "string") ? array.join(" ") : "";
+  }
+  const value = (record[key] as string).trim();
+  const lines = value.split("\n");
+  const first = lines.length > 1 ? `${lines[0]} …` : value;
+  if (/path|file/.test(key) && first.includes("/")) {
+    const segments = first.split("/").filter(Boolean);
+    return segments.length > 2 ? `…/${segments.slice(-2).join("/")}` : first;
+  }
+  return first;
+}
+
 function toolCallPresentation(message: UnknownRecord): { input: unknown; name: string; preview: string; wrapperName: string } {
   const declaredName = textValue(message.name) || textValue(message.type).replace(/_call$/, "") || "Unknown tool";
   const source = message.arguments ?? message.input;
@@ -266,9 +294,9 @@ function toolCallPresentation(message: UnknownRecord): { input: unknown; name: s
       return { input: wrapped.input, name: declaredName, preview: command, wrapperName: wrapped.name };
     }
     const parsed = parseJsonValue(source);
-    return { input: parsed === undefined ? source : parsed, name: declaredName, preview: previewText(parsed ?? source), wrapperName: "" };
+    return { input: parsed === undefined ? source : parsed, name: declaredName, preview: callPreview(parsed ?? source), wrapperName: "" };
   }
-  return { input: source ?? {}, name: declaredName, preview: previewText(source), wrapperName: "" };
+  return { input: source ?? {}, name: declaredName, preview: callPreview(source), wrapperName: "" };
 }
 
 function isToolResultDefinition(value: unknown): value is ToolResultDefinition {
@@ -309,13 +337,13 @@ function ToolResultCatalog({ tools }: { tools: ToolResultDefinition[] }) {
       const { declaration, summary } = splitToolDescription(tool.description);
       const metadata = Object.fromEntries(Object.entries(tool).filter(([key]) => key !== "name" && key !== "description"));
       return <div key={`${tool.name}-${index}`} style={{ containIntrinsicSize: "0 64px", contentVisibility: "auto" }}>
-        <Disclosure summary={<div className="min-w-0"><div className="flex flex-wrap items-center gap-2"><strong className="break-all font-mono text-xs text-ink">{tool.name}</strong><Badge mono>{textValue(tool.type) || "tool"}</Badge></div>{summary ? <p className="mt-1 line-clamp-2 text-xs leading-4 text-muted">{summary}</p> : null}</div>}>
+        <NestedDisclosure summary={<div className="min-w-0"><div className="flex flex-wrap items-center gap-2"><strong className="break-all font-mono text-xs text-ink">{tool.name}</strong><Badge mono>{textValue(tool.type) || "tool"}</Badge></div>{summary ? <p className="mt-1 line-clamp-2 text-xs leading-4 text-muted">{summary}</p> : null}</div>}>
           <div className="space-y-3">
             {summary ? <RichText>{summary}</RichText> : null}
-            {declaration ? <Disclosure summary={<><strong className="text-xs">Declaration</strong><span className="text-xs text-muted">Parameters and return type</span></>}><pre className="tf-code tf-well max-h-[32rem] overflow-auto whitespace-pre-wrap p-3 text-ink">{declaration}</pre></Disclosure> : null}
-            {Object.keys(metadata).length ? <Disclosure summary={<><strong className="text-xs">Additional fields</strong><Badge mono>{Object.keys(metadata).length}</Badge></>}><JsonBlock value={metadata}/></Disclosure> : null}
+            {declaration ? <NestedDisclosure summary={<><strong className="text-xs">Declaration</strong><span className="text-xs text-muted">Parameters and return type</span></>}><pre className="tf-code tf-well max-h-[32rem] overflow-auto whitespace-pre-wrap p-3 text-ink">{declaration}</pre></NestedDisclosure> : null}
+            {Object.keys(metadata).length ? <NestedDisclosure summary={<><strong className="text-xs">Additional fields</strong><Badge mono>{Object.keys(metadata).length}</Badge></>}><JsonBlock value={metadata}/></NestedDisclosure> : null}
           </div>
-        </Disclosure>
+        </NestedDisclosure>
       </div>;
     })}</div>
   </section>;
@@ -384,7 +412,7 @@ function StructuredValue({ depth = 0, value }: { depth?: number; value: unknown 
       return <li className="grid grid-cols-[1.25rem_minmax(0,1fr)] gap-2" key={index}>
         <span className="select-none text-right font-mono text-muted">{index + 1}</span>
         <div className="min-w-0">{inline !== null ? <InlineValue value={item}/>
-          : size > FOLD_CHARS || depth >= 2 ? <Disclosure summary={<span className="min-w-0 truncate text-xs text-muted">{previewText(item) || `${size.toLocaleString()} characters`}</span>}><StructuredValue depth={depth + 1} value={item}/></Disclosure>
+          : size > FOLD_CHARS || depth >= 2 ? <NestedDisclosure summary={<span className="min-w-0 truncate text-xs text-muted">{previewText(item) || `${size.toLocaleString()} characters`}</span>}><StructuredValue depth={depth + 1} value={item}/></NestedDisclosure>
             : <StructuredValue depth={depth + 1} value={item}/>}</div>
       </li>;
     })}</ol>;
@@ -396,7 +424,7 @@ function StructuredValue({ depth = 0, value }: { depth?: number; value: unknown 
     return <div className="contents" key={key}>
       <dt className="truncate font-mono text-muted" title={key}>{key}</dt>
       <dd className="min-w-0 text-ink">{inline !== null ? <InlineValue value={item}/>
-        : size > FOLD_CHARS || depth >= 2 ? <Disclosure summary={<span className="min-w-0 truncate text-xs text-muted">{previewText(item) || `${size.toLocaleString()} characters`}</span>}><StructuredValue depth={depth + 1} value={item}/></Disclosure>
+        : size > FOLD_CHARS || depth >= 2 ? <NestedDisclosure summary={<span className="min-w-0 truncate text-xs text-muted">{previewText(item) || `${size.toLocaleString()} characters`}</span>}><StructuredValue depth={depth + 1} value={item}/></NestedDisclosure>
           : <StructuredValue depth={depth + 1} value={item}/>}</dd>
     </div>;
   })}</dl>;
@@ -538,13 +566,9 @@ function ToolOutputView({ format, title, value }: { format: OutputFormat; title?
   </div>;
 }
 
-function Disclosure({ children, defaultOpen = false, summary }: { children: ReactNode; defaultOpen?: boolean; summary: ReactNode }) {
-  // A later selection inside a closed disclosure opens it at once so the block can be scrolled to.
-  const { mounted, open, toggle } = useAccordion(defaultOpen);
-  return <div className="t-acc tf-card" data-open={open ? "true" : "false"}>
-    <div aria-expanded={open} className="t-acc-head tf-focus-inset flex min-h-11 cursor-pointer flex-wrap items-center gap-x-2 gap-y-1 rounded-control px-3 py-2 hover:bg-fill-hover" onClick={toggle} onKeyDown={(event) => activateOnKey(event, toggle)} role="button" tabIndex={0}><Chevron open={open}/>{summary}</div>
-    {mounted ? <div className="t-acc-panel"><div className="t-acc-panel-inner"><div className="tf-inset border-t border-line py-3">{children}</div></div></div> : null}
-  </div>;
+/* A nested disclosure inside a block's body: declarations, extra fields, large values. */
+function NestedDisclosure({ children, summary }: { children: ReactNode; summary: ReactNode }) {
+  return <SimpleDisclosure summary={summary} tier="inline">{children}</SimpleDisclosure>;
 }
 
 function ContentPart({ value }: { value: unknown }) {
@@ -690,9 +714,9 @@ function LayerDiffSection({ diff, onSelectToken, selection, turnId }: { diff: La
     <span className="ml-auto shrink-0 font-mono text-xs text-muted">{tokenText(diff.before)} → <span className="text-ink">{tokenText(diff.after)}</span>{delta ? ` (${delta > 0 ? "+" : ""}${delta.toLocaleString()})` : ""}</span>
   </>;
   const style = selectedLayer ? { borderColor: meta.color, boxShadow: `0 0 0 3px color-mix(in srgb, ${meta.color} 18%, transparent)` } : undefined;
-  if (!diff.rows.length && !diff.uncompared) return <div className={`tf-card flex min-h-11 flex-wrap items-center gap-x-2 gap-y-1 py-2 pl-9 pr-3 transition ${layerDimmed ? "tf-dimmed" : ""}`} style={style}>{summary}</div>;
-  return <div className={`transition ${layerDimmed ? "tf-dimmed" : ""}`} style={style}><Disclosure defaultOpen={selectedLayer || diff.rows.some(({ change, entry }) => change !== "removed" && selectionHits([entry], selection, turnId))} summary={summary}>
-    <ul className="divide-y divide-line text-xs">
+  if (!diff.rows.length && !diff.uncompared) return <div className={`tf-card transition ${layerDimmed ? "tf-dimmed" : ""}`} style={style}><FoldLine className="flex-wrap" tier="section">{summary}</FoldLine></div>;
+  return <div className={`tf-card overflow-hidden transition ${layerDimmed ? "tf-dimmed" : ""}`} style={style}><SimpleDisclosure defaultOpen={selectedLayer || diff.rows.some(({ change, entry }) => change !== "removed" && selectionHits([entry], selection, turnId))} headClassName="flex-wrap" summary={summary} tier="section">
+    <ul className="tf-inset divide-y divide-line text-xs">
       {diff.rows.map(({ change, entry }) => {
         const blockIds = change === "removed" ? [] : entryBlockIds([entry]);
         const active = selectionHits([entry], selection, turnId);
@@ -706,7 +730,7 @@ function LayerDiffSection({ diff, onSelectToken, selection, turnId }: { diff: La
       })}
       {diff.uncompared ? <li className="py-2 text-muted">{diff.uncompared} {diff.uncompared === 1 ? "block has" : "blocks have"} no captured id, so {diff.uncompared === 1 ? "it is" : "they are"} not compared.</li> : null}
     </ul>
-  </Disclosure></div>;
+  </SimpleDisclosure></div>;
 }
 
 function RequestChanges({ previous, current, onSelectToken, selection }: { previous: TurnModel | undefined; current: TurnModel; onSelectToken: (selection: TokenSelection | null) => void; selection: TokenSelection | null }) {
@@ -734,7 +758,7 @@ function RequestChanges({ previous, current, onSelectToken, selection }: { previ
       <dt className="font-medium text-muted">{label}</dt><dd className="min-w-0 break-words font-mono text-xs text-muted">{before}</dd><span aria-hidden="true" className="hidden text-muted sm:block">→</span><dd className="min-w-0 break-words font-mono text-xs text-ink">{after}</dd>
     </div>)}</dl> : <EmptyState framed>No high-level request changes detected.</EmptyState>}
     <section className="space-y-2"><h4 className="tf-eyebrow">Input by layer</h4>{diffs.map((diff) => <LayerDiffSection diff={diff} key={diff.layer} onSelectToken={onSelectToken} selection={selection} turnId={current.id}/>)}</section>
-    {changedFields.length ? <Disclosure summary={<><strong className="text-xs">Changed request fields</strong><span className="text-xs text-muted">Exact top-level evidence</span></>}><div className="flex flex-wrap gap-1.5">{changedFields.map((field) => <Badge key={field} mono>{field}</Badge>)}</div></Disclosure> : null}
+    {changedFields.length ? <NestedDisclosure summary={<><strong className="text-xs">Changed request fields</strong><span className="text-xs text-muted">Exact top-level evidence</span></>}><div className="flex flex-wrap gap-1.5">{changedFields.map((field) => <Badge key={field} mono>{field}</Badge>)}</div></NestedDisclosure> : null}
   </div>;
 }
 
@@ -954,11 +978,6 @@ function RowIcon({ color, icon: Icon }: { color?: string; icon: IconComponent })
   return <Icon className="shrink-0 text-muted" style={color ? { color } : undefined}/>;
 }
 
-/* The accordion chevron; it turns when the row opens (Accordion expand). */
-function Chevron({ open }: { open: boolean }) {
-  return <span aria-hidden="true" className={`t-acc-chevron grid w-4 shrink-0 place-items-center ${open ? "text-muted" : "text-muted/60"}`}><ChevronRightIcon className="size-4"/></span>;
-}
-
 function StateBadge({ state }: { state?: ItemState }) {
   if (state === "new") return <Badge tone="success">new</Badge>;
   if (state === "changed") return <Badge tone="warning">changed</Badge>;
@@ -1003,22 +1022,17 @@ function isFresh(...entries: Array<InputEntry | undefined>): boolean {
    the summary. A row without a body keeps the chevron's space so summaries align. */
 function Row({ accent, children, defaultOpen = false, dimmed = false, hint, summary }: { accent?: string; children?: ReactNode; defaultOpen?: boolean; dimmed?: boolean; hint?: string; summary: ReactNode }) {
   const focus = useContext(CrossLinkContext);
-  const { mounted, open, toggle } = useAccordion(focus.key ? Boolean(accent) : defaultOpen, focus.key);
+  const tier = useContext(RowTierContext);
+  const state = useAccordion(focus.key ? Boolean(accent) : defaultOpen, focus.key);
   // A selected row carries its category color as a left bar and a light tint.
   const mark = accent ? { backgroundColor: `color-mix(in srgb, ${accent} 9%, transparent)`, boxShadow: `inset 3px 0 0 ${accent}` } : undefined;
   const fade = !focus.key && dimmed ? "tf-dimmed" : "";
-  if (children === undefined) return <div className={`t-row t-fade tf-inset flex min-h-11 items-center gap-2.5 py-2 text-sm ${fade}`} style={mark} title={hint}><span aria-hidden="true" className="w-4 shrink-0"/>{summary}</div>;
-  return <div className="t-row t-acc" data-open={open ? "true" : "false"}>
-    <div aria-expanded={open} className={`t-acc-head t-fade tf-inset tf-focus-inset flex min-h-11 cursor-pointer items-center gap-2.5 py-2 text-sm hover:bg-fill-hover ${fade}`} onClick={toggle} onKeyDown={(event) => activateOnKey(event, toggle)} role="button" style={mark} tabIndex={0} title={hint}>
-      <Chevron open={open}/>
-      {summary}
-    </div>
-    {mounted ? <div className="t-acc-panel"><div className="t-acc-panel-inner"><div className="tf-inset pb-4 pt-1"><div className="pl-[1.625rem]">{children}</div></div></div></div> : null}
-  </div>;
+  if (children === undefined) return <FoldLine className={`t-row t-fade ${fade}`} style={mark} tier={tier} title={hint}>{summary}</FoldLine>;
+  return <Disclosure className="t-row" headClassName={`t-fade ${fade}`} headStyle={mark} state={state} summary={summary} tier={tier} title={hint}>{children}</Disclosure>;
 }
 
-function Meta({ children, mono = false }: { children: ReactNode; mono?: boolean }) {
-  return <span className={`min-w-0 flex-1 truncate text-xs text-muted ${mono ? "font-mono text-xs" : ""}`}>{children}</span>;
+function Meta({ children, mono = false, title }: { children: ReactNode; mono?: boolean; title?: string }) {
+  return <span title={title} className={`min-w-0 flex-1 truncate text-xs text-muted ${mono ? "font-mono text-xs" : ""}`}>{children}</span>;
 }
 
 function StateSummary({ entries }: { entries: InputEntry[] }) {
@@ -1039,17 +1053,15 @@ function LayerSection({ badge, children, entries, layer, selection, turnId }: { 
   const meta = LAYER_META[layer];
   const picked = selectionHits(entries, selection, turnId);
   const focus = useContext(CrossLinkContext);
-  const { open, toggle } = useAccordion(!focus.key || picked, focus.key);
+  const state = useAccordion(!focus.key || picked, focus.key);
   // A selected layer takes its own color; the other layers step back while it is selected.
   const ring = picked ? { borderColor: meta.color, boxShadow: `0 0 0 3px color-mix(in srgb, ${meta.color} 18%, transparent)` } : undefined;
   return <section aria-label={meta.title} className="tf-card scroll-m-24 overflow-hidden transition" data-layer={layer} data-turn-id={turnId} style={ring} tabIndex={-1}>
-    <button aria-expanded={open} className="tf-inset tf-focus-inset flex min-h-11 w-full items-center gap-2.5 py-1.5 text-left" onClick={toggle} type="button">
-      <Chevron open={open}/>
+    <Disclosure state={state} summary={<>
       <RowIcon color={meta.color} icon={LAYER_ICONS[layer]}/>
       <h3 className="tf-heading shrink-0">{meta.title}</h3>
       <RowEnd badge={badge ?? <StateSummary entries={entries}/>} tokens={sumTokens(entries)}/>
-    </button>
-    {open ? <div className="divide-y divide-line border-t border-line">{children}</div> : null}
+    </>} tier="section"><div className="divide-y divide-line">{children}</div></Disclosure>
   </section>;
 }
 
@@ -1091,13 +1103,12 @@ function ToolDefinitionRow({ entry, onSelectToken, selection, tools, turnId }: R
           const name = textValue(tool.name) || `Tool ${index + 1}`;
           const description = textValue(tool.description);
           const schema = tool.parameters ?? tool.input_schema ?? tool.format;
-          return <li key={`${name}-${index}`} style={{ containIntrinsicSize: "0 28px", contentVisibility: "auto" }}><details>
-            <summary className="grid cursor-pointer list-none grid-cols-[minmax(6rem,12rem)_minmax(0,1fr)] gap-3 rounded-tag px-1 py-1 font-mono text-xs hover:bg-fill-hover [&::-webkit-details-marker]:hidden"><span className="truncate text-ink">{name}</span><span className="truncate text-muted">{toolSignature(tool)}</span></summary>
-            <div className="mb-2 ml-1 mt-1 space-y-2 border-l-2 border-line pl-3">
+          return <li key={`${name}-${index}`} style={{ containIntrinsicSize: "0 32px", contentVisibility: "auto" }}><SimpleDisclosure dense summary={<span className="grid min-w-0 flex-1 grid-cols-[minmax(6rem,12rem)_minmax(0,1fr)] gap-3 font-mono"><span className="truncate text-ink">{name}</span><span className="truncate">{toolSignature(tool)}</span></span>} tier="inline">
+            <div className="space-y-1">
               {description ? <p className="whitespace-pre-wrap text-xs leading-5 text-muted">{description}</p> : null}
-              {schema ? <details><summary className="cursor-pointer text-xs font-medium text-muted hover:text-ink">Schema</summary><div className="mt-2"><JsonBlock value={schema}/></div></details> : null}
+              {schema ? <NestedDisclosure summary={<span>Schema</span>}><JsonBlock value={schema}/></NestedDisclosure> : null}
             </div>
-          </details></li>;
+          </SimpleDisclosure></li>;
         })}</ul>
       </section>)}</div>
     </BlockAnchor>
@@ -1202,7 +1213,9 @@ function ToolExchangeRow({ call, defaultOpen = false, inResponse = false, onSele
   const failedParts = readout?.parts.filter((part) => part.failure).length ?? 0;
   const namespace = textValue(callItem?.namespace);
   // Some clients have the model label its own call (Antigravity's `toolSummary`).
-  const title = textValue(asRecord(presentation?.input).title) || textValue(asRecord(presentation?.input).toolSummary) || presentation?.preview || outcome?.status || "";
+  const label = textValue(asRecord(presentation?.input).title) || textValue(asRecord(presentation?.input).toolSummary);
+  const title = label || presentation?.preview || outcome?.status || "";
+  const titleIsCode = Boolean(!label && presentation?.preview);
   const tokens = sumTokens([call, result].filter((entry): entry is InputEntry => Boolean(entry)));
   const blockIds = entryBlockIds([call, result]);
   const state = result?.rowState ?? call?.rowState;
@@ -1210,7 +1223,7 @@ function ToolExchangeRow({ call, defaultOpen = false, inResponse = false, onSele
   return <Row accent={marks.accent} defaultOpen={defaultOpen || marks.open || isFresh(call, result)} dimmed={marks.dimmed} summary={<>
     <LinkSwatch blockIds={blockIds} category={call ? "model" : "results"} icon={TerminalIcon} label={call ? "Tool calls" : "Tool results"} onSelectToken={onSelectToken} selection={selection} turnId={turnId}/>
     <span className="shrink-0 font-mono text-sm text-ink">{namespace ? <span className="text-muted">{namespace}.</span> : null}{presentation?.name || "Tool result"}</span>
-    <Meta>{title}</Meta>
+    <Meta mono={titleIsCode} title={title}>{title}</Meta>
     <RowEnd badge={failed ? <Badge tone="danger">failed</Badge> : failedParts ? <Badge tone="danger">{readout && readout.parts.length > 1 ? `${failedParts} failed` : "failed"}</Badge> : <StateBadge state={state}/>} tokens={tokens}/>
   </>}>
     <div className="space-y-4">
@@ -1626,16 +1639,6 @@ function groupSteps(entries: InputEntry[], isFreshEntry: (entry: InputEntry) => 
   return steps;
 }
 
-function stepSummary(step: TimelineStep): string {
-  if (step.role === "user") return "";
-  const calls = step.entries.filter((entry) => entry.part === undefined && toolEventKind(entry.item) === "call").length
-    + step.entries.filter((entry) => entry.inputClass.label === "Tool calls" && entry.part !== undefined).length;
-  const reasoning = step.entries.some((entry) => entry.inputClass.label === "Reasoning");
-  const message = step.entries.some((entry) => entry.inputClass.label === "Assistant messages");
-  if (step.role === "model") return [reasoning ? "reasoning" : "", message ? "message" : "", calls ? `${calls} ${calls === 1 ? "call" : "calls"}` : ""].filter(Boolean).join(" · ");
-  return `${step.entries.length} ${step.entries.length === 1 ? "item" : "items"}`;
-}
-
 /* Claude Code often sends one long Guidelines document split into heading-sized
    blocks. Keep those blocks for search and raw provenance, while reading the
    document as one instruction in the inspector. */
@@ -1662,68 +1665,66 @@ function InstructionGroupRow({ entries, previous, ...props }: RowProps & { entri
   </>}><div className="space-y-3">{entries.map((entry) => <BlockAnchor blockIds={entryBlockIds([entry])} key={entry.key} turnId={props.turnId}><SectionContent previous={previous} section={entry.section} value={entry.part}/></BlockAnchor>)}</div></Row>;
 }
 
-function TimelineStepView({ open, outputTokens, rowProps, step, tone }: { open: boolean; outputTokens?: number; rowProps: RowProps; step: TimelineStep; tone?: "carried" | "response" }) {
-  const meta = STEP_META[step.role];
+/* Request context in the Dialog: one inline disclosure before the conversation.
+   Opened, it lists capabilities, instructions, and injected context the way Tokens
+   does, grouped by layer, so a block reads the same in both views. */
+function RequestContext({ entries, rowProps }: { entries: InputEntry[]; rowProps: RowProps }) {
+  // One group per layer, in prompt-layer order, whatever order the request interleaves them in.
+  const steps = (["capabilities", "instructions", "context"] as const).flatMap((role) => {
+    const members = entries.filter((entry) => stepRole(entry) === role || (role === "context" && !["capabilities", "instructions"].includes(stepRole(entry))));
+    return members.length ? [{ entries: members, fresh: false, key: `context:${role}`, role }] : [];
+  });
+  const selected = selectionHits(entries, rowProps.selection, rowProps.turnId);
   const focus = useContext(CrossLinkContext);
-  const matched = tone !== "response" && selectionHits(step.entries.flatMap((entry) => [entry, entry.result]), rowProps.selection, rowProps.turnId);
-  const disclosure = useAccordion(!focus.key || matched, focus.key);
-  // Output has no per-item counts; the response shows the turn's measured output tokens.
-  const tokens = tone === "response" ? (outputTokens ? { cached: 0, tokens: outputTokens } : undefined) : sumTokens(step.entries.flatMap((entry) => entry.result ? [entry, entry.result] : [entry]));
-  const summary = stepSummary(step);
-  return <li className="t-row relative pl-8" data-layer={step.role === "capabilities" || step.role === "instructions" ? step.role : undefined} data-turn-id={rowProps.turnId}>
-    <span aria-hidden="true" className={`absolute left-0 top-0.5 grid size-6 place-items-center rounded-full border bg-panel ${tone === "response" ? "border-ink text-ink" : "border-line text-muted"}`}><meta.icon className="size-3.5"/></span>
-    <button aria-expanded={disclosure.open} className="tf-focus-inset mb-1.5 flex min-h-6 w-full items-center gap-2 text-left text-xs" onClick={disclosure.toggle} type="button">
-      <Chevron open={disclosure.open}/>
-      <span className="font-semibold text-ink">{tone === "response" ? "Response" : meta.label}</span>
-      {summary ? <span className="truncate text-muted">{summary}</span> : null}
-      {step.fresh && tone !== "response" ? <Badge tone="success">new</Badge> : null}
-      {tokens ? <span className="ml-auto font-mono tabular-nums text-muted">{tokens.tokens.toLocaleString()}</span> : null}
-    </button>
-    {disclosure.open ? <div className="divide-y divide-line overflow-hidden rounded-inset border border-line">
-      {step.role === "instructions" ? <InstructionRows entries={step.entries} {...rowProps}/> : step.entries.map((entry) => <EntryRow entry={entry} key={entry.key} {...rowProps} defaultOpen={open && step.role !== "context"} inResponse={tone === "response"}/>)}
-    </div> : null}
-  </li>;
-}
-
-/* A run of steps this request carries from before, folded to one line. */
-function CarriedSteps({ label, note, rowProps, steps }: { label: string; note: string; rowProps: RowProps; steps: TimelineStep[] }) {
-  const selected = steps.some((step) => step.entries.some((entry) => selectionHits([entry, entry.result], rowProps.selection, rowProps.turnId)));
-  const focus = useContext(CrossLinkContext);
-  const { open, toggle } = useAccordion(selected, focus.key);
+  const state = useAccordion(selected, focus.key);
   if (!steps.length) return null;
-  return <li className="relative pl-8">
-    <span aria-hidden="true" className="absolute left-0 top-0 grid size-6 place-items-center rounded-full border border-line bg-panel text-muted"><HistoryIcon className="size-3.5"/></span>
-    <button aria-expanded={open} className="flex min-h-6 items-center gap-2 text-xs text-muted hover:text-ink" onClick={toggle} type="button">
-      <ChevronRightIcon className={`size-3.5 transition-transform ${open ? "rotate-90" : ""}`}/>
-      <span className="font-semibold">{label}</span>
-      <span>{steps.length} {steps.length === 1 ? "step" : "steps"} {note}</span>
-    </button>
-    {open ? <ol className="mt-3 space-y-5">{steps.map((step) => <TimelineStepView key={step.key} open={false} rowProps={rowProps} step={step} tone="carried"/>)}</ol> : null}
+  const tokens = sumTokens(entries);
+  return <li>
+    <Disclosure state={state} summary={<>
+      <RowIcon icon={SlidersIcon}/>
+      <span className="shrink-0 font-medium text-ink">Request context</span>
+      <span className="min-w-0 flex-1 truncate">{steps.map((step) => STEP_META[step.role].label.toLowerCase()).join(" · ")}</span>
+      {tokens ? <span className="ml-auto shrink-0 font-mono tabular-nums">{tokens.tokens.toLocaleString()}</span> : null}
+    </>} tier="inline">
+      <RowTierContext.Provider value="row">
+        <div className="space-y-3 pt-1">{steps.map((step) => <section data-layer={step.role === "capabilities" || step.role === "instructions" ? step.role : undefined} data-turn-id={rowProps.turnId} key={step.key}>
+          <h4 className="tf-eyebrow mb-1.5 flex items-center gap-2">{STEP_META[step.role].label}<span className="ml-auto font-mono normal-case tracking-normal tabular-nums">{sumTokens(step.entries)?.tokens.toLocaleString()}</span></h4>
+          <div className="divide-y divide-line overflow-hidden rounded-inset border border-line">
+            {step.role === "instructions" ? <InstructionRows entries={step.entries} {...rowProps}/> : step.entries.map((entry) => <EntryRow entry={entry} key={entry.key} {...rowProps}/>)}
+          </div>
+        </section>)}</div>
+      </RowTierContext.Provider>
+    </Disclosure>
   </li>;
 }
 
 /* A conversation projection, not a second parser: retain the canonical block
-   anchors and only give ordinary messages a quieter, directly readable body. */
+   anchors and only give ordinary messages a quieter, directly readable body.
+   Messages read open with no header; they fold (to one inline line with a
+   preview) only when a selection elsewhere puts them out of focus. Everything
+   else in the dialog is inline secondary detail and starts closed. */
 function TimelineEntry({ entry, inResponse = false, ...props }: RowProps & { entry: InputEntry }) {
   const focus = useContext(CrossLinkContext);
   const matched = !inResponse && selectionHits([entry, entry.result], props.selection, props.turnId);
-  const disclosure = useAccordion(!focus.key || matched, focus.key);
+  const state = useAccordion(!focus.key || matched, focus.key);
   const message = entry.part !== undefined && (entry.inputClass.label === "User prompt" || entry.inputClass.label === "Assistant messages");
   if (!message) {
     // Timeline starts secondary detail closed; Tokens keeps its change-driven
     // disclosure. Selection still opens the original block through Row.
     const quietEntry = { ...entry, rowState: undefined, result: entry.result ? { ...entry.result, rowState: undefined } : undefined };
-    return <li className="min-w-0 overflow-hidden rounded-inset border border-line"><EntryRow entry={quietEntry} {...props} inResponse={inResponse}/></li>;
+    return <li className="min-w-0"><EntryRow entry={quietEntry} {...props} inResponse={inResponse}/></li>;
   }
   const user = entry.inputClass.label === "User prompt";
   const label = user ? "User" : "Assistant";
   const text = typeof entry.part === "string" ? entry.part : textValue(asRecord(entry.part).text);
-  return <li aria-label={`${label} message`} className={`tf-dialog-message ${user ? "tf-dialog-user" : "tf-dialog-assistant"}`}>
-    {focus.key || !disclosure.open ? <button aria-expanded={disclosure.open} className="tf-focus-inset flex min-h-11 items-center gap-2 text-left text-xs text-muted" onClick={disclosure.toggle} type="button">
-      <Chevron open={disclosure.open}/><span>{label}</span>
-      {!disclosure.open ? <span className="truncate">{previewText(text)}</span> : null}
-    </button> : <span className="sr-only">{label}</span>}
-    {disclosure.open ? <div className={user ? "tf-dialog-bubble" : "tf-dialog-reply"}><BlockAnchor blockIds={entryBlockIds([entry])} turnId={props.turnId}>{text ? <RichText>{text}</RichText> : <ContentPart value={entry.part}/>}</BlockAnchor></div> : null}
+  const body = <div className={user ? "tf-dialog-bubble" : "tf-dialog-reply"}><BlockAnchor blockIds={entryBlockIds([entry])} turnId={props.turnId}>{text ? <RichText>{text}</RichText> : <ContentPart value={entry.part}/>}</BlockAnchor></div>;
+  if (!focus.key) return <li aria-label={`${label} message`} className={`tf-dialog-message ${user ? "tf-dialog-user" : "tf-dialog-assistant"}`}><span className="sr-only">{label}</span>{body}</li>;
+  return <li aria-label={`${label} message`} className="tf-dialog-message tf-dialog-assistant">
+    <Disclosure state={state} summary={<>
+      <RowIcon icon={user ? UserIcon : ChatIcon}/>
+      <span className="shrink-0 font-medium text-ink">{label}</span>
+      {!state.open ? <span className="min-w-0 truncate">{previewText(text)}</span> : null}
+    </>} tier="inline"><div className={user ? "tf-dialog-user" : ""}>{body}</div></Disclosure>
   </li>;
 }
 
@@ -1733,7 +1734,6 @@ function TimelineRequest({ earlierTurns, onSelectToken, selection, turn }: { ear
   const returned = useMemo(() => previousOutputIds(turn, earlierTurns), [earlierTurns, turn]);
   const isFreshEntry = (entry: InputEntry) => entry.state !== "carried" && !carried.has(entry.key) && !returned.has(entry.itemId);
   const requestContext = (entry: InputEntry) => entry.inputClass.layer === "capabilities" || entry.inputClass.layer === "instructions" || entry.inputClass.layer === "context";
-  const contextSteps = groupSteps(entries.filter(requestContext), () => false, "context:");
   const steps = groupSteps(entries.filter((entry) => !requestContext(entry)), isFreshEntry, "in:");
   const output = useMemo(() => timelineItems(turn, turnPlugins(turn).protocol?.output?.(turn.record) || []), [turn]);
   const response = useMemo(() => groupSteps(inputEntries(turn, output), () => true, "out:"), [output, turn]);
@@ -1741,11 +1741,11 @@ function TimelineRequest({ earlierTurns, onSelectToken, selection, turn }: { ear
 
   return <div className="space-y-4 tf-pad">
     <ChainNote turn={turn}/>
-    <ol className="space-y-5">
-      <CarriedSteps label="Request context" note="" rowProps={rowProps} steps={contextSteps}/>
+    <RowTierContext.Provider value="inline"><ol className="space-y-3">
+      <RequestContext entries={entries.filter(requestContext)} rowProps={rowProps}/>
       {steps.flatMap((step) => step.entries.map((entry) => <TimelineEntry entry={entry} key={entry.key} {...rowProps}/>))}
       {response.flatMap((step) => step.entries.map((entry) => <TimelineEntry entry={entry} inResponse key={`response:${entry.key}`} {...rowProps} selection={null}/>))}
-    </ol>
+    </ol></RowTierContext.Provider>
     {!entries.length && !response.length ? <EmptyState framed>No conversation items were captured for this turn.</EmptyState> : null}
   </div>;
 }

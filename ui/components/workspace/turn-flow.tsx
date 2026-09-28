@@ -13,7 +13,8 @@ import { activateOnKey } from "../motion";
 import { IconButton } from "../ui/button";
 import { EmptyState } from "../ui/feedback";
 import { SearchField } from "../ui/field";
-import { ChevronRightIcon, SearchIcon } from "../ui/icons";
+import { Chevron } from "../ui/disclosure";
+import { SearchIcon } from "../ui/icons";
 import type { CategoryFocus } from "./input-units";
 
 /* Fixed geometry keeps every Sankey node and ribbon aligned with its HTML row. */
@@ -138,7 +139,7 @@ export function TurnFlow(props: TurnFlowProps) {
   const active = lanes.find((lane) => lane.id === chosen) || selectedLane || lanes[0];
   if (!active) return <FlowLane {...props}/>;
   return <div className="min-w-0 overflow-x-auto rounded-panel border border-line bg-panel lg:sticky lg:top-[calc(var(--tf-toolbar-height)+0.75rem)] lg:h-[calc(100dvh-var(--tf-toolbar-height)-1.5rem)]">
-    <div className="flex min-w-full items-start">
+    <div className="relative flex min-w-full items-start">
       {lanes.map((lane) => lane.id === active.id
         ? <div className="min-w-0 flex-1" key={lane.id} style={{ minWidth: 280 }}><FlowLane {...props} lane={lane}/></div>
         : <div className="w-7 shrink-0 border-l border-line" key={lane.id}>
@@ -163,9 +164,19 @@ export function TurnFlow(props: TurnFlowProps) {
                 </g>;
               })}
             </svg>
-            {lane.indices.map((index) => <button aria-label={`Expand ${lane.label}, turn ${props.turns[index].label}`} className="tf-focus-inset absolute h-14 w-full hover:bg-fill-hover" key={props.turns[index].id} onClick={() => setChosen(lane.id)} style={{ top: index * ROW }} title={`Turn ${props.turns[index].label} · ${props.turns[index].step} · ${formatNumber(props.turns[index].input)} input tokens`} type="button"/>)}
           </div>
         </div>)}
+      {/* Capture-order gaps belong to the folded lane's turn. Make the entire
+          shared row one target, including its narrow strip node. */}
+      {lanes.filter((lane) => lane.id !== active.id).flatMap((lane) => lane.indices.map((index) => <button
+        aria-label={`Open ${lane.label}, turn ${props.turns[index].label}`}
+        className="tf-focus-inset absolute inset-x-0 h-14 hover:bg-fill-hover focus-visible:bg-fill-hover"
+        key={`folded-row:${props.turns[index].id}`}
+        onClick={() => { setChoice(null); props.onSelectTurn(index); }}
+        style={{ top: `calc(8rem + ${index * ROW}px)` }}
+        title={`Turn ${props.turns[index].label} · ${lane.label} · ${props.turns[index].step}`}
+        type="button"
+      />))}
     </div>
   </div>;
 }
@@ -410,9 +421,9 @@ function FlowLane({ focus = null, onSelectNode, onSelectTurn, selected, selectio
             if (item.kind === "thread") return <li className="tf-inset absolute inset-x-0 flex items-end truncate border-t border-line pb-1.5 text-sm font-semibold text-ink" key={item.key} style={{ height: THREAD_HEADER, top: item.top }} title={item.label}>{item.label}</li>;
             if (item.kind === "query") return <li className="tf-inset absolute inset-x-0 flex items-end truncate pb-1 text-xs font-medium text-muted" key={item.key} style={{ height: HEADER, top: item.top }} title={item.label}>{item.label}</li>;
             if (item.kind === "branch") return <li className="absolute inset-x-0" key={item.key} style={{ height: BRANCH, top: item.top }}>
-              <button aria-expanded={item.open} className="tf-focus-inset tf-inset flex h-full w-full items-center gap-1.5 border-t border-line text-left text-xs text-muted transition-colors hover:bg-fill-hover hover:text-ink" onClick={() => toggleThread(item.threadId)} type="button">
+              <button aria-expanded={item.open} className="group/fold tf-focus-inset tf-inset flex h-full w-full items-center gap-2 border-t border-line text-left text-xs text-muted transition-colors hover:bg-fill-hover hover:text-ink" onClick={() => toggleThread(item.threadId)} type="button">
                 {item.depth ? <span aria-hidden="true" className="shrink-0" style={{ width: item.depth * 14 }}/> : null}
-                <ChevronRightIcon className={`size-3.5 shrink-0 transition-transform ${item.open ? "rotate-90" : ""}`}/>
+                <Chevron open={item.open} tier="inline"/>
                 {item.name
                   ? <span className="shrink-0 text-ink" title={item.name}>↳ <span className="font-mono font-medium">{item.name.startsWith("/") ? item.name.split("/").pop() : item.name}</span></span>
                   : <span className="shrink-0 font-medium text-ink">↳ {item.label}</span>}

@@ -25,7 +25,7 @@ from token_tap.storage.trace_store import SessionQuery, TraceStore, get_trace_st
 _DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 
 CLIENT_LABELS = dashboard_labels()
-DASHBOARD_SUMMARY_VERSION = 12
+DASHBOARD_SUMMARY_VERSION = 14
 VALID_SESSION_STATUSES = {"active", "complete", "error", "empty"}
 _REDACTED_VALUE = "REDACTED"
 _SENSITIVE_KEY_NAMES = {
@@ -1165,12 +1165,14 @@ _METADATA_PROMPT_PREFIXES = (
 )
 
 _TITLE_PROMPT_PREFIXES = (
+    "generate a short conversation title",
     "generate a concise, single-line task title",
     "generate a concise, sentence-case title for the session",
     "you are a helpful assistant. you will be presented with a user prompt, and your job is to provide a short title",
 )
 
 _TITLE_PROMPT_MARKERS = (
+    "you are a conversation title generator.",
     "you are naming a coding session so the user can pick it out of a long list of sessions",
 )
 
@@ -1192,6 +1194,13 @@ def _metadata_instruction_texts(record: dict[str, Any]) -> list[str]:
         return []
 
     texts = []
+    # Gemini Code Assist wraps its model request in `request`.
+    model_body = body.get("request") if isinstance(body.get("request"), dict) else body
+    instruction = model_body.get("systemInstruction")
+    if isinstance(instruction, dict):
+        text = _parts_text(instruction.get("parts"))
+        if text:
+            texts.append(text)
     for key in ("system", "instructions"):
         text = _content_text(body.get(key))
         if text:
@@ -1525,7 +1534,12 @@ def _response_text(body: Any) -> str:
                 continue
             content = candidate.get("content")
             if isinstance(content, dict):
-                texts.append(_parts_text(content.get("parts")))
+                parts = content.get("parts")
+                texts.append(
+                    _parts_text([part for part in parts if isinstance(part, dict) and part.get("thought") is not True])
+                    if isinstance(parts, list)
+                    else ""
+                )
         text = "\n".join(part for part in texts if part).strip()
         if text:
             return text

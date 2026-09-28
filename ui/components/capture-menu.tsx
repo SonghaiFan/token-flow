@@ -7,7 +7,8 @@ import type { CaptureClient } from "@/lib/types";
 import { AgentMark } from "./agent-mark";
 import { StatusDot } from "./ui/badge";
 import { Button } from "./ui/button";
-import { ChevronRightIcon, PlusIcon } from "./ui/icons";
+import { Chevron } from "./ui/disclosure";
+import { PlusIcon } from "./ui/icons";
 import { Menu, MenuItem, MenuLabel, MenuSeparator } from "./ui/menu";
 
 function since(value: string | null | undefined): string {
@@ -101,7 +102,7 @@ export function CaptureButton() {
           <MenuSeparator/>
           <MenuItem onSelect={() => setShowMore((open) => !open)}>
             <span className="flex-1 text-muted">More agents…</span>
-            <ChevronRightIcon className={`size-4 text-muted transition-transform ${showMore ? "rotate-90" : ""}`}/>
+            <Chevron open={showMore}/>
           </MenuItem>
           {showMore ? <ul className="pb-1">{missing.map((client) => <li className="flex min-h-11 items-center gap-3 px-2.5" key={client.id}>
             <span className="opacity-50"><AgentMark label={client.label}/></span>

@@ -75,6 +75,13 @@
   --tf-rail-min: 24rem;
   --tf-rail-max: 32rem;
 
+  /* Disclosure (product-design-system.md, "Disclosure"). One chevron slot and
+     gap, so a body always starts under its summary text. Motion is --acc-*. */
+  --tf-fold-glyph: 1rem;
+  --tf-fold-glyph-dense: 0.75rem;
+  --tf-fold-gap: 0.625rem;
+  --tf-fold-indent: calc(var(--tf-fold-glyph) + var(--tf-fold-gap));
+
   /* Emphasis: what steps back while something else is selected. */
   --tf-opacity-dimmed: 0.45;
   --tf-opacity-cached: 0.5;

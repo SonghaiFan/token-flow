@@ -2,7 +2,7 @@
 
 import { createContext, useContext, useRef, useState, type ReactNode } from "react";
 import { Button } from "../ui/button";
-import { ChevronRightIcon } from "../ui/icons";
+import { TreeToggle } from "../ui/disclosure";
 
 type JsonPathPart = number | string;
 
@@ -83,7 +83,7 @@ function RawJsonNode({ blockId, isLast = true, keyName, path, selectedPath, sele
 
   return <div className="raw-json-branch" data-json-path={pathString}>
     <div className={`raw-json-line flex min-w-0 items-start rounded-tag px-1 ${selected ? "raw-json-selected" : ""}`} data-json-path={pathString} {...itemProps}>
-      <button aria-expanded={open} aria-label={`${open ? "Collapse" : "Expand"} ${pathString}`} className="mr-1 mt-[0.15em] inline-flex size-4 shrink-0 items-center justify-center rounded-tag text-muted hover:bg-fill-hover hover:text-ink" onClick={() => setCollapsed(open)} type="button"><ChevronRightIcon className={`size-3 transition-transform ${open ? "rotate-90" : ""}`} strokeWidth={2.25}/></button>
+      <TreeToggle label={`${open ? "Collapse" : "Expand"} ${pathString}`} onToggle={() => setCollapsed(open)} open={open}/>
       <span className="min-w-0 break-words">{key}<span className="text-muted">{openMark}</span>{open ? null : <><span className="ml-1 text-muted">… {countLabel}</span><span className="text-muted">{closeMark}</span>{comma}</>}</span>
     </div>
     {open ? <>

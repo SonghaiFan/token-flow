@@ -7,6 +7,7 @@
 import { Streamdown, type Components } from "streamdown";
 import { asObject } from "@/lib/json";
 import { Badge } from "../ui/badge";
+import { SimpleDisclosure } from "../ui/disclosure";
 
 const markdownComponents: Components = {
   h1: ({ children }) => <h1 className="mb-3 mt-5 text-xl font-semibold tracking-[-0.03em] first:mt-0">{children}</h1>,
@@ -135,9 +136,8 @@ export function EnvironmentView({ earlier, facts }: { earlier: EnvironmentFacts 
       {facts.roots.length ? <><dt className="text-muted">Workspace roots</dt><dd className="min-w-0 space-y-0.5 break-all font-mono text-xs text-ink">{facts.roots.map((root) => <div key={root}>{root}</div>)}</dd></> : null}
       {facts.entries.length ? <><dt className="text-muted">File system</dt><dd className="min-w-0 font-mono text-xs text-ink">{[facts.profile && `${facts.profile} profile`, facts.fileSystem, accessCounts(facts)].filter(Boolean).join(" · ")}</dd></> : null}
     </dl>
-    {facts.entries.length ? <details className="text-xs">
-      <summary className="cursor-pointer text-xs text-muted hover:text-ink">{facts.entries.length} access rules</summary>
-      <div className="mt-2 overflow-hidden rounded-inset border border-line"><table className="w-full table-fixed text-left text-xs"><tbody className="divide-y divide-line">{facts.entries.map((entry, index) => <tr key={`${entry.target}-${index}`}><td className="w-20 px-3 py-1.5 align-top"><Badge mono tone={entry.access === "deny" ? "danger" : "neutral"}>{entry.access}</Badge></td><td className="break-all px-3 py-1.5 font-mono text-ink">{entry.target}{entry.special ? <span className="ml-2 font-sans text-xs text-muted">special</span> : null}{entry.escalatable === "false" ? <span className="ml-2 font-sans text-xs text-muted">not escalatable</span> : null}</td></tr>)}</tbody></table></div>
-    </details> : null}
+    {facts.entries.length ? <SimpleDisclosure summary={<span>{facts.entries.length} access rules</span>} tier="inline">
+      <div className="overflow-hidden rounded-inset border border-line"><table className="w-full table-fixed text-left text-xs"><tbody className="divide-y divide-line">{facts.entries.map((entry, index) => <tr key={`${entry.target}-${index}`}><td className="w-20 px-3 py-1.5 align-top"><Badge mono tone={entry.access === "deny" ? "danger" : "neutral"}>{entry.access}</Badge></td><td className="break-all px-3 py-1.5 font-mono text-ink">{entry.target}{entry.special ? <span className="ml-2 font-sans text-xs text-muted">special</span> : null}{entry.escalatable === "false" ? <span className="ml-2 font-sans text-xs text-muted">not escalatable</span> : null}</td></tr>)}</tbody></table></div>
+    </SimpleDisclosure> : null}
   </div>;
 }
