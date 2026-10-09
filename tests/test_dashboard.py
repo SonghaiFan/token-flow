@@ -2322,10 +2322,10 @@ async def test_dashboard_can_start_and_stop_codex_app_capture(trace_db, monkeypa
             assert launched["command"][1:] == (
                 "-m",
                 "token_tap",
-                "--tap-client",
+                "capture",
                 "codexapp",
-                "--tap-no-open",
-                "--tap-no-live",
+                "--no-open",
+                "--no-dashboard",
             )
             assert launched["kwargs"]["stdout"] is not None
 
@@ -2405,7 +2405,7 @@ async def test_dashboard_can_start_and_stop_pi_capture_in_terminal(trace_db, mon
 
             assert opened["command"][:3] == ("open", "-a", "Terminal")
             assert f"cd {project}" in opened["script"]
-            assert "--tap-client pi --tap-no-open --tap-no-live" in opened["script"]
+            assert f"capture pi --project {project} --no-open --no-dashboard" in opened["script"]
 
             async with session.delete(f"http://127.0.0.1:{port}/dashboard/captures", headers=headers) as resp:
                 assert resp.status == 200

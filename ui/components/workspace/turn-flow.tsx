@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useId, useMemo, useRef, useState } from "react";
+import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { categoryColor, FADED_MARK_OPACITY } from "@/lib/category-palette";
 import { formatCompact, formatDuration, formatNumber, formatTime } from "@/lib/format";
 import { CATEGORY_META, CATEGORY_ORDER } from "@/lib/input-categories";
@@ -9,7 +9,7 @@ import { threadIndices, threadTree, type ThreadNode } from "@/lib/threads";
 import { queryGroups } from "@/lib/turn-order";
 import type { InputCategory, InputLayer, TokenSelection, TurnModel } from "@/lib/types";
 import { Badge, Swatch } from "../ui/badge";
-import { activateOnKey } from "../motion";
+import { activateOnKey, motionMs } from "../motion";
 import { IconButton } from "../ui/button";
 import { EmptyState } from "../ui/feedback";
 import { SearchField } from "../ui/field";
@@ -137,6 +137,31 @@ export function TurnFlow(props: TurnFlowProps) {
   const chosen = choice?.selected === props.selected ? choice.id : null;
   const selectedLane = lanes.find((lane) => props.selected !== null && lane.indices.includes(props.selected));
   const active = lanes.find((lane) => lane.id === chosen) || selectedLane || lanes[0];
+  // A switch keeps the two lanes' outgoing layers mounted until the push settles.
+  const [shift, setShift] = useState<{ from: string; to: string } | null>(null);
+  const [shown, setShown] = useState(active?.id);
+  if (active && active.id !== shown) {
+    setShown(active.id);
+    setShift(shown && lanes.some((lane) => lane.id === shown) ? { from: shown, to: active.id } : null);
+  }
+  useEffect(() => {
+    if (!shift) return;
+    const timer = window.setTimeout(() => setShift(null), motionMs("--lane-dur", 350));
+    return () => window.clearTimeout(timer);
+  }, [shift]);
+  // Layers are drawn at the expanded lane's final width, measured here.
+  const frameRef = useRef<HTMLDivElement | null>(null);
+  const [frameWidth, setFrameWidth] = useState(0);
+  const framed = Boolean(active);
+  useLayoutEffect(() => {
+    const element = frameRef.current;
+    if (!element) return;
+    setFrameWidth(element.clientWidth);
+    const observer = new ResizeObserver(() => setFrameWidth(element.clientWidth));
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, [framed]);
+  const openWidth = Math.max(280, frameWidth - (lanes.length - 1) * 28);
   // Selection is easy to leave, one level per miss: a click that lands on no node
   // ends the node selection; one that also lands on no turn row or other control
   // closes the turn and returns to the overview. A row click opens its turn as usual.
@@ -147,15 +172,24 @@ export function TurnFlow(props: TurnFlowProps) {
     if (props.selected !== null && !target.closest("button, a, input, select, [role='button']")) props.onSelectTurn(null);
   };
   if (!active) return <div onClick={clearOffNode}><FlowLane {...props}/></div>;
-  return <div className="min-w-0 overflow-x-auto rounded-panel border border-line bg-panel lg:sticky lg:top-[calc(var(--tf-toolbar-height)+0.75rem)] lg:h-[calc(100dvh-var(--tf-toolbar-height)-1.5rem)]" onClick={clearOffNode}>
-    <div className="relative flex min-w-full items-start">
+  return <div className="min-w-0 overflow-x-auto rounded-panel border border-line bg-panel lg:sticky lg:top-[calc(var(--tf-toolbar-height)+0.75rem)] lg:h-[calc(100dvh-var(--tf-toolbar-height)-1.5rem)]" onClick={clearOffNode} ref={frameRef}>
+    <div className="relative flex min-w-full items-start" style={frameWidth ? { "--lane-open-w": `${openWidth}px` } as React.CSSProperties : undefined}>
       {/* Lane push: the chosen lane grows while the previous one narrows, so the
           switch reads as one motion. Every lane is the same FlowLane; folding only
-          changes its scale, never what it draws. */}
+          changes its scale, never what it draws. The two lanes of a switch hold both
+          layers while it settles: the outgoing one fades out as the other fades in. */}
       {lanes.map((lane, position) => {
         const open = lane.id === active.id;
+        const moving = shift?.from === lane.id || shift?.to === lane.id;
         return <div className={`t-lane shrink-0 basis-7 overflow-hidden ${position ? "border-l border-line" : ""}`} data-open={open ? "true" : "false"} key={lane.id}>
-          <FlowLane {...props} collapsed={!open} lane={lane} onExpand={() => setChosen(lane.id)}/>
+          <div className="t-lane-stack">
+            {open || moving ? <div className="t-lane-layer" data-layer="full" data-shown={open ? "true" : "false"} inert={!open} key="full">
+              <FlowLane {...props} lane={lane} onExpand={() => setChosen(lane.id)} leaving={!open}/>
+            </div> : null}
+            {!open || moving ? <div className="t-lane-layer" data-layer="strip" data-shown={open ? "false" : "true"} inert={open} key="strip">
+              <FlowLane {...props} collapsed lane={lane} onExpand={() => setChosen(lane.id)}/>
+            </div> : null}
+          </div>
         </div>;
       })}
       {/* Capture-order gaps belong to the folded lane's turn. Make the entire
@@ -176,7 +210,7 @@ export function TurnFlow(props: TurnFlowProps) {
 /* One lane of the flow. Expanded, it is the turn list and its Sankey. Collapsed, it
    is the same Sankey at strip scale: each turn one fixed square split by layer,
    with the same hatching, ribbons, and selection fading, and no text column. */
-function FlowLane({ collapsed = false, focus = null, onExpand, onSelectNode, onSelectTurn, selected, selection, turns, lane }: TurnFlowProps & { collapsed?: boolean; lane?: { label: string; indices: number[] }; onExpand?: () => void }) {
+function FlowLane({ collapsed = false, focus = null, leaving = false, onExpand, onSelectNode, onSelectTurn, selected, selection, turns, lane }: TurnFlowProps & { collapsed?: boolean; lane?: { label: string; indices: number[] }; leaving?: boolean; onExpand?: () => void }) {
   const hatchId = `turn-flow-hatch-${useId().replace(/:/g, "")}`;
   const [query, setQuery] = useState("");
   const [searchOpen, setSearchOpen] = useState(false);
@@ -351,7 +385,7 @@ function FlowLane({ collapsed = false, focus = null, onExpand, onSelectNode, onS
   }, [selected]);
 
   useEffect(() => {
-    if (collapsed) return;
+    if (collapsed || leaving) return;
     function navigate(event: KeyboardEvent) {
       const target = event.target as HTMLElement | null;
       if (target?.isContentEditable || target?.tagName === "INPUT" || target?.tagName === "TEXTAREA" || target?.tagName === "SELECT") return;
@@ -379,7 +413,7 @@ function FlowLane({ collapsed = false, focus = null, onExpand, onSelectNode, onS
     }
     window.addEventListener("keydown", navigate);
     return () => window.removeEventListener("keydown", navigate);
-  }, [collapsed, onSelectTurn, selected, turns.length, visible]);
+  }, [collapsed, leaving, onSelectTurn, selected, turns.length, visible]);
 
   const isActive = (row: FlowRow, node: PlacedNode) => {
     const ids = selectedIds(selection, turns[row.index]);
@@ -400,9 +434,9 @@ function FlowLane({ collapsed = false, focus = null, onExpand, onSelectNode, onS
     onSelectNode(row.index, { blockId: node.blockIds[0] || "", blockIds: node.blockIds, category: node.category, label: node.label, layer: layerNode ? node.layer : undefined, turnId: turn.id });
   };
 
-  const strip = collapsed ? <button className="t-lane-swap tf-focus-inset flex h-32 w-full items-center justify-center overflow-hidden border-b border-line text-xs text-muted hover:bg-fill-hover hover:text-ink" key="strip" onClick={onExpand} title={`Expand ${lane?.label ?? "lane"}`} type="button"><span className="max-h-28 truncate [writing-mode:vertical-rl]">{lane?.label}</span></button> : null;
+  const strip = collapsed ? <button className="tf-focus-inset flex h-32 w-full items-center justify-center overflow-hidden border-b border-line text-xs text-muted hover:bg-fill-hover hover:text-ink" key="strip" onClick={onExpand} title={`Expand ${lane?.label ?? "lane"}`} type="button"><span className="max-h-28 truncate [writing-mode:vertical-rl]">{lane?.label}</span></button> : null;
   return <aside aria-label={collapsed ? `${lane?.label ?? "Lane"}, folded` : "Token flow"} className={`bg-panel [--text-w:7rem] ${collapsed ? "w-7" : "min-w-70"}`}>
-    {strip ?? <div className="t-lane-swap tf-inset h-32 overflow-auto space-y-2 border-b border-line py-2" key="full">
+    {strip ?? <div className="tf-inset h-32 overflow-auto space-y-2 border-b border-line py-2" key="full">
       {lane ? <div className="tf-eyebrow">{lane.label}</div> : null}
       <div className="flex items-center gap-2">
         {/* The overview is the flow's resting state; this line returns to it. */}
@@ -426,7 +460,7 @@ function FlowLane({ collapsed = false, focus = null, onExpand, onSelectNode, onS
     <div className="lg:min-h-0 lg:flex-1 lg:overflow-y-auto">
       {normalized && !visible.length ? <EmptyState title={`No turns match “${query}”`}>Search matches turn numbers, prompts, tools, models, and status.</EmptyState> : null}
       <div className="relative" style={{ height: layout.height }}>
-        {collapsed ? null : <ol className="t-lane-swap">
+        {collapsed ? null : <ol>
           {layout.items.map((item) => {
             if (item.kind === "thread") return <li className="tf-inset absolute inset-x-0 flex items-end truncate border-t border-line pb-1.5 text-sm font-semibold text-ink" key={item.key} style={{ height: THREAD_HEADER, top: item.top }} title={item.label}>{item.label}</li>;
             if (item.kind === "query") return <li className="tf-inset absolute inset-x-0 flex items-end truncate pb-1 text-xs font-medium text-muted" key={item.key} style={{ height: HEADER, top: item.top }} title={item.label}>{item.label}</li>;
@@ -474,7 +508,7 @@ function FlowLane({ collapsed = false, focus = null, onExpand, onSelectNode, onS
         </ol>}
         {/* A strip's canvas is the whole lane; an expanded lane's starts after the text column. */}
         <div className={`pointer-events-none absolute inset-y-0 ${collapsed ? "inset-x-0" : "left-[calc(var(--text-w)+1.5rem)] right-3 sm:left-[calc(var(--text-w)+1.75rem)] sm:right-4"}`} ref={canvasRef}>
-          {width ? <svg aria-hidden={collapsed || undefined} className="t-lane-swap block overflow-visible" height={layout.height} key={collapsed ? "strip" : "full"} viewBox={`0 0 ${width} ${Math.max(1, layout.height)}`} width={width}>
+          {width ? <svg aria-hidden={collapsed || undefined} className="block overflow-visible" height={layout.height} key={collapsed ? "strip" : "full"} viewBox={`0 0 ${width} ${Math.max(1, layout.height)}`} width={width}>
             <defs><pattern height="8" id={hatchId} patternUnits="userSpaceOnUse" width="8"><path d="M-2 2L2-2M0 8L8 0M6 10L10 6" fill="none" stroke="var(--ink)" strokeOpacity="0.34" strokeWidth="1"/></pattern>
               {/* A strip square has the expanded node's corner (3 of 14), cut once around all its slices. */}
               <clipPath clipPathUnits="objectBoundingBox" id={`${hatchId}-square`}><rect height="1" rx={3 / NODE} width="1"/></clipPath></defs>

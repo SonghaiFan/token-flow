@@ -133,8 +133,11 @@ the expanded node's corner and outline, its layers flush slices inside it, the s
 auxiliary requests an empty square), never a second drawing. Switching lanes uses
 the *Lane push* motion recipe: the chosen lane grows while the previous one
 narrows on one 350ms curve, so the total width holds and the lanes beyond slide
-over; each lane's content swaps between strip and full with a 250ms fade, clipped
-by the lane. This supersedes the folded
+over. Each lane stacks a strip layer and a full layer, both laid out at their
+final width, so the lane reveals or clips a finished drawing and the Sankey never
+reflows mid-push. The outgoing layer leaves in 150ms; the incoming full layer
+settles in over 300ms (60ms delay, 12px slide, blur), and the new strip fades in
+after 120ms. Leaving layers are inert. This supersedes the folded
 background-at-the-bottom and granularity-switch descriptions below, preserving
 simultaneous visibility without implying a parent relationship for background work.
 

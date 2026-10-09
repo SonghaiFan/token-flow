@@ -52,7 +52,11 @@
   --row-ease: cubic-bezier(0.22, 1, 0.36, 1);
   /* Lane push: switching the expanded lane of the turn flow */
   --lane-dur: 350ms;
-  --lane-swap-dur: 250ms;
+  --lane-enter-dur: 300ms;
+  --lane-enter-delay: 60ms;
+  --lane-exit-dur: 150ms;
+  --lane-strip-delay: 120ms;
+  --lane-shift: 12px;
   --lane-blur: 2px;
   --lane-ease: cubic-bezier(0.22, 1, 0.36, 1);
   /* Menu dropdown */
@@ -160,8 +164,7 @@
 
 /* Lane push: every lane has a 28px basis; the expanded one also takes the free
    width. Growing one lane and narrowing the other on one curve reads as a push,
-   and the lanes beyond them slide over by the same amount. Each lane's content
-   swaps between strip and full with a short fade, while the lane clips it. */
+   and the lanes beyond them slide over by the same amount. */
 .t-lane {
   flex-grow: 0;
   min-width: 1.75rem;
@@ -173,13 +176,37 @@
   flex-grow: 1;
   min-width: 17.5rem;
 }
-.t-lane-swap {
+/* A lane stacks its strip and full layers in one cell. Each layer is laid out
+   at its final width (--lane-open-w, measured by the flow), so the lane reveals
+   or clips a finished drawing instead of reflowing the Sankey every frame.
+   During a switch the two lanes involved hold both layers: the outgoing layer
+   leaves quickly, the incoming one settles in behind the push. */
+.t-lane-stack { display: grid; }
+.t-lane-stack > .t-lane-layer { grid-area: 1 / 1; min-width: 0; }
+.t-lane-layer[data-layer="full"] { width: var(--lane-open-w, 17.5rem); }
+.t-lane-layer[data-layer="strip"] { width: 1.75rem; }
+.t-lane-layer {
   transition:
-    opacity var(--lane-swap-dur) var(--lane-ease),
-    filter  var(--lane-swap-dur) var(--lane-ease);
+    opacity   var(--lane-enter-dur) var(--lane-ease) var(--lane-enter-delay),
+    transform var(--lane-enter-dur) var(--lane-ease) var(--lane-enter-delay),
+    filter    var(--lane-enter-dur) var(--lane-ease) var(--lane-enter-delay);
+}
+.t-lane-layer[data-layer="strip"] { transition-delay: var(--lane-strip-delay); }
+.t-lane-layer[data-shown="false"] {
+  opacity: 0;
+  filter: blur(var(--lane-blur));
+  pointer-events: none;
+  transition:
+    opacity   var(--lane-exit-dur) var(--ease-out),
+    transform var(--lane-exit-dur) var(--ease-out),
+    filter    var(--lane-exit-dur) var(--ease-out);
+}
+.t-lane-layer[data-layer="full"][data-shown="false"] {
+  transform: translateX(calc(var(--lane-shift) * -1));
 }
 @starting-style {
-  .t-lane-swap { opacity: 0; filter: blur(var(--lane-blur)); }
+  .t-lane-layer { opacity: 0; filter: blur(var(--lane-blur)); }
+  .t-lane-layer[data-layer="full"] { transform: translateX(calc(var(--lane-shift) * -1)); }
 }
 
 /* Menu dropdown, opening: search results grow from the search field. */
@@ -256,7 +283,7 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .t-row, .t-lane, .t-lane-swap,
+  .t-row, .t-lane, .t-lane-layer,
   .t-tabs-pill, .t-tab,
   .t-acc > .t-acc-panel, .t-acc > .t-acc-panel > .t-acc-panel-inner, .t-acc-chevron,
   .t-page-enter, .t-dropdown-enter, .t-modal, .t-modal-backdrop, .t-fade {

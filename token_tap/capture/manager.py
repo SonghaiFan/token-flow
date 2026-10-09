@@ -16,6 +16,7 @@ from pathlib import Path
 
 from token_tap.agents import AGENTS
 from token_tap.agents.base import AgentPlugin
+from token_tap.core.capture_service import CaptureRequest
 from token_tap.storage.trace_store import read_configured_working_directory, save_configured_working_directory
 
 CaptureChanged = Callable[[], Awaitable[None]]
@@ -130,20 +131,14 @@ class CaptureManager:
     async def start(self, client: str = DEFAULT_CAPTURE_CLIENT, working_directory: str | Path | None = None) -> bool:
         """Start capture; return False if a capture process is already active."""
         plugin = capture_clients()[client]
-        project: Path | None = None
-        if plugin.dashboard_capture.terminal:
-            raw_project = working_directory or self._working_directory
-            if raw_project is None:
-                raise ValueError("Choose a project folder before starting a terminal agent")
-            candidate = Path(raw_project).expanduser()
-            if not candidate.is_absolute():
-                raise ValueError("Project folder must be an absolute path")
-            try:
-                project = candidate.resolve(strict=True)
-            except OSError as exc:
-                raise ValueError("Project folder does not exist") from exc
-            if not project.is_dir():
-                raise ValueError("Project folder must be a directory")
+        request = CaptureRequest.create(
+            client,
+            project=working_directory or self._working_directory if plugin.dashboard_capture.terminal else None,
+            require_project=plugin.dashboard_capture.terminal,
+            open_dashboard=False,
+            dashboard_enabled=False,
+        )
+        project = request.project
         async with self._lock:
             if self._process is not None and self._process.returncode is None:
                 return False
@@ -153,15 +148,7 @@ class CaptureManager:
             self._started_at = datetime.now(timezone.utc).isoformat()
             self._exit_code = None
             self._error = None
-            command = [
-                sys.executable,
-                "-m",
-                "token_tap",
-                "--tap-client",
-                client,
-                "--tap-no-open",
-                "--tap-no-live",
-            ]
+            command = [sys.executable, "-m", "token_tap", *request.public_argv()]
             try:
                 if plugin.dashboard_capture.terminal:
                     assert project is not None

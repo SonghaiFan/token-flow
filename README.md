@@ -33,10 +33,11 @@ npm run sync
 cd ..
 ```
 
-Start the local dashboard:
+Open the local dashboard (starts the shared service when needed, then returns
+to the shell):
 
 ```bash
-uv run token-flow dashboard --tap-no-open
+uv run token-flow
 ```
 
 The default dashboard is `http://127.0.0.1:19527/`.
@@ -47,23 +48,26 @@ Flags after `--` are passed to the selected client.
 
 ```bash
 # Codex CLI
-uv run token-flow --tap-client codex --tap-no-open -- --full-auto
+uv run token-flow capture codex --project . -- --full-auto
 
 # Codex App
-uv run token-flow --tap-client codexapp --tap-no-open
+uv run token-flow capture codexapp --no-open
 
 # Claude Code
-uv run token-flow --tap-client claude --tap-no-open
+uv run token-flow capture claude --project .
 
 # Gemini CLI
-uv run token-flow --tap-client gemini --tap-no-open -- -p "hello"
+uv run token-flow capture gemini --project . -- -p "hello"
 ```
 
 To stop the shared dashboard:
 
 ```bash
-uv run token-flow dashboard stop
+uv run token-flow stop
 ```
+
+Use `uv run token-flow status` to show the dashboard URL and active database.
+The older `--tap-*` capture syntax remains available for compatibility.
 
 ## UI development
 

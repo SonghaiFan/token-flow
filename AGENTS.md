@@ -126,6 +126,10 @@ Supported clients are plugins; never branch on a client id outside its plugin.
   remember only the last choice, and never fall back to the dashboard process's
   working directory. Desktop agents remain app-managed unless their plugin can
   guarantee project-folder launch behavior.
+- The public CLI and dashboard capture API are adapters over the shared
+  `token_tap/core/capture_service.py` request model. Keep product agent aliases,
+  project validation, and worker arguments there; translate to legacy
+  `--tap-*` flags only at the capture runtime compatibility boundary.
 - The dashboard's **Database…** action stores its selected SQLite file in
   `~/.token-flow/settings.json`. Explicit database environment variables still
   take precedence, and the database cannot switch while a capture is active.
@@ -187,6 +191,11 @@ request evidence → back to dashboard. Check both wide and narrow viewports.
 
 
 ## Before ending a session
+
+- The product-facing CLI is `token-flow` for the detached dashboard,
+  `token-flow capture <agent>` for an explicit capture, plus `export`, `status`,
+  and `stop`. Keep legacy `--tap-*` invocations functional as a compatibility
+  path, but do not restore them to the root help.
 
 - Folded flow lanes retain full-width chronological row targets: hovering a gap
   highlights that turn's row; clicking expands its lane and selects the turn.

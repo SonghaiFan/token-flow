@@ -16,6 +16,7 @@ import sqlite3
 import sys
 import threading
 import webbrowser
+from contextlib import contextmanager
 from contextvars import ContextVar
 from pathlib import Path
 from urllib.parse import urlparse
@@ -34,6 +35,7 @@ from token_tap.commands.cli_clients import (
     run_client,
 )
 from token_tap.commands.cli_output import print_status as _print
+from token_tap.core.capture_service import CaptureRequest
 from token_tap.server.app import LiveViewerServer
 from token_tap.server.shared_dashboard import (
     DEFAULT_DASHBOARD_PORT,
@@ -59,7 +61,6 @@ if hasattr(sys.stderr, "reconfigure"):
     sys.stderr.reconfigure(encoding="utf-8", errors="backslashreplace")
 
 log = logging.getLogger("token-flow")
-
 
 def _create_trace_writer(
     *,
@@ -109,11 +110,11 @@ async def _is_dashboard_reusable(host: str, port: int) -> bool:
 
 
 def _dashboard_stop_command(host: str, port: int) -> str:
-    parts = ["token-flow", "dashboard", "stop"]
+    parts = ["token-flow", "stop"]
     if port != DEFAULT_DASHBOARD_PORT:
-        parts.extend(["--tap-live-port", str(port)])
+        parts.extend(["--port", str(port)])
     if host != "127.0.0.1":
-        parts.extend(["--tap-host", host])
+        parts.extend(["--host", host])
     return " ".join(shlex.quote(part) for part in parts)
 
 
@@ -492,6 +493,147 @@ def _prompt_trace_path(prompt_path: Path) -> Path:
     if prompt_path.name in {"prompt.md", "prompt.markdown", "system.md", "system.markdown"}:
         return prompt_path.with_name("trace.jsonl")
     return prompt_path.with_name(f"{prompt_path.stem}.trace.jsonl")
+
+
+def _root_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        prog="token-flow",
+        description="Capture and understand the context used by AI coding agents.",
+        epilog=(
+            "examples:\n"
+            "  token-flow                         Open the dashboard\n"
+            "  token-flow capture claude          Capture Claude Code in this project\n"
+            "  token-flow capture codex -- --full-auto\n"
+            "  token-flow export <conversation> -o conversation.html\n"
+            "  token-flow status\n"
+            "  token-flow stop"
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    parser.add_argument("-v", "--version", action="version", version=f"%(prog)s {__version__}")
+    parser.add_argument("--no-open", action="store_true", help="Start the dashboard without opening a browser")
+    parser.add_argument("--port", type=int, metavar="PORT", help="Dashboard port")
+    parser.add_argument("--host", help="Dashboard bind address")
+    parser.add_argument(
+        "command",
+        nargs="?",
+        choices=["capture", "export", "status", "stop", "dashboard", "proxy", "ca"],
+        help="capture an agent, export a conversation, or manage the local dashboard",
+    )
+    return parser
+
+
+def parse_capture_args(argv: list[str] | None = None) -> tuple[Path | None, list[str]]:
+    """Parse the CLI adapter and hand a shared request to the capture runtime."""
+    parser = argparse.ArgumentParser(
+        prog="token-flow capture",
+        description="Start an AI coding agent and capture its model requests.",
+        epilog="Arguments after -- are passed unchanged to the selected agent.",
+    )
+    parser.add_argument("agent", metavar="AGENT", help="Agent to start (for example: claude, codex, codex-app, gemini)")
+    parser.add_argument("--project", type=Path, help="Working directory for the agent (default: current directory)")
+    parser.add_argument("--no-open", action="store_true", help="Do not open the dashboard in a browser")
+    parser.add_argument("--no-dashboard", action="store_true", help="Capture without starting the dashboard")
+    parser.add_argument("--dashboard-port", type=int, metavar="PORT", help="Dashboard port")
+    public, forwarded = parser.parse_known_args(argv)
+
+    try:
+        request = CaptureRequest.create(
+            public.agent,
+            project=public.project,
+            open_dashboard=not public.no_open,
+            dashboard_enabled=not public.no_dashboard,
+            dashboard_port=public.dashboard_port,
+            agent_args=tuple(forwarded),
+        )
+    except ValueError as exc:
+        parser.error(str(exc))
+    return request.project, request.legacy_argv()
+
+
+def _service_parser(prog: str, description: str) -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(prog=prog, description=description)
+    parser.add_argument("--port", "--tap-live-port", type=int, default=0, dest="port", help="Dashboard port")
+    parser.add_argument("--host", "--tap-host", default="127.0.0.1", dest="host", help="Dashboard bind address")
+    return parser
+
+
+def parse_open_args(argv: list[str] | None = None) -> argparse.Namespace:
+    parser = _service_parser("token-flow", "Open the local Token Flow dashboard.")
+    parser.add_argument("--no-open", action="store_true", help="Start the dashboard without opening a browser")
+    return parser.parse_args(argv)
+
+
+def parse_status_args(argv: list[str] | None = None) -> argparse.Namespace:
+    return _service_parser("token-flow status", "Show the local dashboard and database status.").parse_args(argv)
+
+
+def parse_stop_args(argv: list[str] | None = None) -> argparse.Namespace:
+    return _service_parser("token-flow stop", "Stop the shared local dashboard service.").parse_args(argv)
+
+
+@contextmanager
+def _working_directory(path: Path | None):
+    if path is None:
+        yield
+        return
+    previous = Path.cwd()
+    os.chdir(path)
+    try:
+        yield
+    finally:
+        os.chdir(previous)
+
+
+async def open_dashboard_main(args: argparse.Namespace) -> int:
+    host = args.host
+    port = resolve_dashboard_port(args.port)
+    output_dir = Path(".traces")
+    try:
+        url, spawned = await ensure_shared_dashboard(
+            host=host,
+            port=port,
+            output_dir=output_dir,
+            open_browser=False,
+            open_browser_fn=_open_browser,
+        )
+    except (RuntimeError, sqlite3.Error) as exc:
+        _print(f"Unable to open Token Flow: {exc}", file=sys.stderr)
+        return 1
+    _print(f"🌐 Dashboard: {url}{' (started)' if spawned else ' (already running)'}")
+    _print(f"🗄️  Database: {resolve_db_path()}")
+    if not args.no_open:
+        _open_browser(url)
+    return 0
+
+
+async def status_main(args: argparse.Namespace) -> int:
+    port = resolve_dashboard_port(args.port)
+    url = dashboard_url(args.host, port)
+    if await is_dashboard_healthy(args.host, port):
+        _print(f"● Dashboard running: {url}")
+        _print(f"  Database: {resolve_db_path()}")
+        return 0
+    if await is_dashboard_healthy(args.host, port, require_current_db=False):
+        _print(f"⚠ Dashboard on {url} is using a different database or Token Flow version.")
+        _print(f"  Expected database: {resolve_db_path()}")
+        return 1
+    _print(f"○ Dashboard stopped: {url}")
+    _print(f"  Database: {resolve_db_path()}")
+    return 1
+
+
+async def stop_main(args: argparse.Namespace) -> int:
+    port = resolve_dashboard_port(args.port)
+    url = dashboard_url(args.host, port)
+    if not await is_dashboard_healthy(args.host, port, require_current_db=False):
+        _print(f"Token Flow is not running on {url}")
+        return 1
+    if not await stop_dashboard_service(args.host, port):
+        _print(f"Unable to stop Token Flow on {url}", file=sys.stderr)
+        return 1
+    _print(f"Stopped Token Flow on {url}")
+    return 0
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
@@ -935,24 +1077,77 @@ def trust_ca_main(argv: list[str] | None = None) -> int:
 
 def main_entry() -> None:
     """Entry point for the token-flow CLI."""
-    # Check if first argument is "export" subcommand
-    if len(sys.argv) > 1 and sys.argv[1] == "export":
+    argv = sys.argv[1:]
+
+    if not argv:
+        try:
+            code = asyncio.run(open_dashboard_main(parse_open_args([])))
+        except KeyboardInterrupt:
+            code = 0
+        sys.exit(code)
+
+    if argv[0] in {"-h", "--help", "-v", "--version"}:
+        _root_parser().parse_args(argv)
+        return
+
+    if argv[0] in {"--no-open", "--port", "--host"}:
+        try:
+            code = asyncio.run(open_dashboard_main(parse_open_args(argv)))
+        except KeyboardInterrupt:
+            code = 0
+        sys.exit(code)
+
+    if argv[0] == "capture":
+        project, capture_argv = parse_capture_args(argv[1:])
+        with _working_directory(project):
+            args = parse_args(capture_argv)
+            try:
+                code = asyncio.run(async_main(args))
+            except KeyboardInterrupt:
+                code = 0
+        sys.exit(code)
+
+    if argv[0] == "export":
         from token_tap.commands.export import export_main
 
-        sys.exit(export_main(sys.argv[2:]))
+        sys.exit(export_main(argv[1:]))
 
-    if len(sys.argv) > 1 and sys.argv[1] == "trust-ca":
-        sys.exit(trust_ca_main(sys.argv[2:]))
+    if argv[0] == "status":
+        sys.exit(asyncio.run(status_main(parse_status_args(argv[1:]))))
 
-    if len(sys.argv) > 1 and sys.argv[1] == "dashboard":
-        args = parse_dashboard_args(sys.argv[2:])
+    if argv[0] == "stop":
+        sys.exit(asyncio.run(stop_main(parse_stop_args(argv[1:]))))
+
+    if argv[0] == "proxy":
+        args = parse_args(["--tap-no-launch", *argv[1:]])
+        try:
+            code = asyncio.run(async_main(args))
+        except KeyboardInterrupt:
+            code = 0
+        sys.exit(code)
+
+    if argv[0] == "ca":
+        ca_parser = argparse.ArgumentParser(prog="token-flow ca", description="Manage the local capture CA.")
+        ca_parser.add_argument("command", choices=["trust"])
+        ca_args = ca_parser.parse_args(argv[1:])
+        if ca_args.command == "trust":
+            sys.exit(trust_ca_main([]))
+
+    if argv[0] == "trust-ca":
+        sys.exit(trust_ca_main(argv[1:]))
+
+    if argv[0] == "dashboard":
+        args = parse_dashboard_args(argv[1:])
         try:
             code = asyncio.run(dashboard_main(args))
         except KeyboardInterrupt:
             code = 0
         sys.exit(code)
 
-    args = parse_args()
+    # Compatibility path for pre-product CLI invocations such as
+    # ``token-flow --tap-client codex``. Keep it functional while the public
+    # help and documentation move to ``token-flow capture codex``.
+    args = parse_args(argv)
     try:
         code = asyncio.run(async_main(args))
     except KeyboardInterrupt:
