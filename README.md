@@ -7,6 +7,8 @@ proxies supported coding agents, stores their model requests locally, and turns
 raw traces into understandable conversations, turns, token composition, cache
 flow, and structured request evidence.
 
+> This project is evolving quickly and will remain free and open source forever. If you’ve downloaded it or are using it, please **Star** the repository and [**Follow @SonghaiFan**](https://github.com/SonghaiFan) to keep up with my projects. Your Star is my biggest source of support and motivation to keep building.
+
 ## What Token Flow does
 
 - Watches Codex CLI, Codex App, Claude Code, Gemini CLI, and other supported

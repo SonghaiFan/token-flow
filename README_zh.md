@@ -6,6 +6,8 @@ Token Flow 是一个本地优先的 AI Agent conversation 查看器。它通过�
 支持的编程 Agent，把原始请求整理成容易理解的 conversation、turn、token
 构成、cache flow 和结构化 request evidence。
 
+> 这个项目正在快速迭代，并将永久免费开源。如果你已经下载或正在使用，欢迎 **Star** 收藏项目，并 [**Follow @SonghaiFan**](https://github.com/SonghaiFan) 关注后续项目动态。你的 Star 是对我最大的支持，也是我持续开发的最大动力。
+
 ## Token Flow 做什么
 
 - 通过本地 capture backend 监听 Codex CLI、Codex App、Claude Code、Gemini
