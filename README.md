@@ -1,6 +1,21 @@
-# Token Flow
+<h1 align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset=".github/brand/lockup-dark.svg" />
+    <img src=".github/brand/lockup-light.svg" width="340" alt="Token Flow" />
+  </picture>
+</h1>
 
-[简体中文](README_zh.md)
+<p align="center"><b>See where your agent's tokens go.</b></p>
+
+<p align="center">
+  <a href="#development-setup">Set up</a> ·
+  <a href="#capture-an-agent">Capture an agent</a> ·
+  <a href="#architecture">Architecture</a> ·
+  <a href="SECURITY.md">Privacy</a> ·
+  <a href="README.zh-CN.md">中文</a>
+</p>
+
+![A Token Flow conversation: six turns of a Claude Code session, with input split into instructions, capabilities and project context, flowing from turn to turn.](.github/brand/screenshot.jpg)
 
 Token Flow is a local-first viewer for AI-agent conversations. It watches or
 proxies supported coding agents, stores their model requests locally, and turns
@@ -121,3 +136,20 @@ reviewed and redacted. See [SECURITY.md](SECURITY.md).
 ## License
 
 MIT. Token Flow retains the original license notices for inherited code.
+
+<br />
+
+<p align="center">
+  <a href="https://leftopen.songhai.site"><img src=".github/brand/series/leftopen.svg" width="32" height="32" alt="LeftOpen" title="LeftOpen" /></a>&nbsp;
+  <a href="https://github.com/SonghaiFan/token-flow"><img src=".github/brand/series/token-flow.svg" width="32" height="32" alt="Token Flow" title="Token Flow" /></a>&nbsp;
+  <a href="https://songhaifan.github.io/roc-ui/"><img src=".github/brand/series/roc-ui.svg" width="32" height="32" alt="ROC" title="ROC" /></a>
+</p>
+
+<p align="center"><sub>Token Flow is part of the Franklin series.</sub></p>
+
+<p align="right">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset=".github/brand/frank-signature-dark.svg" />
+    <img src=".github/brand/frank-signature-light.svg" width="72" alt="Frank" />
+  </picture>
+</p>
