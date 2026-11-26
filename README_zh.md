@@ -1,6 +1,18 @@
-# Token Flow
+<h1 align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset=".github/brand/lockup-dark.svg" />
+    <img src=".github/brand/lockup-light.svg" width="360" alt="Token Flow" />
+  </picture>
+</h1>
 
-[English](README.md)
+<p align="center"><b>在本机追踪 AI 编程会话、token 构成与请求证据。</b></p>
+
+<p align="center"><a href="#开发环境">开始</a> · <a href="#capture-一个-agent">捕获会话</a> · <a href="#架构边界">架构</a> · <a href="SECURITY.md">隐私</a> · <a href="README.md">English</a></p>
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset=".github/brand/overview-dark.svg" />
+  <img src=".github/brand/overview-light.svg" width="1200" alt="Token Flow 工作流示意；不是应用截图。" />
+</picture>
 
 Token Flow 是一个本地优先的 AI Agent conversation 查看器。它通过监听或代理
 支持的编程 Agent，把原始请求整理成容易理解的 conversation、turn、token
@@ -36,7 +48,7 @@ cd ..
 启动本地 dashboard：
 
 ```bash
-uv run token-flow dashboard --tap-no-open
+uv run token-flow
 ```
 
 默认地址是 `http://127.0.0.1:19527/`。
@@ -79,6 +91,7 @@ npm run dev
 ```bash
 cd ui
 npm run lint
+npm run typecheck:vite
 npm run build
 npm run sync
 ```
@@ -107,3 +120,24 @@ Trace 可能包含 prompt、tool schema、tool result、文件路径和其他私
 ## License
 
 MIT。继承的代码会保留原作者的 license notice。
+
+<br />
+
+<p align="center">
+  <a href="https://github.com/SonghaiFan/leftopen"><img src=".github/brand/series/leftopen.svg" width="32" height="32" alt="LeftOpen" title="LeftOpen" /></a>&nbsp;
+  <a href="https://github.com/SonghaiFan/openclaw-visualiser"><img src=".github/brand/series/her-os.svg" width="32" height="32" alt="her-os" title="her-os" /></a>&nbsp;
+  <a href="https://github.com/SonghaiFan/roc-ui"><img src=".github/brand/series/roc.svg" width="32" height="32" alt="ROC" title="ROC" /></a>&nbsp;
+  <a href="https://github.com/SonghaiFan/token-flow"><img src=".github/brand/series/token-flow.svg" width="32" height="32" alt="Token Flow" title="Token Flow" /></a>&nbsp;
+  <a href="https://github.com/SonghaiFan/franklin-board"><img src=".github/brand/series/aboard.svg" width="32" height="32" alt="Aboard" title="Aboard" /></a>&nbsp;
+  <img src=".github/brand/series/structured-text.svg" width="32" height="32" alt="Structured Text" title="Structured Text · local package" />&nbsp;
+  <a href="https://github.com/SonghaiFan/tasty-text"><img src=".github/brand/series/tasty-text.svg" width="32" height="32" alt="Tasty Text" title="Tasty Text" /></a>
+</p>
+
+<p align="center"><sub>Token Flow 属于 Franklin 工具系列。</sub></p>
+
+<p align="right">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset=".github/brand/frank-signature-dark.svg" />
+    <img src=".github/brand/frank-signature-light.svg" width="72" alt="Frank" />
+  </picture>
+</p>

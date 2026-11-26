@@ -1,6 +1,18 @@
-# Token Flow
+<h1 align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset=".github/brand/lockup-dark.svg" />
+    <img src=".github/brand/lockup-light.svg" width="360" alt="Token Flow" />
+  </picture>
+</h1>
 
-[简体中文](README_zh.md)
+<p align="center"><b>Follow coding-agent conversations, token flow and request evidence on your own machine.</b></p>
+
+<p align="center"><a href="#development-setup">Get started</a> · <a href="#capture-an-agent">Capture an agent</a> · <a href="#architecture">Architecture</a> · <a href="SECURITY.md">Privacy</a> · <a href="README_zh.md">中文</a></p>
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset=".github/brand/overview-dark.svg" />
+  <img src=".github/brand/overview-light.svg" width="1200" alt="Token Flow workflow illustration; not an application screenshot." />
+</picture>
 
 Token Flow is a local-first viewer for AI-agent conversations. It watches or
 proxies supported coding agents, stores their model requests locally, and turns
@@ -86,6 +98,7 @@ For the Python server to serve the latest production UI:
 ```bash
 cd ui
 npm run lint
+npm run typecheck:vite
 npm run build
 npm run sync
 ```
@@ -121,3 +134,24 @@ reviewed and redacted. See [SECURITY.md](SECURITY.md).
 ## License
 
 MIT. Token Flow retains the original license notices for inherited code.
+
+<br />
+
+<p align="center">
+  <a href="https://github.com/SonghaiFan/leftopen"><img src=".github/brand/series/leftopen.svg" width="32" height="32" alt="LeftOpen" title="LeftOpen" /></a>&nbsp;
+  <a href="https://github.com/SonghaiFan/openclaw-visualiser"><img src=".github/brand/series/her-os.svg" width="32" height="32" alt="her-os" title="her-os" /></a>&nbsp;
+  <a href="https://github.com/SonghaiFan/roc-ui"><img src=".github/brand/series/roc.svg" width="32" height="32" alt="ROC" title="ROC" /></a>&nbsp;
+  <a href="https://github.com/SonghaiFan/token-flow"><img src=".github/brand/series/token-flow.svg" width="32" height="32" alt="Token Flow" title="Token Flow" /></a>&nbsp;
+  <a href="https://github.com/SonghaiFan/franklin-board"><img src=".github/brand/series/aboard.svg" width="32" height="32" alt="Aboard" title="Aboard" /></a>&nbsp;
+  <img src=".github/brand/series/structured-text.svg" width="32" height="32" alt="Structured Text" title="Structured Text · local package" />&nbsp;
+  <a href="https://github.com/SonghaiFan/tasty-text"><img src=".github/brand/series/tasty-text.svg" width="32" height="32" alt="Tasty Text" title="Tasty Text" /></a>
+</p>
+
+<p align="center"><sub>Token Flow is part of the Franklin tools series.</sub></p>
+
+<p align="right">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset=".github/brand/frank-signature-dark.svg" />
+    <img src=".github/brand/frank-signature-light.svg" width="72" alt="Frank" />
+  </picture>
+</p>

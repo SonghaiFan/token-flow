@@ -50,7 +50,7 @@ export function AppShell({ captureIndicator = true, children, onBack, title, met
           {onBack ? <IconButton className="-ml-2 lg:hidden" label="Back to conversations" onClick={onBack}><ArrowLeftIcon/></IconButton> : null}
           <button className={`tf-control flex items-center gap-2 rounded-control px-1 ${onBack ? "lg:-ml-1" : "-ml-1"}`} onClick={onBack} type="button">
             <span aria-hidden="true" className="grid size-7 shrink-0 place-items-center rounded-inset bg-white p-0.5">
-              <img alt="" className="size-full object-contain" src="/assets/token-flow-logo.svg" />
+              <img alt="" className="size-full object-contain" src="/assets/token-flow-logo-small.svg" />
             </span>
             <span className="text-base font-semibold tracking-[-0.02em]">Token Flow</span>
             <span className="hidden sm:inline-flex"><Badge mono>v0.2</Badge></span>

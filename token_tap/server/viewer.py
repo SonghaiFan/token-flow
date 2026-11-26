@@ -30,6 +30,7 @@ VIEWER_TEMPLATE_PATH = Path(__file__).parents[1] / "viewer.html"
 VIEWER_ASSETS_DIR = Path(__file__).parents[1] / "viewer_assets"
 VIEWER_CSS_PATH = VIEWER_ASSETS_DIR / "viewer.css"
 VIEWER_LOGO_PATH = VIEWER_ASSETS_DIR / "token-flow-logo.svg"
+VIEWER_FAVICON_PATH = VIEWER_ASSETS_DIR / "token-flow-favicon.svg"
 VIEWER_JS_PATHS = (
     VIEWER_ASSETS_DIR / "token_flow_d3_layouts.min.js",
     VIEWER_ASSETS_DIR / "state.js",
@@ -96,7 +97,8 @@ def _read_viewer_template() -> str:
         raise ValueError("viewer.html is missing the script asset anchor.")
     css = VIEWER_CSS_PATH.read_text(encoding="utf-8").rstrip()
     logo_svg = VIEWER_LOGO_PATH.read_text(encoding="utf-8").strip()
-    logo_data_uri = "data:image/svg+xml," + quote(logo_svg, safe="")
+    favicon_svg = VIEWER_FAVICON_PATH.read_text(encoding="utf-8").strip()
+    logo_data_uri = "data:image/svg+xml," + quote(favicon_svg, safe="")
     vendor_js = VIEWER_JS_PATHS[0].read_text(encoding="utf-8").rstrip()
     js = "".join(path.read_text(encoding="utf-8") for path in VIEWER_JS_PATHS[1:]).rstrip()
     html = html.replace(VIEWER_STYLE_TEMPLATE_ANCHOR, f"<style>\n{css}\n</style>", 1)
